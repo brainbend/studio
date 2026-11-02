@@ -2,11 +2,14 @@ name: Release
 # Two ways to publish:
 #  - merge to main with a new version in apps/brainbend-studio/Cargo.toml: tags v<version> and builds the release
 #  - push a tag like v0.2.0-rc.1 by hand
+# Run it by hand from the Actions tab (or `gh workflow run release.yml --ref dev`) for a dry run: it builds every
+# platform and keeps the downloads as workflow artifacts, but creates no tag and no release.
 # A merge to main whose version already has a tag does nothing.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -22,7 +25,11 @@ jobs:
           fetch-tags: ${{ github.ref_type != 'tag' }}
       - id: decide
         run: |
-          if [ "${{ github.ref_type }}" = tag ]; then
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            VERSION=$(scripts/version.sh)
+            TAG="v$VERSION-dryrun"
+            RELEASE=true
+          elif [ "${{ github.ref_type }}" = tag ]; then
             TAG="${{ github.ref_name }}"
             VERSION="${TAG#v}"
             RELEASE=true
@@ -85,6 +92,7 @@ jobs:
           path: BrainBend-Studio-*
   publish:
     needs: [check, build]
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5
