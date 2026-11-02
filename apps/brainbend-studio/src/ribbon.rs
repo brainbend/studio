@@ -82,6 +82,7 @@ pub const CUT: char = '\u{eae0}';
 pub const MAGNIFY: char = '\u{e30c}';
 pub const ACCESS: char = '\u{e4e8}';
 pub const MOON: char = '\u{e330}';
+pub const WARNING_CIRCLE: char = '\u{e4e2}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const ARROW_DOWN: char = '\u{e03e}';
 pub const SLIDERS: char = '\u{e434}';
@@ -1323,6 +1324,15 @@ impl App {
                         .on_hover_text(if dark { "Switch to light mode" } else { "Switch to dark mode" });
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+                    }
+                    // A newer release is out: a red button to the left of the theme toggle opens its page.
+                    if let Some(r) = self.updater.available().cloned() {
+                        ui.add_space(4.0);
+                        let white = egui::Color32::WHITE;
+                        let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label: "Update available", caret: false, fill: Some(egui::Color32::from_rgb(200, 36, 36)), ink: white, outline: false, bold: true, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
+                            .on_hover_text(format!("Version {} is available. Open the release page.", r.version));
+                        alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Update available"));
+                        if alert.clicked() { update::open_in_browser(&r.url); }
                     }
                 });
             });

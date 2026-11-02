@@ -21,6 +21,9 @@ brainbend-import-pptx = { path = "../../crates/import-pptx" }
 brainbend-export-pptx = { path = "../../crates/export-pptx" }
 brainbend-publish-html = { path = "../../crates/publish-html" }
 brainbend-spell = { path = "../../crates/spell" }
+ureq = "3"
+serde_json = "1.0.154"
+semver = "1.0.28"
 
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["snapshot", "wgpu"] }

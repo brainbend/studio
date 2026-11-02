@@ -207,9 +207,36 @@ impl App {
         ui.heading("About BrainBend Studio");
         ui.add_space(6.0);
         ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+        self.update_controls(ui);
         ui.label("A free, lightweight authoring tool for interactive lessons that publish to the web and to LMSs (SCORM 1.2 and 2004).");
         ui.add_space(6.0);
         ui.weak("Fonts: Montserrat and Open Sans (SIL Open Font License 1.1). Icons: Phosphor (MIT). Spelling: SCOWL en_US word list (permissive license, crates/spell/dict).");
+    }
+
+    /// The update line of the About section: what the last check found, a button to check now, and the launch preference.
+    fn update_controls(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        let checking = matches!(self.updater.state, update::State::Checking(_));
+        let mut open: Option<String> = None;
+        ui.horizontal(|ui| {
+            match &self.updater.state {
+                update::State::Checking(_) => { ui.add(egui::Spinner::new()); ui.label("Checking for updates…"); }
+                update::State::UpToDate => { ui.label("You have the latest version."); }
+                update::State::Available(r) => {
+                    ui.strong(format!("Version {} is available.", r.version));
+                    if ui.link("See what's new").clicked() { open = Some(r.url.clone()); }
+                }
+                update::State::Failed(e) => { ui.weak(format!("Could not check for updates: {e}")); }
+                update::State::Idle => {}
+            }
+        });
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!checking, egui::Button::new("Check for updates")).clicked() { self.updater.start(ui.ctx()); }
+            if ui.checkbox(&mut self.updater.on_launch, "Check when BrainBend Studio starts").changed() { self.updater.save(); }
+        });
+        ui.add_space(6.0);
+        if let Some(url) = open { update::open_in_browser(&url); }
     }
 
     fn print_page(&mut self, ui: &mut egui::Ui) {

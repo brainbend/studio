@@ -18,6 +18,7 @@ mod objects_panel;
 mod ribbon;
 use ribbon::combo;
 mod states_panel;
+mod update;
 mod lesson_view;
 
 /// On macOS the content extends under a transparent title bar so our own bar can sit beside the native window buttons.
@@ -44,6 +45,8 @@ fn main() -> eframe::Result {
             brainbend_spell::warm();
             install_theme(&cc.egui_ctx);
             let mut app = App::default();
+            app.updater = update::Updater::load();
+            if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.open_to_story_view = true;
             if let Some(p) = arg {
                 app.open(&p);
@@ -203,6 +206,8 @@ struct App {
     /// Action waiting on the "unsaved changes" dialog.
     pending: Option<Pending>,
     allow_close: bool,
+    /// Checks GitHub for a newer release.
+    updater: update::Updater,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
     /// Slides to delete once the frame is drawn: the slide list and Story View are still walking the old list.
@@ -370,7 +375,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), fresh_text: None, start_edit: None, pending: None, allow_close: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1009,6 +1014,7 @@ impl App {
 
     /// The bar along the bottom: where you are, what is wrong, and the zoom.
     fn status_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
+        self.updater.poll();
         // Counting the issues walks the whole project, so it is done now and then, not every frame.
         let now = ctx.input(|i| i.time);
         let sig = (self.undo.len(), self.redo.len(), self.project.as_ref().map(|p| p.slides.len() + 1).unwrap_or(0));
@@ -7076,6 +7082,23 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("open-story.png")).unwrap();
+    }
+
+    #[test]
+    fn update_button_appears_in_the_title_bar_only_when_a_release_is_newer() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Update available").is_none(), "nothing to show before a newer release is found");
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r"}"#).unwrap();
+        h.state_mut().updater.state = update::State::Available(release);
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("update-button.png")).unwrap();
+        }
+        assert!(h.query_by_label_contains("Update available").is_some(), "the red button shows once a newer release is known");
     }
 
     /// Renders several editor states to PNGs when BRAINBEND_SHOT_DIR is set (visual review only).
