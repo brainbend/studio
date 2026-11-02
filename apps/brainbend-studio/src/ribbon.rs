@@ -82,6 +82,10 @@ pub const CUT: char = '\u{eae0}';
 pub const MAGNIFY: char = '\u{e30c}';
 pub const ACCESS: char = '\u{e4e8}';
 pub const MOON: char = '\u{e330}';
+pub const BOOK_OPEN: char = '\u{e0e6}';
+pub const BUG: char = '\u{e5f4}';
+pub const DISCORD: char = '\u{e61a}';
+pub const REFRESH: char = '\u{e094}';
 pub const WARNING_CIRCLE: char = '\u{e4e2}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const ARROW_DOWN: char = '\u{e03e}';
@@ -428,9 +432,12 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-pub const TABS: [&str; 7] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master"];
+pub const HELP_TAB: usize = 7;
+pub const TABS: [&str; 8] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master", "Help"];
 pub const MASTER_TAB: usize = 6;
 pub const HOME_TAB: usize = 1;
+const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
+const COMMUNITY_URL: &str = "https://discord.gg/XHgwWNtqXt";
 
 /// Flat icon button for the title bar.
 /// A title-bar button drawn by hand so it never changes size on hover: an optional icon, a label and an optional
@@ -1014,7 +1021,7 @@ impl App {
                 let master = self.in_master_view();
                 for (i, name) in TABS.into_iter().enumerate() {
                     // The master view has its own short tab list; the Slide Master tab exists only there.
-                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2].contains(&i)) { continue; }
+                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2, HELP_TAB].contains(&i)) { continue; }
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
@@ -1070,6 +1077,7 @@ impl App {
                                 self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
                             }
                             MASTER_TAB => self.master_tab(ui, ctx),
+                            HELP_TAB => self.help_tab(ui),
                             _ => self.design_tab(ui, ctx),
                         }
                         });
@@ -1335,6 +1343,38 @@ impl App {
                         if alert.clicked() { update::open_in_browser(&r.url); }
                     }
                 });
+            });
+        });
+    }
+
+    /// Help: documentation, reporting problems, the community, and checking for a newer version.
+    fn help_tab(&mut self, ui: &mut egui::Ui) {
+        group(ui, "Help", |ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(false, |ui| { big_button(ui, BOOK_OPEN, "Docs", "Documentation is coming soon"); });
+                if big_button(ui, BUG, "Submit Issue", "Report a problem or suggest a feature on GitHub").clicked() { update::open_in_browser(ISSUES_URL); }
+            });
+        });
+        group(ui, "Community", |ui| {
+            if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
+        });
+        group(ui, "Updates", |ui| {
+            ui.horizontal(|ui| {
+                let checking = matches!(self.updater.state, update::State::Checking(_));
+                let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
+                if check.clicked() { self.updater.start(ui.ctx()); }
+                let mut open: Option<String> = None;
+                ui.vertical(|ui| {
+                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    match &self.updater.state {
+                        update::State::Checking(_) => { ui.weak("Checking…"); }
+                        update::State::UpToDate => { ui.weak("You have the latest version."); }
+                        update::State::Available(r) => { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the release page").clicked() { open = Some(r.url.clone()); } }
+                        update::State::Failed(e) => { ui.weak(format!("Could not check: {e}")); }
+                        update::State::Idle => {}
+                    }
+                });
+                if let Some(url) = open { update::open_in_browser(&url); }
             });
         });
     }

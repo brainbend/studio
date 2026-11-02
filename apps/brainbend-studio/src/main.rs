@@ -7085,6 +7085,22 @@ mod tests {
     }
 
     #[test]
+    fn help_tab_offers_docs_issues_community_and_update_check() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.ribbon_tab = ribbon::HELP_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for label in ["Docs", "Submit Issue", "BrainBend Community", "Check for Updates"] {
+            assert!(h.query_by_label(label).is_some(), "{label} is on the Help tab");
+        }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("help-tab.png")).unwrap();
+        }
+    }
+
+    #[test]
     fn update_button_appears_in_the_title_bar_only_when_a_release_is_newer() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
