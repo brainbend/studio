@@ -2,14 +2,27 @@ name: CI
 on: [push, pull_request]
 jobs:
   rust:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+          # One test at a time on Windows: a crash there ends the whole test run, and this shows which test caused it.
+          - os: windows-latest
+            test_args: "--test-threads=1"
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: System libraries for the desktop app
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets
+      - run: cargo test --workspace -- ${{ matrix.test_args }}
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets
   player:
     runs-on: ubuntu-latest
     steps:

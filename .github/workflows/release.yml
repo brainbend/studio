@@ -5,6 +5,8 @@ name: Release
 # Run it by hand from the Actions tab (or `gh workflow run release.yml --ref dev`) for a dry run: it builds every
 # platform and keeps the downloads as workflow artifacts, but creates no tag and no release.
 # A merge to main whose version already has a tag does nothing.
+# This workflow only builds and packages. The tests run in CI (ci.yml) on every push and pull request, so keep main
+# protected so that only commits with passing CI reach it.
 on:
   push:
     branches: [main]
@@ -60,16 +62,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: System libraries (Linux)
         if: matrix.name == 'linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-      - name: Test
-        run: cargo test --workspace --release
       - name: Package (macOS)
         if: matrix.name == 'macos'
         run: |
-          # The tests leave a lot of build output behind, and the DMG needs room: free it first.
-          cargo clean
           df -h /
           python3 -m pip install --quiet --break-system-packages pillow
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
