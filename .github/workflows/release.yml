@@ -61,6 +61,9 @@ jobs:
       - name: Package (macOS)
         if: matrix.name == 'macos'
         run: |
+          # The tests leave a lot of build output behind, and the DMG needs room: free it first.
+          cargo clean
+          df -h /
           python3 -m pip install --quiet --break-system-packages pillow
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           ./scripts/package-macos.sh universal
