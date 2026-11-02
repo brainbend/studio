@@ -1,12 +1,44 @@
 name: Release
-# Pushing a tag like v0.1.0 builds the app for macOS, Windows and Linux and attaches the downloads to a GitHub release.
+# Two ways to publish:
+#  - merge to main with a new version in apps/brainbend-studio/Cargo.toml: tags v<version> and builds the release
+#  - push a tag like v0.2.0-rc.1 by hand
+# A merge to main whose version already has a tag does nothing.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 permissions:
   contents: write
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.decide.outputs.release }}
+      tag: ${{ steps.decide.outputs.tag }}
+      prerelease: ${{ steps.decide.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-tags: true
+      - id: decide
+        run: |
+          if [ "${{ github.ref_type }}" = tag ]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            RELEASE=true
+          else
+            VERSION=$(scripts/version.sh)
+            TAG="v$VERSION"
+            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then RELEASE=false; else RELEASE=true; fi
+          fi
+          case "$VERSION" in *-*) PRE=true ;; *) PRE=false ;; esac
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, tag $TAG, release=$RELEASE, prerelease=$PRE"
   build:
+    needs: check
+    if: needs.check.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -30,25 +62,26 @@ jobs:
         if: matrix.name == 'macos'
         run: |
           python3 -m pip install --quiet --break-system-packages pillow
-          ./scripts/bundle-macos.sh
-          ditto -c -k --keepParent "dist/BrainBend Studio.app" "BrainBend-Studio-${{ github.ref_name }}-macos.zip"
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          ./scripts/package-macos.sh universal
+          cp dist/brainbend-studio-*-macos-universal.dmg "BrainBend-Studio-${{ needs.check.outputs.tag }}-macos-universal.dmg"
       - name: Package (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
         run: |
           cargo build --release -p brainbend-studio
-          Compress-Archive -Path target/release/brainbend-studio.exe, LICENSE-MIT, LICENSE-APACHE -DestinationPath "BrainBend-Studio-${{ github.ref_name }}-windows.zip"
+          Compress-Archive -Path target/release/brainbend-studio.exe, LICENSE-MIT, LICENSE-APACHE -DestinationPath "BrainBend-Studio-${{ needs.check.outputs.tag }}-windows.zip"
       - name: Package (Linux)
         if: matrix.name == 'linux'
         run: |
           cargo build --release -p brainbend-studio
-          tar -czf "BrainBend-Studio-${{ github.ref_name }}-linux.tar.gz" -C target/release brainbend-studio -C ../.. LICENSE-MIT LICENSE-APACHE
+          tar -czf "BrainBend-Studio-${{ needs.check.outputs.tag }}-linux.tar.gz" -C target/release brainbend-studio -C ../.. LICENSE-MIT LICENSE-APACHE
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.name }}
           path: BrainBend-Studio-*
   publish:
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v5
@@ -58,4 +91,8 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --title "BrainBend Studio ${{ github.ref_name }}" --generate-notes
+        run: |
+          PRE=""
+          if [ "${{ needs.check.outputs.prerelease }}" = true ]; then PRE="--prerelease"; fi
+          gh release create "${{ needs.check.outputs.tag }}" dist/* --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" --title "BrainBend Studio ${{ needs.check.outputs.tag }}" --generate-notes $PRE
