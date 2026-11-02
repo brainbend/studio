@@ -1,0 +1,26 @@
+[package]
+name = "brainbend-studio"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+eframe = "0.36.2"
+earcutr = "0.5.0"
+i_overlay = "9.1"
+latex-rust = "3.0.1"
+pulldown-latex = "0.8"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
+rfd = "0.17.2"
+skrifa = "0.44"
+brainbend-doc = { path = "../../crates/doc" }
+brainbend-import-legacy = { path = "../../crates/import-legacy" }
+brainbend-import-pptx = { path = "../../crates/import-pptx" }
+brainbend-export-pptx = { path = "../../crates/export-pptx" }
+brainbend-publish-html = { path = "../../crates/publish-html" }
+brainbend-spell = { path = "../../crates/spell" }
+
+[dev-dependencies]
+egui_kittest = { version = "0.36", features = ["snapshot", "wgpu"] }

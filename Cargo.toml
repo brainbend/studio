@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/doc", "crates/spell", "crates/import-legacy", "crates/import-pptx", "crates/export-pptx", "crates/publish-html", "apps/brainbend-studio"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/brainbend/studio"
+authors = ["BrainBend"]
+
+[profile.release]
+lto = "thin"
+opt-level = 3

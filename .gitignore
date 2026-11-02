@@ -1,0 +1,38 @@
+# Private course files and published output.
+*.story
+*.brainbend
+/exports/
+recovery.*
+
+# Generated builds and local caches.
+/build/
+/dist/
+/target/
+/node_modules/
+__pycache__/
+*.py[cod]
+*.app/
+*.dmg
+*.pkg
+*.msi
+*.exe
+.DS_Store
+
+# Credentials and machine-specific settings.
+.env
+.env.*
+!.env.example
+/.aws/
+/.codex/
+/.agents/
+*.p12
+*.pfx
+*.key
+*.pem
+*.log
+
+# Player test fixtures and deps
+/tests/player/.fixtures/
+/tests/player/node_modules/
+/tests/player/package-lock.json
+/dist/

@@ -1,0 +1,13 @@
+{
+  "name": "brainbend-player-tests",
+  "private": true,
+  "description": "Headless tests for the BrainBend Studio web player (jsdom, mock SCORM LMS).",
+  "scripts": {
+    "fixtures": "node build-fixtures.js",
+    "test": "node build-fixtures.js && node --test"
+  },
+  "devDependencies": {
+    "axe-core": "^4.10.2",
+    "jsdom": "24.1.3"
+  }
+}
