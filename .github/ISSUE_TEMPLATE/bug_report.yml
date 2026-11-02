@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. File > New > Media Lesson\n2. ..."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Editor (Media Lesson)
+        - Editor (Web Lesson)
+        - Opening or importing a file (.brainbend, .pptx, .story)
+        - Publishing (HTML5 or SCORM)
+        - Published player
+        - PowerPoint export
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: BrainBend Studio version and operating system
+      placeholder: "0.1.0, macOS 15"
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Sample file or screenshot
+      description: Attach a small project that shows the problem, if you can. Remove anything private first.
