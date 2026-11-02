@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-tags: true
+          fetch-tags: ${{ github.ref_type != 'tag' }}
       - id: decide
         run: |
           if [ "${{ github.ref_type }}" = tag ]; then
