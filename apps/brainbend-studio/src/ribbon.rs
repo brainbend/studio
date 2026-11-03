@@ -860,7 +860,7 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
 /// Copy the fields that differ between `a` (before) and `b` (after) onto `t`.
 fn apply_diff(a: &Object, b: &Object, t: &mut Object) {
     macro_rules! field { ($($f:ident),*) => { $( if a.$f != b.$f { t.$f = b.$f.clone(); } )* } }
-    field!(fill, stroke, dash, shadow, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
+    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
     // Picking a flat colour replaces a gradient.
     if a.fill != b.fill && a.gradient == b.gradient { t.gradient = None; }
     macro_rules! sfield { ($($f:ident),*) => { $( if a.style.$f != b.style.$f { t.style.$f = b.style.$f.clone(); } )* } }
@@ -956,7 +956,7 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
                 });
                 if !is_line {
                     ui.horizontal(|ui| {
-                        icon_popup(ui, DROP, "Effects: shadow and corners", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        icon_popup(ui, DROP, "Effects: shadow, glow, reflection, soft edges and corners", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
                             ui.set_min_width(260.0);
                             let mut has = obj.shadow.is_some();
                             if ui.checkbox(&mut has, "Shadow").changed() {
@@ -971,6 +971,42 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
                                 });
                                 *changed |= shadow_options(ui, sh);
                             }
+                            ui.separator();
+                            let mut glow_on = obj.glow.is_some();
+                            if ui.checkbox(&mut glow_on, "Glow").on_hover_text("A soft halo of colour around the object").changed() {
+                                obj.glow = if glow_on { Some(Glow { radius: 12.0, color: Rgba(255, 190, 40, 200) }) } else { None };
+                                *changed = true;
+                            }
+                            if let Some(g) = obj.glow.as_mut() {
+                                let mut c = Some(g.color);
+                                ui.horizontal(|ui| {
+                                    ui.label("Glow color");
+                                    if color_menu(ui, DROP, "Glow color", &mut c, None) { if let Some(c) = c { g.color = c; *changed = true; } }
+                                    ui.label("Size");
+                                    *changed |= ui.add(egui::DragValue::new(&mut g.radius).range(1.0..=100.0)).changed();
+                                });
+                            }
+                            let mut refl_on = obj.reflection.is_some();
+                            if ui.checkbox(&mut refl_on, "Reflection").on_hover_text("A faded mirror image below the object. Not every browser shows it.").changed() {
+                                obj.reflection = if refl_on { Some(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 }) } else { None };
+                                *changed = true;
+                            }
+                            if let Some(r) = obj.reflection.as_mut() {
+                                ui.horizontal(|ui| {
+                                    ui.label("Size");
+                                    *changed |= ui.add(egui::Slider::new(&mut r.size, 0.1..=1.0).show_value(false)).changed();
+                                    ui.label("Opacity");
+                                    *changed |= ui.add(egui::Slider::new(&mut r.opacity, 0.05..=1.0).show_value(false)).changed();
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Gap");
+                                    *changed |= ui.add(egui::DragValue::new(&mut r.gap).range(0.0..=100.0)).changed();
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label("Soft edges").on_hover_text("Fades the object's edges inward. A softened object shows no shadow or glow.");
+                                *changed |= ui.add(egui::DragValue::new(&mut obj.soft_edge).range(0.0..=100.0).suffix(" px")).changed();
+                            });
                             if !is_pic {
                                 ui.separator();
                                 ui.horizontal(|ui| {
@@ -1949,6 +1985,9 @@ impl App {
         after.stroke = proto.stroke;
         after.dash = proto.dash;
         after.shadow = proto.shadow;
+        after.glow = proto.glow;
+        after.soft_edge = proto.soft_edge;
+        after.reflection = proto.reflection;
         after.radius = proto.radius;
         after.line_spacing = proto.line_spacing;
         self.apply_object_edit(ctx, &before, &after);

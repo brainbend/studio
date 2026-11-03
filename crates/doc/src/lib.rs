@@ -169,6 +169,25 @@ pub struct Shadow {
     pub color: Rgba,
 }
 
+/// A soft halo of colour around an object.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Glow {
+    /// How far the halo reaches, in pixels.
+    pub radius: f32,
+    pub color: Rgba,
+}
+
+/// A faded, upside-down copy of an object just below it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reflection {
+    /// How much of the object's height the reflection shows, from 0 to 1.
+    pub size: f32,
+    /// How visible the reflection is where it meets the object, from 0 to 1.
+    pub opacity: f32,
+    /// The space between the object and its reflection, in pixels.
+    pub gap: f32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind {
     Fade,
@@ -694,6 +713,15 @@ pub struct Object {
     pub stroke: Option<Stroke>,
     #[serde(default)]
     pub shadow: Option<Shadow>,
+    /// A halo of colour around the object.
+    #[serde(default)]
+    pub glow: Option<Glow>,
+    /// Fades the object's edges inward over this many pixels (0 is off). A softened object shows no shadow or glow.
+    #[serde(default)]
+    pub soft_edge: f32,
+    /// A faded mirror image below the object.
+    #[serde(default)]
+    pub reflection: Option<Reflection>,
     /// Initially hidden (inferred from the source's state flag 0x20; also inherited from groups).
     #[serde(default)]
     pub hidden: bool,
@@ -800,6 +828,9 @@ impl Object {
             y,
             w,
             h,
+            glow: None,
+            soft_edge: 0.0,
+            reflection: None,
             fill: None,
             gradient: None,
             rotation: 0.0,
@@ -2296,4 +2327,24 @@ mod marker_tests {
         assert!(Project::from_json(&p.to_json().unwrap()).unwrap().palette.len() == Project::PALETTE_MAX);
     }
 }
+}
+
+#[cfg(test)]
+mod object_effects_tests {
+    use super::*;
+
+    #[test]
+    fn glow_soft_edges_and_reflection_round_trip_and_older_objects_have_none() {
+        let mut o = Object::new("b", "Button", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
+        assert!(o.glow.is_none() && o.reflection.is_none() && o.soft_edge == 0.0);
+        o.glow = Some(Glow { radius: 12.0, color: Rgba(255, 200, 0, 200) });
+        o.soft_edge = 6.0;
+        o.reflection = Some(Reflection { size: 0.5, opacity: 0.4, gap: 3.0 });
+        let back: Object = serde_json::from_value(serde_json::to_value(&o).unwrap()).unwrap();
+        assert_eq!((back.glow, back.soft_edge, back.reflection), (o.glow, o.soft_edge, o.reflection));
+        let mut v = serde_json::to_value(&o).unwrap();
+        for k in ["glow", "soft_edge", "reflection"] { v.as_object_mut().unwrap().remove(k); }
+        let old: Object = serde_json::from_value(v).unwrap();
+        assert!(old.glow.is_none() && old.reflection.is_none() && old.soft_edge == 0.0, "a project saved before these effects opens without them");
+    }
 }

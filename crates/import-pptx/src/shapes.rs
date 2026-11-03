@@ -449,6 +449,20 @@ fn shape_shadow(cx: &Cx, sp_pr: Option<Node>) -> Option<Shadow> {
     Some(Shadow { dx: dist * cx.k * a.cos(), dy: dist * cx.k * a.sin(), blur: attr_f(s, "blurRad").unwrap_or(0.0) * cx.k, spread: 0.0, color })
 }
 
+/// Glow, reflection and soft edges from a shape's effect list (the shadow is read by `shape_shadow`).
+fn shape_effects(cx: &Cx, sp_pr: Option<Node>, o: &mut Object) {
+    let Some(list) = sp_pr.and_then(|p| child(p, "effectLst")) else { return };
+    if let Some(g) = child(list, "glow") {
+        let color = first_color(g).map(|c| cx.ch.color(&c, None)).unwrap_or(Rgba(255, 200, 0, 160));
+        o.glow = Some(Glow { radius: attr_f(g, "rad").unwrap_or(0.0) * cx.k, color });
+    }
+    if let Some(r) = child(list, "reflection") {
+        let pct = |name: &str, d: f32| attr_f(r, name).map(|v| (v / 100000.0).clamp(0.0, 1.0)).unwrap_or(d);
+        o.reflection = Some(Reflection { size: pct("endPos", 1.0), opacity: pct("stA", 1.0), gap: attr_f(r, "dist").unwrap_or(0.0) * cx.k });
+    }
+    if let Some(e) = child(list, "softEdge") { o.soft_edge = attr_f(e, "rad").unwrap_or(0.0) * cx.k; }
+}
+
 fn flip_path(cmds: Vec<PathCmd>, fh: bool, fv: bool) -> Vec<PathCmd> {
     let fx = |x: f32| if fh { 1.0 - x } else { x };
     let fy = |y: f32| if fv { 1.0 - y } else { y };
@@ -511,6 +525,7 @@ fn convert_sp(cx: &mut Cx, sp: Node, tf: Tf, out: &mut Vec<Object>) {
     o.hidden = cnv.is_some_and(|c| c.attribute("hidden") == Some("1"));
     o.alt = cnv.and_then(|c| c.attribute("descr")).unwrap_or("").to_string();
     o.shadow = shape_shadow(cx, sp_pr);
+    shape_effects(cx, sp_pr, &mut o);
     if let Some(FillSpec::Grad { angle, stops }) = &fill_spec {
         o.gradient = Some(Gradient { angle: *angle, stops: stops.iter().map(|(p, c)| (*p, cx.ch.color(c, None))).collect() });
     }
@@ -606,6 +621,7 @@ fn convert_connector(cx: &mut Cx, c: Node, tf: Tf, out: &mut Vec<Object>) {
     o.rotation = xf.rot.rem_euclid(360.0);
     o.stroke = Some(stroke);
     o.shadow = shape_shadow(cx, sp_pr);
+    shape_effects(cx, sp_pr, &mut o);
     out.push(o);
 }
 
@@ -674,6 +690,7 @@ fn convert_pic(cx: &mut Cx, pic: Node, tf: Tf, out: &mut Vec<Object>) {
     let style = read_style(pic);
     o.stroke = shape_line(cx, sp_pr, &style, None, None);
     o.shadow = shape_shadow(cx, sp_pr);
+    shape_effects(cx, sp_pr, &mut o);
     if let Some(prst) = sp_pr.and_then(|p| child(p, "prstGeom")).and_then(|g| g.attribute("prst")).filter(|p| *p != "rect") {
         match PictureShape::from_preset(prst) {
             Some(shape) => o.mask = Some(shape),

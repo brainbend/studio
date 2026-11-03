@@ -1569,6 +1569,19 @@ test('player layout: the banner tops the sidebar, the logo sits small beside the
   assert.deepEqual(errors, []);
 });
 
+test('button effects: a glow is a halo, soft edges mask the object, a reflection mirrors it, and none of it touches a plain button', () => {
+  const { w, errors } = boot(fixture('buttoneffects'));
+  const node = (name) => $$(w, '.obj').find((o) => o.textContent === name);
+  assert.match(node('glow').style.boxShadow, /^0 0 24px 6px /, 'a glow is a blurred shadow with no offset');
+  assert.match(node('soft').style.webkitMaskImage, /linear-gradient\(to right,transparent,#000 24px,#000 calc\(100% - 24px\),transparent\),linear-gradient\(to bottom/, 'soft edges fade all four sides');
+  assert.equal(node('soft').style.webkitMaskComposite, 'source-in');
+  assert.match(node('reflect').style.webkitBoxReflect, /^below 6px linear-gradient\(to bottom,transparent,transparent 40%,rgba\(255,255,255,0\.5\)\)$/, 'a reflection shows 60% of the height, strongest at the object');
+  const plain = node('plain');
+  assert.ok(!plain.style.webkitMaskImage && !plain.style.webkitBoxReflect, 'a plain button has no mask or reflection');
+  assert.ok(!/24px/.test(plain.style.boxShadow));
+  assert.deepEqual(errors, []);
+});
+
 // ---- Play / pause, seekbar and replay ------------------------------------------------------------
 const transport = (w) => ({
   play: $(w, '.ctl-play'), replay: $(w, '.ctl-replay'), seek: $(w, 'input.ctl-seek'), time: $(w, '.ctl-time'),

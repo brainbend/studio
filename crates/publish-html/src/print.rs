@@ -177,7 +177,10 @@ fn object_html(o: &Object, p: &Project) -> String {
                 }
                 style.push_str("box-sizing:border-box;");
             } else if let Some(s) = o.stroke { let _ = write!(style, "border:{}px {} {};box-sizing:border-box;", s.width, o.dash.css(), css(s.color)); }
-            if let Some(sh) = o.shadow { let _ = write!(style, "box-shadow:{}px {}px {}px {}px {};", sh.dx, sh.dy, sh.blur, sh.spread, css(sh.color)); }
+            let mut shadows: Vec<String> = Vec::new();
+            if let Some(sh) = o.shadow { shadows.push(format!("{}px {}px {}px {}px {}", sh.dx, sh.dy, sh.blur, sh.spread, css(sh.color))); }
+            if let Some(g) = o.glow { shadows.push(format!("0 0 {}px {}px {}", g.radius, (g.radius / 4.0).round(), css(g.color))); }
+            if !shadows.is_empty() { let _ = write!(style, "box-shadow:{};", shadows.join(",")); }
         }
     }
     if matches!(o.kind, Kind::Image) {

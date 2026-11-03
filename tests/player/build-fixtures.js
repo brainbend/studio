@@ -43,6 +43,7 @@ cargo('pause', [path.join(out, 'pause')]);
 cargo('playerui', [path.join(out, 'playerui')]);
 cargo('playerui', [path.join(out, 'playerui-right'), 'right']);
 cargo('playerui', [path.join(out, 'playerui-icons'), 'off', 'icons']);
+cargo('buttoneffects', [path.join(out, 'buttoneffects')]);
 cargo('transport', [path.join(out, 'transport')]);
 cargo('transport', [path.join(out, 'transport-icons'), 'icons']);
 cargo('bank', [path.join(out, 'bank')]);

@@ -3,7 +3,7 @@ use brainbend_doc::*;
 fn obj(id: &str, kind: Kind, text: &str) -> Object {
     Object {
         id: id.into(), name: id.into(), kind, x: 100.0, y: 100.0, w: 300.0, h: 100.0,
-        fill: Some(Rgba(3, 83, 158, 255)), stroke: None, shadow: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich: None, entrance: None, exit: None, timing: None,
+        fill: Some(Rgba(3, 83, 158, 255)), stroke: None, shadow: None, glow: None, soft_edge: 0.0, reflection: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich: None, entrance: None, exit: None, timing: None,
         text: text.into(),
         style: TextStyle { font_family: "Open Sans".into(), size: 40.0, bold: true, italic: false, underline: false, color: Rgba(255, 255, 255, 255), align: Align::Center, valign: VAlign::Middle },
         asset: None, states: vec![], initial_state: String::new(), placeholder: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,

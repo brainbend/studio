@@ -1188,12 +1188,31 @@
     var sh = shadow ? shadow.dx + 'px ' + shadow.dy + 'px ' + shadow.blur + 'px ' + (shadow.spread || 0) + 'px ' + css(shadow.color) : '';
     // A freeform shape's shadow follows its outline (a box shadow would be a rectangle behind it).
     if (entry.node._path && entry.node._path.ownerSVGElement) {
-      entry.node._path.ownerSVGElement.style.filter = shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ')' : '';
+      var fx = (shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ') ' : '') +
+        (o.glow ? 'drop-shadow(0 0 ' + Math.max(0, o.glow.radius / 2) + 'px ' + css(o.glow.color) + ')' : '');
+      entry.node._path.ownerSVGElement.style.filter = fx;
       sh = '';
+    } else if (o.glow) {
+      var gl = '0 0 ' + o.glow.radius + 'px ' + Math.round(o.glow.radius / 4) + 'px ' + css(o.glow.color);
+      sh = sh ? sh + ',' + gl : gl;
     }
     // The focus ring is dark with a white inner band, so it shows on any background.
     if (entry.ring) sh = (sh ? sh + ',' : '') + '0 0 0 3px #fff';
     entry.node.style.boxShadow = sh || 'none';
+    // Soft edges fade the object out towards its border (and, being a mask, any shadow or glow outside it). A focused
+    // object keeps its edges so the focus ring shows. Reflection is not supported by every browser; where it is not,
+    // the object simply has none.
+    var se = o.soft_edge || 0, mask = '';
+    if (se > 0 && !entry.ring) {
+      var fade = function (dir) { return 'linear-gradient(' + dir + ',transparent,#000 ' + se + 'px,#000 calc(100% - ' + se + 'px),transparent)'; };
+      mask = fade('to right') + ',' + fade('to bottom');
+    }
+    entry.node.style.webkitMaskImage = mask; entry.node.style.maskImage = mask;
+    entry.node.style.webkitMaskComposite = mask ? 'source-in' : ''; entry.node.style.maskComposite = mask ? 'intersect' : '';
+    var rf = o.reflection;
+    entry.node.style.webkitBoxReflect = rf
+      ? 'below ' + rf.gap + 'px linear-gradient(to bottom,transparent,transparent ' + Math.round((1 - rf.size) * 100) + '%,rgba(255,255,255,' + rf.opacity + '))'
+      : '';
     if (entry.clickable && !entry.drawCheck) {
       if (entry.state === 'Disabled') entry.node.setAttribute('aria-disabled', 'true'); else entry.node.removeAttribute('aria-disabled');
     }
