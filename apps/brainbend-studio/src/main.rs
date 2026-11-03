@@ -200,6 +200,11 @@ struct App {
     /// Object whose text is being edited in place on the canvas, and its text before editing.
     editing: Option<(usize, usize)>,
     editing_old: String,
+    /// The edited object's rotation and text direction when last drawn: the edit box cannot turn, so a change ends the edit.
+    edit_turn: Option<(u32, i16)>,
+    /// Where the slide sits on screen (its top-left corner and scale) as of the last frame; the tests find handles with it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    canvas_frame: Option<(egui::Pos2, f32)>,
     /// The id of a text box made by double-clicking blank space; it goes again if it is left empty.
     fresh_text: Option<String>,
     /// Typing starts here on the next frame (the canvas of this frame was drawn before the box existed).
@@ -378,7 +383,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -6008,6 +6013,7 @@ impl App {
             let scale = fit * self.zoom;
             let size = egui::vec2(slide.width * scale, slide.height * scale);
             let origin = area.center() - size / 2.0 + self.pan;
+            self.canvas_frame = Some((origin, scale));
             self.paint_backdrop(ctx, &painter, origin, scale, &slide);
             let to_screen = |x: f32, y: f32, w: f32, h: f32| {
                 egui::Rect::from_min_size(origin + egui::vec2(x, y) * scale, egui::vec2(w, h) * scale)
@@ -6851,13 +6857,19 @@ impl App {
                 let valid = slide.layers.get(li).and_then(|l| l.objects.get(oi)).is_some();
                 if !valid {
                     self.editing = None;
+                    self.edit_turn = None;
                 } else {
-                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.editing = None; return };
+                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.editing = None; self.edit_turn = None; return };
                     let o = &o_real;
+                    // The edit box cannot turn with the object, so turning it (the handle, the Properties field or the
+                    // text direction buttons) ends the edit. The text is already in the object, so nothing is lost.
+                    let turn_now = (o.rotation.to_bits(), o.text_rotation);
+                    let turned = self.edit_turn.is_some_and(|before| before != turn_now);
+                    self.edit_turn = Some(turn_now);
                     let r = egui::Rect::from_min_size(origin + egui::vec2(o.x, o.y) * scale, egui::vec2(o.w, o.h) * scale);
                     let font = egui::FontId::new((o.style.size * scale).max(8.0), font_family(&o.style.font_family));
                     let mut text = o.text.clone();
-                    let mut done = false;
+                    let mut done = turned;
                     let edit_id = egui::Id::new("inplace-edit");
                     // Show mixed formatting while editing.
                     let fmts = o.char_fmts();
@@ -7015,6 +7027,7 @@ impl App {
                     }
                     if done {
                         self.editing = None;
+                        self.edit_turn = None;
                         // A text box made by double-clicking that was left empty is not wanted.
                         if let Some(id) = self.fresh_text.take() {
                             let empty = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| o.id == id && o.text.is_empty());
@@ -9303,6 +9316,61 @@ mod tests {
         h.event(egui::Event::Text("!".into()));
         h.run_steps(3);
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text.contains('!'), "typing reaches the object while it is edited in place");
+    }
+
+    /// Starts editing a text box in place, with some text typed into it.
+    fn editing_text_box() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = "Hello there".into();
+        h.run_steps(4);
+        assert!(h.state().editing.is_some(), "the box is being edited");
+        h
+    }
+
+    #[test]
+    fn dragging_the_rotate_handle_while_editing_text_ends_the_edit_and_turns_the_box() {
+        let mut h = editing_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
+        let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
+        drag(&mut h, knob, centre + egui::vec2(150.0, 0.0));
+        let after = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!(after.rotation.abs() > 1.0, "the handle still turns the box: {}", after.rotation);
+        assert!(h.state().editing.is_none(), "an edit box that cannot turn is not left behind a turned frame");
+        assert_eq!(after.text, "Hello there", "the typed text is kept");
+    }
+
+    #[test]
+    fn turning_a_text_box_from_properties_or_the_ribbon_also_ends_the_edit() {
+        for change in [|o: &mut Object| o.rotation = 40.0, |o: &mut Object| o.text_rotation = 270] {
+            let mut h = editing_text_box();
+            let (li, oi) = h.state().selected.unwrap();
+            change(&mut h.state_mut().project.as_mut().unwrap().slides[0].layers[li].objects[oi]);
+            h.run_steps(3);
+            assert!(h.state().editing.is_none(), "turning the object ends the edit");
+            assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text, "Hello there");
+        }
+    }
+
+    #[test]
+    fn editing_a_text_box_that_is_already_turned_is_not_cut_short() {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].rotation = 30.0;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.run_steps(5);
+        assert!(h.state().editing.is_some(), "only a change of rotation ends the edit, not a rotation that was already there");
     }
 
     #[test]
