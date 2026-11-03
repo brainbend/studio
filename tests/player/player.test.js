@@ -1569,6 +1569,28 @@ test('player layout: the banner tops the sidebar, the logo sits small beside the
   assert.deepEqual(errors, []);
 });
 
+test('player layout: the sidebar slides in and out, the top bar moves at once, and the menu hides when the slide ends', () => {
+  const anims = [];
+  const { w, errors } = boot(fixture('playerui'), null, {}, (win) => {
+    sidebarSizes(win);
+  });
+  const menu = $(w, '#menu'); const bar = $(w, '#topbar');
+  menu.animate = function (frames) { const a = { frames, cancel() {} }; anims.push(a); return a; };
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal(anims.length, 1, 'closing starts a slide');
+  assert.equal(anims[0].frames[1].transform, 'translateX(-100%)', 'it slides off to the left');
+  assert.equal(menu.hidden, false, 'it stays on screen while it slides');
+  assert.equal(bar.style.left, '0px', 'the top bar starts moving at once');
+  assert.ok(w.document.body.classList.contains('side-anim'), 'the layout glides rather than jumps');
+  anims[0].onfinish();
+  assert.equal(menu.hidden, true, 'and is gone when the slide ends');
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal(menu.hidden, false);
+  assert.equal(anims[1].frames[0].transform, 'translateX(-100%)', 'opening slides in from the left');
+  assert.equal(bar.style.left, '280px');
+  assert.deepEqual(errors, []);
+});
+
 test('player layout: with a sidebar on the right the top bar stops short of it', () => {
   const { w, errors } = boot(fixture('playerui-right'), null, {}, sidebarSizes);
   assert.equal($(w, '#topbar').style.right, '280px');

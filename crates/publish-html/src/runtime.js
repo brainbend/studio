@@ -1952,9 +1952,9 @@
     if (sidebarOn) {
       sideToggle.setAttribute('aria-expanded', String(!menu.hidden));
       sideToggle.addEventListener('click', function () {
-        menu.hidden = !menu.hidden;
-        sideToggle.setAttribute('aria-expanded', String(!menu.hidden));
-        fit();
+        var opening = menu.hidden || sideClosing;
+        sideToggle.setAttribute('aria-expanded', String(opening));
+        slideSidebar(opening);
       });
     } else {
       menuBtn = el('button'); menuBtn.type = 'button'; setButton(menuBtn, 'Menu', 'menu');
@@ -2122,11 +2122,30 @@
   });
 
   // ---- fit stage to window ----------------------------------------------------------------
+  // The sidebar slides in and out while the top bar, control bar and slide glide to their new places. With reduced motion
+  // (or no animation support) it simply appears or disappears.
+  var sideClosing = false, sideAnimTimer = null;
+  function slideSidebar(open) {
+    if (reduceMotion || !menu.animate) { menu.hidden = !open; sideClosing = false; fit(); return; }
+    var away = sideMode === 'Right' ? '100%' : '-100%';
+    document.body.classList.add('side-anim');
+    clearTimeout(sideAnimTimer);
+    sideAnimTimer = setTimeout(function () { document.body.classList.remove('side-anim'); }, 300);
+    if (open) {
+      sideClosing = false; menu.hidden = false; fit();
+      menu.animate([{ transform: 'translateX(' + away + ')' }, { transform: 'none' }], { duration: 220, easing: 'ease' });
+    } else {
+      sideClosing = true; fit();
+      var a = menu.animate([{ transform: 'none' }, { transform: 'translateX(' + away + ')' }], { duration: 220, easing: 'ease', fill: 'forwards' });
+      var done = function () { if (sideClosing) { menu.hidden = true; sideClosing = false; } if (a && a.cancel) a.cancel(); };
+      if (a) a.onfinish = done; else done();
+    }
+  }
   function fit() {
     var navH = nav ? nav.offsetHeight : 0;
     var topH = topbar ? topbar.offsetHeight : 0;
     // A sidebar takes a strip from the left or right; the slide fits what is left.
-    var sideW = sidebarOn && menu && !menu.hidden ? menu.offsetWidth : 0;
+    var sideW = sidebarOn && menu && !menu.hidden && !sideClosing ? menu.offsetWidth : 0;
     // The sidebar runs the full height; the top bar and the control bar sit beside it, over and under the slide only.
     if (menu && sidebarOn) { menu.style.top = '0px'; menu.style.bottom = '0px'; }
     if (topbar) {

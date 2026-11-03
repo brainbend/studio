@@ -180,6 +180,8 @@ html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
 #topbar .tb-toggle:hover{{background:var(--p-hover)}}
 #topbar .tb-title{{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 #topbar .logo{{height:28px;max-width:140px;object-fit:contain}}
+body.side-anim #topbar,body.side-anim #nav{{transition:left .22s ease,right .22s ease}}
+body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #menu.sidebar{{width:280px;box-shadow:none;z-index:3}}
 #menu.side-left{{border-right:1px solid var(--p-line)}}
 #menu.side-right{{left:auto;right:0;border-left:1px solid var(--p-line)}}
