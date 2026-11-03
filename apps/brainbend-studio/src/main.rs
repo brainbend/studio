@@ -141,6 +141,10 @@ struct App {
     trig_all: bool,
     /// The project's Variables window is open.
     variables_open: bool,
+    /// The Variables window's search text and filters (type: 0 any, 1 true/false, 2 number, 3 text; use: 0 any, 1 in a trigger, 2 in no trigger).
+    var_query: String,
+    var_kind: usize,
+    var_use: usize,
     /// The Focus Order window (Home > Slide): the reading and tab order of the current layer.
     focus_open: bool,
     /// The Equation window (Insert > Equation, or Edit equation in Properties), while it is open.
@@ -389,7 +393,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -3420,8 +3424,30 @@ impl App {
         if !open { self.variables_open = false; }
     }
 
-    /// Project variables (used by triggers): add, set the initial value, delete.
+    /// Project variables (used by triggers): search and filter, add, set the initial value, delete.
     fn variables_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let in_triggers = variables_in_triggers(self.project.as_ref().unwrap());
+        let total = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in).count();
+        let filtering = !self.var_query.trim().is_empty() || self.var_kind != 0 || self.var_use != 0;
+        if total > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.var_query).hint_text("Search variables").desired_width(118.0));
+                combo("varkindfilter").width(78.0).selected_text(["All types", "true/false", "number", "text"][self.var_kind]).show_ui(ui, |ui| {
+                    for (i, l) in ["All types", "true/false", "number", "text"].iter().enumerate() { ui.selectable_value(&mut self.var_kind, i, *l); }
+                });
+                combo("varusefilter").width(112.0).selected_text(["Any use", "Used in a trigger", "In no trigger"][self.var_use]).show_ui(ui, |ui| {
+                    for (i, l) in ["Any use", "Used in a trigger", "In no trigger"].iter().enumerate() { ui.selectable_value(&mut self.var_use, i, *l); }
+                }).response.on_hover_text("Only triggers are checked. A slider, an input, a dial or text that shows %name% can still use a variable that is in no trigger.");
+                if filtering && ui.small_button("Clear").clicked() { self.var_query.clear(); self.var_kind = 0; self.var_use = 0; }
+            });
+            if filtering {
+                let shown = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && variable_shown(v, &in_triggers, &self.var_query, self.var_kind, self.var_use)).count();
+                ui.weak(format!("Showing {shown} of {total} variables"));
+                if shown == 0 { ui.label("No variables match."); }
+            }
+            ui.add_space(2.0);
+        }
+        let (query, kind, usage) = (self.var_query.clone(), self.var_kind, self.var_use);
         let mut add_var: Option<(String, usize)> = None;
         let mut remove_var: Option<String> = None;
         let mut dup_var: Option<String> = None;
@@ -3429,7 +3455,7 @@ impl App {
         let var_meta_before = Meta::of(self.project.as_ref().unwrap());
         egui::ScrollArea::vertical().id_salt("vars").show(ui, |ui| {
             let proj = self.project.as_mut().unwrap();
-            for v in proj.variables.iter_mut().filter(|v| !v.built_in) {
+            for v in proj.variables.iter_mut().filter(|v| !v.built_in && variable_shown(v, &in_triggers, &query, kind, usage)) {
                 let row = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| { ui.style_mut().interaction.selectable_labels = false; ui.horizontal(|ui| {
                     ui.label(format!("{} =", v.name));
                     if value_editor(ui, &mut v.initial) { var_edited = true; }
@@ -5093,6 +5119,29 @@ fn install_fonts(ctx: &egui::Context) {
 
 fn color(c: Rgba) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(c.0, c.1, c.2, c.3)
+}
+
+/// The ids of the variables any trigger reads or changes: a condition, a set or adjust action, or a change event.
+fn variables_in_triggers(p: &Project) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for t in p.slides.iter().flat_map(|s| s.triggers.iter()) {
+        for c in &t.conditions { ids.insert(c.variable.clone()); }
+        match (&t.event, &t.action) {
+            (Event::VariableChanged(v), _) => { ids.insert(v.clone()); }
+            _ => {}
+        }
+        if let Action::SetVariable { variable, .. } | Action::AdjustVariable { variable, .. } = &t.action { ids.insert(variable.clone()); }
+    }
+    ids
+}
+
+/// Does `v` pass the Variables window's search and filters? `kind`: 0 any, 1 true/false, 2 number, 3 text.
+/// `usage`: 0 any, 1 named by a trigger, 2 named by no trigger.
+fn variable_shown(v: &Variable, in_triggers: &std::collections::HashSet<String>, query: &str, kind: usize, usage: usize) -> bool {
+    let q = query.trim().to_lowercase();
+    (q.is_empty() || v.name.to_lowercase().contains(&q))
+        && match kind { 1 => matches!(v.initial, Value::Bool(_)), 2 => matches!(v.initial, Value::Num(_)), 3 => matches!(v.initial, Value::Text(_)), _ => true }
+        && match usage { 1 => in_triggers.contains(&v.id), 2 => !in_triggers.contains(&v.id), _ => true }
 }
 
 impl eframe::App for App {
@@ -8630,6 +8679,80 @@ mod tests {
         h.state_mut().right_tab = 1;
         h.run_steps(4);
         assert_eq!(h.state().right_tab, 1);
+    }
+
+    fn var(id: &str, name: &str, initial: Value) -> Variable { Variable { id: id.into(), name: name.into(), initial, built_in: false } }
+
+    fn sample_variables() -> Vec<Variable> {
+        vec![var("v1", "Score", Value::Num(0.0)), var("v2", "Passed", Value::Bool(false)), var("v3", "Learner Name", Value::Text(String::new())), var("v4", "Attempts", Value::Num(0.0))]
+    }
+
+    #[test]
+    fn variables_are_found_by_name_type_and_whether_a_trigger_uses_them() {
+        let vars = sample_variables();
+        let used: std::collections::HashSet<String> = ["v1".to_string(), "v2".to_string()].into_iter().collect();
+        let names = |q: &str, kind: usize, usage: usize| vars.iter().filter(|v| variable_shown(v, &used, q, kind, usage)).map(|v| v.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names("", 0, 0), ["Score", "Passed", "Learner Name", "Attempts"], "no filter shows everything");
+        assert_eq!(names("sc", 0, 0), ["Score"]);
+        assert_eq!(names("  NAME ", 0, 0), ["Learner Name"], "case and surrounding spaces do not matter");
+        assert_eq!(names("", 2, 0), ["Score", "Attempts"], "numbers");
+        assert_eq!(names("", 1, 0), ["Passed"], "true/false");
+        assert_eq!(names("", 3, 0), ["Learner Name"], "text");
+        assert_eq!(names("", 0, 1), ["Score", "Passed"], "named by a trigger");
+        assert_eq!(names("", 0, 2), ["Learner Name", "Attempts"], "named by no trigger");
+        assert_eq!(names("s", 2, 1), ["Score"], "filters combine");
+        assert!(names("zzz", 0, 0).is_empty());
+    }
+
+    #[test]
+    fn a_trigger_names_a_variable_in_its_conditions_actions_and_events() {
+        let mut p = Project::new("p");
+        p.slides.push(Slide::new("s", "S", 1280.0, 720.0));
+        p.variables = sample_variables();
+        p.slides[0].triggers = vec![
+            Trigger { id: "a".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::SetVariable { variable: "v1".into(), value: Value::Num(1.0) }, conditions: vec![] },
+            Trigger { id: "b".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::NextSlide, conditions: vec![brainbend_doc::Condition { variable: "v2".into(), cmp: brainbend_doc::Cmp::Eq, value: Value::Bool(true), or_with_previous: false }] },
+            Trigger { id: "c".into(), owner: Owner::Slide, event: Event::VariableChanged("v3".into()), action: Action::NextSlide, conditions: vec![] },
+            Trigger { id: "d".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::AdjustVariable { variable: "v4".into(), op: brainbend_doc::AdjustOp::Add, value: Value::Num(1.0) }, conditions: vec![] },
+        ];
+        let mut used: Vec<String> = variables_in_triggers(&p).into_iter().collect();
+        used.sort();
+        assert_eq!(used, ["v1", "v2", "v3", "v4"]);
+        assert!(variables_in_triggers(&Project::new("empty")).is_empty());
+    }
+
+    #[test]
+    fn the_variables_window_narrows_its_list_as_you_search_and_filter() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().variables.extend(sample_variables());
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for name in ["Score", "Passed", "Learner Name", "Attempts"] { assert!(h.query_by_label(&format!("{name} =")).is_some(), "{name} is listed"); }
+        assert!(h.query_by_label_contains("Showing").is_none(), "no count while nothing is filtered");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-1-all.png")).unwrap(); }
+
+        h.state_mut().var_query = "a".into();
+        h.run_steps(3);
+        assert!(h.query_by_label("Score =").is_none(), "Score has no 'a'");
+        assert!(h.query_by_label("Attempts =").is_some() && h.query_by_label("Learner Name =").is_some() && h.query_by_label("Passed =").is_some());
+        assert!(h.query_by_label("Showing 3 of 4 variables").is_some());
+
+        h.state_mut().var_kind = 2;
+        h.run_steps(3);
+        assert!(h.query_by_label("Attempts =").is_some() && h.query_by_label("Passed =").is_none(), "number variables with an 'a': Attempts");
+        assert!(h.query_by_label("Showing 1 of 4 variables").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-2-filtered.png")).unwrap(); }
+
+        h.state_mut().var_query = "zzz".into();
+        h.run_steps(3);
+        assert!(h.query_by_label("No variables match.").is_some());
+        h.get_by_label("Clear").click();
+        h.run_steps(3);
+        assert!((h.state().var_query.is_empty(), h.state().var_kind, h.state().var_use) == (true, 0, 0), "Clear resets the search and both filters");
+        assert!(h.query_by_label("Score =").is_some(), "everything is back");
     }
 
     #[test]
