@@ -6270,6 +6270,9 @@ impl App {
                     let o = &mut s.layers[li].objects[oi];
                     o.text.clear();
                     o.rich = None;
+                    // The edit box cannot turn, so a turned object is shown upright (frame and handles too) while its
+                    // text is edited. Only what is drawn changes: the saved rotation is untouched.
+                    o.rotation = 0.0;
                     s
                 }
                 _ => slide,
@@ -9358,6 +9361,54 @@ mod tests {
             assert!(h.state().editing.is_none(), "turning the object ends the edit");
             assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text, "Hello there");
         }
+    }
+
+    fn editing_a_turned_text_box() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        {
+            let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
+            o.text = "Hello there".into();
+            o.rotation = 30.0;
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = "Hello there".into();
+        h.run_steps(5);
+        h
+    }
+
+    #[test]
+    fn a_turned_box_is_edited_upright_and_keeps_its_rotation() {
+        let mut h = editing_a_turned_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        assert!(h.state().editing.is_some(), "a rotation that was already there does not end the edit");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("turned-box-editing.png")).unwrap(); }
+        h.event(egui::Event::Text("!".into()));
+        h.run_steps(3);
+        // Finish with Escape, as a person would.
+        h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: Some(egui::Key::Escape), pressed: true, repeat: false, modifiers: Default::default() });
+        h.run_steps(3);
+        assert!(h.state().editing.is_none());
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!(o.text.contains('!'), "the typing reached the box");
+        assert_eq!(o.rotation, 30.0, "only what is drawn was straightened, not the box itself");
+    }
+
+    #[test]
+    fn while_a_turned_box_is_edited_its_handles_are_drawn_upright_with_the_edit_box() {
+        let mut h = editing_a_turned_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        // Where the rotate handle is when the frame is upright: straight above the middle of the top edge.
+        let upright_knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
+        let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
+        drag(&mut h, upright_knob, centre + egui::vec2(150.0, 0.0));
+        let after = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!((after.rotation - 30.0).abs() > 5.0, "the handle was found where an upright frame has it: {}", after.rotation);
     }
 
     #[test]
