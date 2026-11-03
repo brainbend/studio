@@ -202,7 +202,7 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
             ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
         }
         let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
-        let icon_col = if enabled { tint(icon) } else { col };
+        let icon_col = if enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
         ui.painter().text(egui::pos2(rect.center().x, rect.top() + 4.0), egui::Align2::CENTER_TOP, icon, egui::FontId::new(22.0, icons()), icon_col);
         let n = lines.len();
         for (i, line) in lines.iter().enumerate() {
@@ -220,6 +220,32 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
         }
     }
     resp
+}
+
+/// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
+fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
+    let lines = label_lines(ui, label);
+    let font = egui::FontId::proportional(11.5);
+    let widest = lines.iter().enumerate().map(|(i, l)| {
+        let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
+        if caret && i + 1 == lines.len() { w + 14.0 } else { w }
+    }).fold(0.0f32, f32::max);
+    (widest + 6.0).max(36.0)
+}
+
+/// A caption under a row of controls, like `group` but without the divider after it.
+fn pinned_group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
+        let body = ui.vertical(|ui| {
+            ui.set_min_height(BIG_H);
+            add(ui);
+        });
+        let w = body.response.rect.width().max(30.0);
+        ui.allocate_ui_with_layout(egui::vec2(w, CAP_H), egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(caption).size(10.5).color(ui.visuals().text_color().gamma_multiply(0.55))).wrap_mode(egui::TextWrapMode::Extend));
+        });
+    });
 }
 
 /// Large flat button (icon above a short label).
@@ -1062,27 +1088,38 @@ impl App {
                 let primary = self.ribbon_target();
                 let mut edited = primary.clone();
                 let mut edit_changed = false;
-                egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        ui.set_min_height(BIG_H);
-                        ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.add_enabled_ui(!self.try_mode, |ui| {
-                        match self.ribbon_tab {
-                            HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
-                            2 => self.insert_tab(ui, normal),
-                            3 => self.slides_tab(ui, ctx),
-                            4 => self.design_tab(ui, ctx),
-                            5 => {
-                                self.transition_groups(ui, ctx);
-                                self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
+                // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
+                let pin_w = if self.project.is_some() { self.pinned_width(ui) } else { 0.0 };
+                let full = ui.available_rect_before_wrap();
+                let h = BIG_H + CAP_H + 8.0;
+                let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w - 8.0).max(80.0), h));
+                let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                    egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.set_min_height(BIG_H);
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            ui.add_enabled_ui(!self.try_mode, |ui| {
+                            match self.ribbon_tab {
+                                HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
+                                2 => self.insert_tab(ui, normal),
+                                3 => self.slides_tab(ui, ctx),
+                                4 => self.design_tab(ui, ctx),
+                                5 => {
+                                    self.transition_groups(ui, ctx);
+                                    self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
+                                }
+                                MASTER_TAB => self.master_tab(ui, ctx),
+                                HELP_TAB => self.help_tab(ui),
+                                _ => self.design_tab(ui, ctx),
                             }
-                            MASTER_TAB => self.master_tab(ui, ctx),
-                            HELP_TAB => self.help_tab(ui),
-                            _ => self.design_tab(ui, ctx),
-                        }
+                            });
                         });
                     });
                 });
+                if pin_w > 0.0 {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(pin).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| self.pinned_actions(ui));
+                }
                 if let (true, Some(before), Some(after)) = (edit_changed, primary.as_ref(), edited.as_ref()) {
                     self.apply_object_edit(ctx, before, after);
                 } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
@@ -1300,31 +1337,6 @@ impl App {
                 }); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
-                    if has { ui.scope(|ui| {
-                        // Hangs from the top edge of the window: square at the top, rounded below.
-                        let down = egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 };
-                        let resp = pill(ui, "publish", Pill { icon: Some((EXPORT, egui::Color32::WHITE)), label: "Publish", caret: true, fill: Some(ORANGE), ink: egui::Color32::WHITE, outline: false, bold: true, radius: down, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text("Export the project");
-                        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| self.publish_items(ui));
-                    }); }
-                    if has {
-                        ui.add_space(4.0);
-                        let resp = pill(ui, "preview", Pill { icon: Some((PLAY, tint(PLAY))), label: "Preview", caret: true, fill: Some(text_col(ui).gamma_multiply(0.14)), ink: text_col(ui), outline: true, bold: false, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text("Play the lesson in your browser");
-                        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| self.preview_items(ui));
-                        ui.add_space(4.0);
-                        if !self.project.as_ref().is_some_and(|p| p.is_web()) {
-                            // Press buttons on the slide to see their states and layers, view only.
-                            let on = self.try_mode;
-                            let ink = if on { egui::Color32::WHITE } else { text_col(ui) };
-                            let tip = pill(ui, "tryit", Pill { icon: Some((CLICK, if on { egui::Color32::WHITE } else { tint(CLICK) })), label: "Try It", caret: false, fill: Some(if on { egui::Color32::from_rgb(11, 110, 105) } else { text_col(ui).gamma_multiply(0.14) }), ink, outline: true, bold: false, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                                .on_hover_text("Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.");
-                            if tip.clicked() {
-                                self.try_mode = !self.try_mode;
-                            }
-                            ui.add_space(4.0);
-                        }
-                    }
                     let dark = ctx.theme() == egui::Theme::Dark;
                     // The moon is black so it shows on the light theme; the sun keeps its yellow.
                     let ink = text_col(ui);
@@ -2134,6 +2146,47 @@ impl App {
     }
 
     /// The Publish choices, shared by the title bar and the Home tab.
+    /// Whether Try It applies: slide-based projects only.
+    fn can_try(&self) -> bool { self.project.as_ref().is_some_and(|p| !p.is_web()) }
+
+    /// How wide the pinned group is, so the ribbon can leave room for it at the right.
+    fn pinned_width(&self, ui: &egui::Ui) -> f32 {
+        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", true)];
+        if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
+        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 18.0
+    }
+
+    /// Try It, Preview and Publish: pinned at the right end of the ribbon, always in view.
+    fn pinned_actions(&mut self, ui: &mut egui::Ui) {
+        // A thin divider separates the group from the tabs' controls.
+        let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, BIG_H + CAP_H), egui::Sense::hover());
+        let col = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
+        ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
+        ui.add_space(5.0);
+        let can_try = self.can_try();
+        pinned_group(ui, "Try, preview, publish", |ui| {
+            ui.horizontal(|ui| {
+                if can_try {
+                    let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";
+                    if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
+                }
+                big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
+                // Publish is the main action, so it is orange with white ink.
+                let backing = ui.painter().add(egui::Shape::Noop);
+                let resp = ui.scope(|ui| {
+                    let v = ui.visuals_mut();
+                    v.override_text_color = Some(egui::Color32::WHITE);
+                    let hover = ORANGE.gamma_multiply(0.85);
+                    v.widgets.hovered.weak_bg_fill = hover;
+                    v.widgets.active.weak_bg_fill = hover;
+                    v.widgets.open.weak_bg_fill = hover;
+                    big_menu(ui, EXPORT, "Publish", "Export the project", |ui| self.publish_items(ui))
+                }).inner;
+                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, ORANGE));
+            });
+        });
+    }
+
     pub(super) fn publish_items(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(220.0);
         if menu_item(ui, EXPORT, "Web (HTML5)").clicked() { self.export_html(); }

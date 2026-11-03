@@ -7094,6 +7094,56 @@ mod tests {
     }
 
     #[test]
+    fn try_it_preview_and_publish_are_pinned_in_the_ribbon_on_every_tab() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let shot = |h: &mut egui_kittest::Harness<'static, App>, file: &str| {
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join(file)).unwrap(); }
+        };
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(4);
+        for tab in [ribbon::HOME_TAB, 2, 3, 4, 5, ribbon::HELP_TAB] {
+            h.state_mut().ribbon_tab = tab;
+            h.run_steps(3);
+            for label in ["Try It", "Preview", "Publish"] {
+                assert!(h.query_by_label(label).is_some(), "{label} is in the ribbon on tab {tab}");
+            }
+        }
+        h.state_mut().ribbon_tab = ribbon::HOME_TAB;
+        h.run_steps(3);
+        shot(&mut h, "pinned-1-home-dark.png");
+        h.ctx.set_theme(egui::ThemePreference::Light);
+        h.run_steps(3);
+        shot(&mut h, "pinned-2-home-light.png");
+        h.ctx.set_theme(egui::ThemePreference::Dark);
+        // Trying a slide greys the ribbon out, but not the pinned group: Try It must stay clickable to stop.
+        h.state_mut().try_mode = true;
+        h.run_steps(3);
+        assert!(!h.get_by_label("Try It").accesskit_node().is_disabled(), "Try It stays enabled while trying");
+        assert!(!h.get_by_label("Publish").accesskit_node().is_disabled());
+        shot(&mut h, "pinned-3-try-mode.png");
+        h.state_mut().try_mode = false;
+        h.set_size(egui::vec2(820.0, 600.0));
+        h.run_steps(4);
+        assert!(h.query_by_label("Publish").is_some(), "still there in a narrow window");
+        shot(&mut h, "pinned-4-narrow.png");
+    }
+
+    #[test]
+    fn a_web_lesson_keeps_preview_and_publish_in_its_toolbar_and_has_no_try_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Publish").is_some());
+        assert!(h.query_by_label("Preview").is_some());
+        assert!(h.query_by_label("Try It").is_none(), "slides only");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("pinned-5-web-lesson.png")).unwrap(); }
+    }
+
+    #[test]
     fn help_tab_offers_docs_issues_community_and_update_check() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
