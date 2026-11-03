@@ -228,6 +228,61 @@ pub fn try_press(slide: &Slide, id: &str, shown: &mut Vec<String>, states: &mut 
     }
 }
 
+/// What a trigger does, in a few words ("jumps to Slide 3"), for telling the author what Try It left out.
+fn action_phrase(action: &Action, slides: &[Slide]) -> String {
+    match action {
+        Action::ShowLayer(_) => "shows a layer".into(),
+        Action::HideLayer(_) => "hides a layer".into(),
+        Action::SetObjectState { .. } => "changes an object's state".into(),
+        Action::SetVariable { .. } | Action::AdjustVariable { .. } => "changes a variable".into(),
+        Action::RunJavaScript(_) => "runs JavaScript".into(),
+        Action::JumpToSlide(id) => match slides.iter().find(|s| &s.id == id) {
+            Some(s) => format!("jumps to {}", s.name),
+            None => "jumps to another slide".into(),
+        },
+        Action::NextSlide => "goes to the next slide".into(),
+        Action::PreviousSlide => "goes to the previous slide".into(),
+        Action::SeekTimeline { .. } => "moves a timeline or a video to a time".into(),
+        Action::ShowObject(_) => "shows an object".into(),
+        Action::HideObject(_) => "hides an object".into(),
+        Action::OpenUrl(_) => "opens a web page".into(),
+        Action::PlayAnimation(_) => "plays an animation".into(),
+        Action::PlayMedia(_) | Action::PauseMedia(_) | Action::StopMedia(_) => "plays or stops a video or audio".into(),
+        Action::CompleteCourse => "completes the course".into(),
+        Action::ExitCourse => "exits the course".into(),
+        Action::RestartCourse => "restarts the course".into(),
+        Action::Unsupported(_) => "does something this version cannot run yet".into(),
+    }
+}
+
+/// What pressing object `id` does in the player that Try It does not run: its click triggers that have conditions, and
+/// those whose action is not one of the three Try It runs (show or hide a layer, set a state).
+pub fn not_run(slide: &Slide, slides: &[Slide], id: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for t in slide.triggers.iter().filter(|t| matches!(t.event, Event::Click) && matches!(&t.owner, Owner::Object(o) if o == id)) {
+        let runs = matches!(t.action, Action::ShowLayer(_) | Action::HideLayer(_) | Action::SetObjectState { .. });
+        if runs && t.conditions.is_empty() { continue; }
+        let mut phrase = action_phrase(&t.action, slides);
+        if !t.conditions.is_empty() { phrase.push_str(" only when its conditions are met"); }
+        if !out.contains(&phrase) { out.push(phrase); }
+    }
+    out
+}
+
+/// The sentence for the Try It banner, or `None` when the press left nothing out.
+pub fn not_run_note(parts: &[String]) -> Option<String> {
+    let shown: Vec<&str> = parts.iter().take(3).map(String::as_str).collect();
+    let list = match shown.as_slice() {
+        [] => return None,
+        [one] => one.to_string(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        _ => unreachable!(),
+    };
+    let more = if parts.len() > 3 { " and more" } else { "" };
+    Some(format!("This button {list}{more}. Try It does not run that: use Preview."))
+}
+
 /// What the panel asks the app to do.
 #[derive(Default)]
 pub struct Outcome {
@@ -410,6 +465,45 @@ mod tests {
         add_button_states(&mut o);
         assert_eq!(o.states.len(), 5, "nothing added twice");
         assert_eq!(o.states[1].fill, Some(Rgba(1, 2, 3, 255)), "existing states are left alone");
+    }
+
+    fn click_trigger(owner: &str, action: Action, conditions: bool) -> brainbend_doc::Trigger {
+        brainbend_doc::Trigger {
+            id: format!("t-{owner}"),
+            owner: Owner::Object(owner.into()),
+            event: Event::Click,
+            action,
+            conditions: if conditions { vec![brainbend_doc::Condition { variable: "v".into(), cmp: brainbend_doc::Cmp::Eq, value: brainbend_doc::Value::Num(1.0), or_with_previous: false }] } else { vec![] },
+        }
+    }
+
+    #[test]
+    fn a_press_says_what_try_it_left_out() {
+        let mut slides = vec![Slide::new("s1", "Intro", 1280.0, 720.0), Slide::new("s2", "Quiz 1", 1280.0, 720.0)];
+        slides[0].triggers = vec![
+            click_trigger("b", Action::ShowLayer("L".into()), false),
+            click_trigger("b", Action::JumpToSlide("s2".into()), false),
+            click_trigger("b", Action::RunJavaScript("x()".into()), false),
+            click_trigger("c", Action::HideLayer("L".into()), true),
+            click_trigger("d", Action::ShowLayer("L".into()), false),
+        ];
+        let s = slides[0].clone();
+        // Showing a layer runs; the jump and the script do not.
+        assert_eq!(not_run(&s, &slides, "b"), ["jumps to Quiz 1", "runs JavaScript"]);
+        // A conditional trigger is left out even when its action is one Try It runs.
+        assert_eq!(not_run(&s, &slides, "c"), ["hides a layer only when its conditions are met"]);
+        // A button whose triggers all run says nothing.
+        assert!(not_run(&s, &slides, "d").is_empty());
+        assert!(not_run(&s, &slides, "no-such-button").is_empty());
+    }
+
+    #[test]
+    fn the_banner_note_reads_as_a_sentence() {
+        assert_eq!(not_run_note(&[]), None);
+        assert_eq!(not_run_note(&["jumps to Quiz 1".into()]).unwrap(), "This button jumps to Quiz 1. Try It does not run that: use Preview.");
+        assert_eq!(not_run_note(&["jumps to Quiz 1".into(), "runs JavaScript".into()]).unwrap(), "This button jumps to Quiz 1 and runs JavaScript. Try It does not run that: use Preview.");
+        let many: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(not_run_note(&many).unwrap(), "This button a, b and c and more. Try It does not run that: use Preview.");
     }
 
     fn button(id: &str, set: Option<&str>) -> Object {

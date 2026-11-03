@@ -128,6 +128,8 @@ struct App {
     try_slide: Option<usize>,
     /// What presses left each tried object in (object id -> state name).
     try_states: HashMap<String, String>,
+    /// What the last press in Try It did that Try It does not run (a jump to another slide, say), for the banner.
+    try_note: Option<String>,
     /// The States tab's viewed state is on its object for the length of a frame.
     swap: Option<states_panel::Swap>,
     right_tab: usize,
@@ -383,7 +385,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -6212,11 +6214,12 @@ impl App {
             let try_on = self.try_mode;
             if try_on && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.try_mode = false; }
             let try_on = self.try_mode;
-            if !try_on { self.try_slide = None; }
+            if !try_on { self.try_slide = None; self.try_note = None; }
             let (slide, shown) = if try_on {
                 if self.try_slide != Some(slide_idx) {
                     self.try_layers = states_panel::try_start(&slide);
                     self.try_states.clear();
+                    self.try_note = None;
                     self.try_slide = Some(slide_idx);
                 }
                 let hidden = states_panel::hidden_by_layers(&slide, &self.try_layers);
@@ -6225,14 +6228,22 @@ impl App {
                 let tshown: Vec<usize> = std::iter::once(0).chain(slide.layers.iter().enumerate().skip(1).filter(|(_, l)| self.try_layers.contains(&l.id)).map(|(i, _)| i)).collect();
                 let mut hit = resp.hover_pos().and_then(|p| hit_object(&tslide, &tshown, (p - origin) / scale, scale));
                 // A showing layer that blocks the layers beneath it keeps presses from reaching them.
+                let mut blocked_by: Option<usize> = None;
                 if let Some(top_modal) = tshown.iter().copied().filter(|&i| i > 0 && tslide.layers[i].modal).max() {
+                    if hit.is_some_and(|(l, _)| l < top_modal) { blocked_by = Some(top_modal); }
                     hit = hit.filter(|&(l, _)| l >= top_modal);
                 }
                 let hit_id = hit.and_then(|(l, o)| tslide.layers[l].objects.get(o).map(|ob| ob.id.clone()));
                 let pressed = ctx.input(|i| i.pointer.primary_down());
                 if resp.clicked() {
-                    if let Some(id) = &hit_id {
+                    if let (Some(b), None) = (blocked_by, &hit_id) {
+                        // The press landed on something a showing layer covers: say so, or it just seems dead.
+                        self.try_note = Some(format!("The layer \"{}\" is showing and blocks clicks on what is beneath it. To let them through, select that layer and turn off \"Block clicks on the layers beneath\".", tslide.layers[b].name));
+                        ctx.request_repaint();
+                    } else if let Some(id) = &hit_id {
                         states_panel::try_press(&slide, id, &mut self.try_layers, &mut self.try_states);
+                        let left_out = self.project.as_ref().map(|p| states_panel::not_run(&slide, &p.slides, id)).unwrap_or_default();
+                        self.try_note = states_panel::not_run_note(&left_out);
                         ctx.request_repaint();
                     }
                 }
@@ -6305,7 +6316,16 @@ impl App {
                 painter.rect_filled(strip, 0.0, egui::Color32::from_rgb(11, 110, 105).gamma_multiply(0.92));
                 let font = egui::FontId::proportional(12.5);
                 painter.text(strip.center_top() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Try It shows button states and layers. Nothing is saved. Esc stops.", font.clone(), egui::Color32::WHITE);
-                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Not played here: GIF animation, video and audio, JavaScript, variables. Use Preview for those.", font, egui::Color32::from_white_alpha(215));
+                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Not played here: GIF animation, video and audio, JavaScript, variables, jumps. Use Preview for those.", font, egui::Color32::from_white_alpha(215));
+                // What the last press left out (or was blocked from) is a separate amber band, so it cannot be missed.
+                if let Some(note) = &self.try_note {
+                    let ink = egui::Color32::from_rgb(45, 30, 0);
+                    let galley = painter.layout(note.clone(), egui::FontId::proportional(14.5), ink, (area.width() - 48.0).max(120.0));
+                    let band = egui::Rect::from_min_size(strip.left_bottom(), egui::vec2(area.width(), galley.size().y + 18.0));
+                    painter.rect_filled(band, 0.0, egui::Color32::from_rgb(255, 196, 64));
+                    painter.rect_filled(egui::Rect::from_min_size(band.left_top(), egui::vec2(6.0, band.height())), 0.0, egui::Color32::from_rgb(200, 120, 0));
+                    painter.galley(egui::pos2(band.center().x - galley.size().x / 2.0, band.top() + 9.0), galley, ink);
+                }
                 return;
             }
             let to_slide = |p: egui::Pos2| (p - origin) / scale;
@@ -9334,6 +9354,81 @@ mod tests {
         h.run_steps(4);
         assert!(h.state().editing.is_some(), "the box is being edited");
         h
+    }
+
+    #[test]
+    fn pressing_a_button_in_try_it_says_when_it_would_jump_to_another_slide() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.selected.unwrap();
+        let (id, name) = ("Quiz time".to_string(), "Quiz time");
+        let target = {
+            let p = a.project.as_mut().unwrap();
+            let mut s2 = Slide::new("slide-2", name, 1280.0, 720.0);
+            s2.name = id;
+            let sid = s2.id.clone();
+            p.slides.push(s2);
+            sid
+        };
+        let oid = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.project.as_mut().unwrap().slides[0].triggers.push(Trigger { id: "t1".into(), owner: Owner::Object(oid), event: Event::Click, action: Action::JumpToSlide(target), conditions: vec![] });
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        a.try_mode = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().try_note.is_none(), "nothing pressed yet");
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        let note = h.state().try_note.clone().expect("the press says what Try It did not do");
+        assert!(note.contains("jumps to Quiz time") && note.contains("Preview"), "{note}");
+        assert_eq!(h.state().slide, 0, "Try It stays on the slide: the jump is explained, not followed");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-jump-note.png")).unwrap(); }
+        // Pressing empty canvas does not wipe it; stopping Try It does.
+        h.state_mut().try_mode = false;
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none(), "the note goes when Try It stops");
+    }
+
+    /// A button on the base layer, a layer over it that is showing, and Try It on with that layer already shown.
+    fn try_it_over_a_layer(modal: bool) -> (egui_kittest::Harness<'static, App>, Object) {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.selected.unwrap();
+        a.add_layer();
+        let layer_id = {
+            let p = a.project.as_mut().unwrap();
+            let l = p.slides[0].layers.last_mut().unwrap();
+            l.name = "Pop-up".into();
+            l.modal = modal;
+            l.id.clone()
+        };
+        a.layer = 0;
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        a.try_mode = true;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().try_slide = Some(0);
+        h.state_mut().try_layers = vec![layer_id];
+        h.run_steps(3);
+        (h, o)
+    }
+
+    #[test]
+    fn pressing_something_a_blocking_layer_covers_says_so() {
+        let (mut h, o) = try_it_over_a_layer(true);
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        let note = h.state().try_note.clone().expect("a dead-looking press explains itself");
+        assert!(note.contains("Pop-up") && note.contains("Block clicks on the layers beneath"), "{note}");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-blocked-note.png")).unwrap(); }
+    }
+
+    #[test]
+    fn a_layer_that_lets_clicks_through_gives_no_blocked_note() {
+        let (mut h, o) = try_it_over_a_layer(false);
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        assert!(h.state().try_note.is_none(), "{:?}", h.state().try_note);
     }
 
     #[test]
