@@ -6370,7 +6370,8 @@ impl App {
             // "Try it": the objects show the state a mouse would put them in, a press acts like the player's (it also
             // shows and hides layers and sets states), and nothing is saved.
             let try_on = self.try_mode;
-            if try_on && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.try_mode = false; }
+            // Esc closes the unsupported-action dialog first; a second Esc stops Try It.
+            if try_on && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { if self.try_note.is_some() { self.try_note = None; } else { self.try_mode = false; } }
             let try_on = self.try_mode;
             if !try_on { self.try_slide = None; self.try_note = None; }
             let (slide, shown) = if try_on {
@@ -6473,16 +6474,19 @@ impl App {
                 let strip = egui::Rect::from_min_size(area.left_top(), egui::vec2(area.width(), 40.0));
                 painter.rect_filled(strip, 0.0, egui::Color32::from_rgb(11, 110, 105).gamma_multiply(0.92));
                 let font = egui::FontId::proportional(12.5);
-                painter.text(strip.center_top() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Try It shows button states and layers. Nothing is saved. Esc stops.", font.clone(), egui::Color32::WHITE);
-                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Not played here: GIF animation, video and audio, JavaScript, variables, jumps. Use Preview for those.", font, egui::Color32::from_white_alpha(215));
-                // What the last press left out (or was blocked from) is a separate amber band, so it cannot be missed.
-                if let Some(note) = &self.try_note {
-                    let ink = egui::Color32::from_rgb(45, 30, 0);
-                    let galley = painter.layout(note.clone(), egui::FontId::proportional(14.5), ink, (area.width() - 48.0).max(120.0));
-                    let band = egui::Rect::from_min_size(strip.left_bottom(), egui::vec2(area.width(), galley.size().y + 18.0));
-                    painter.rect_filled(band, 0.0, egui::Color32::from_rgb(255, 196, 64));
-                    painter.rect_filled(egui::Rect::from_min_size(band.left_top(), egui::vec2(6.0, band.height())), 0.0, egui::Color32::from_rgb(200, 120, 0));
-                    painter.galley(egui::pos2(band.center().x - galley.size().x / 2.0, band.top() + 9.0), galley, ink);
+                painter.text(strip.center_top() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Try It is Enabled. You may now test buttons, layers, and triggers on this slide only.", font.clone(), egui::Color32::WHITE);
+                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Does not work: video, audio, animations, variables, JavaScript, etc. Use Preview for all functionality.", font, egui::Color32::from_white_alpha(215));
+                // What the last press left out (or was blocked from) is a dialog that stays until the author presses OK.
+                if let Some(note) = self.try_note.clone() {
+                    let modal = egui::Modal::new(egui::Id::new("try_it_note")).show(ctx, |ui| {
+                        ui.set_width(360.0);
+                        ui.heading("Not run in Try It");
+                        ui.add_space(6.0);
+                        ui.label(note);
+                        ui.add_space(12.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| ui.button("OK").clicked()).inner
+                    });
+                    if modal.inner { self.try_note = None; }
                 }
                 return;
             }
@@ -9989,7 +9993,22 @@ mod tests {
         assert!(note.contains("jumps to Quiz time") && note.contains("Preview"), "{note}");
         assert_eq!(h.state().slide, 0, "Try It stays on the slide: the jump is explained, not followed");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-jump-note.png")).unwrap(); }
-        // Pressing empty canvas does not wipe it; stopping Try It does.
+        use egui_kittest::kittest::Queryable;
+        // It is a dialog with an OK button; OK dismisses it and leaves Try It on.
+        h.run_steps(3);
+        h.get_by_label("Not run in Try It");
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none() && h.state().try_mode, "OK closes the dialog and Try It stays on");
+        assert!(h.query_by_label("Not run in Try It").is_none());
+        // Pressing again brings it back, and Esc closes it before it stops Try It.
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        assert!(h.state().try_note.is_some());
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none() && h.state().try_mode, "the first Esc closes the dialog");
+        // Stopping Try It also clears a note.
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
         h.state_mut().try_mode = false;
         h.run_steps(3);
         assert!(h.state().try_note.is_none(), "the note goes when Try It stops");
