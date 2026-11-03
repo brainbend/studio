@@ -7364,6 +7364,12 @@ mod tests {
     }
 
     #[test]
+    fn the_community_button_uses_the_projects_own_redirect_not_a_discord_invite() {
+        assert!(ribbon::COMMUNITY_URL.starts_with("https://brainbend.org/"), "{}", ribbon::COMMUNITY_URL);
+        assert!(!ribbon::COMMUNITY_URL.contains("discord.gg"), "an invite link built into the app expires with the invite");
+    }
+
+    #[test]
     fn help_tab_offers_docs_issues_community_and_update_check() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();

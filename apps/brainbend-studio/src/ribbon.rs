@@ -463,7 +463,9 @@ pub const TABS: [&str; 8] = ["File", "Home", "Insert", "Slides", "Design", "Anim
 pub const MASTER_TAB: usize = 6;
 pub const HOME_TAB: usize = 1;
 const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
-const COMMUNITY_URL: &str = "https://discord.gg/XHgwWNtqXt";
+/// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
+/// changes is fixed there and not by shipping a new build.
+pub const COMMUNITY_URL: &str = "https://brainbend.org/discord/";
 
 /// Flat icon button for the title bar.
 /// A title-bar button drawn by hand so it never changes size on hover: an optional icon, a label and an optional
