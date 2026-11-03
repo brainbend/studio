@@ -183,7 +183,7 @@ html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
 #menu.sidebar{{width:280px;box-shadow:none;z-index:3}}
 #menu.side-left{{border-right:1px solid var(--p-line)}}
 #menu.side-right{{left:auto;right:0;border-left:1px solid var(--p-line)}}
-#menu .logo{{display:block;max-width:calc(100% - 32px);max-height:72px;margin:16px auto 8px;object-fit:contain}}
+#menu .banner{{display:block;width:100%;height:120px;object-fit:cover}}
 #menu .sb-tabs{{display:flex;border-bottom:1px solid var(--p-line);margin-top:4px}}
 #menu .sb-tabs button{{flex:1;border-radius:0;text-align:center;padding:10px 8px;border-bottom:3px solid transparent;color:var(--p-muted)}}
 #menu .sb-tabs button[aria-selected=true]{{color:var(--p-fg);border-bottom-color:var(--p-accent);background:transparent}}

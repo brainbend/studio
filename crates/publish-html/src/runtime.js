@@ -1828,7 +1828,10 @@
   var sideMode = PL.sidebar || 'Off';
   var sidebarOn = sideMode !== 'Off' && (!!P.show_menu || !!PL.tab_notes || !!PL.tab_glossary);
   var logoUrl = PL.logo && P.assetUrls[PL.logo] ? P.assetUrls[PL.logo] : null;
-  var menu = null, menuBtn = null, progress = null, topbar = null, sideToggle = null, notesBody = null, sbTabs = {};
+  // A banner photo: a picture across the top of the sidebar, above the navigation. It belongs to the sidebar, so a
+  // player without one (or with it collapsed) does not show it. It is decoration, so it has no alt text.
+  var bannerUrl = PL.banner && P.assetUrls[PL.banner] ? P.assetUrls[PL.banner] : null;
+  var menu = null, menuBtn = null, progress = null, topbar = null, sideToggle = null, notesBody = null, sbTabs = {}, resPanel = null;
   function filterMenu(q) {
     q = (q || '').trim().toLowerCase();
     if (!menu) return;
@@ -1847,8 +1850,8 @@
   }).filter(Boolean);
   var glossTerms = (P.glossary || []).filter(function (g) { return (g.term || '').trim(); }).sort(function (a, b) { return a.term.localeCompare(b.term); });
   var showResources = !!PL.tab_resources && resLinks.length > 0;
-  // The top bar: the sidebar's toggle, the logo when there is no sidebar to hold it, and the title.
-  if (sidebarOn || PL.show_title || showResources || (logoUrl && !sidebarOn)) {
+  // The top bar: the sidebar's toggle, the small logo and the title. It starts beside an open left sidebar (see fit).
+  if (sidebarOn || PL.show_title || showResources || logoUrl) {
     topbar = el('header'); topbar.id = 'topbar';
     if (sidebarOn) {
       sideToggle = el('button', 'tb-toggle'); sideToggle.type = 'button';
@@ -1856,7 +1859,7 @@
       sideToggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
       topbar.appendChild(sideToggle);
     }
-    if (logoUrl && !sidebarOn) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
+    if (logoUrl) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
     if (PL.show_title) { var tt = el('span', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
     if (showResources) {
       var rb = el('button', 'tb-resources', 'Resources'); rb.type = 'button'; rb.setAttribute('aria-expanded', 'false'); rb.setAttribute('aria-controls', 'resources');
@@ -1870,7 +1873,7 @@
       rp.appendChild(rl);
       rb.addEventListener('click', function () { rp.hidden = !rp.hidden; rb.setAttribute('aria-expanded', String(!rp.hidden)); });
       document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && !rp.hidden) { rp.hidden = true; rb.setAttribute('aria-expanded', 'false'); rb.focus(); } });
-      topbar.appendChild(rb); document.body.appendChild(rp);
+      topbar.appendChild(rb); document.body.appendChild(rp); resPanel = rp;
     }
     document.body.appendChild(topbar);
   }
@@ -1880,7 +1883,7 @@
     if (sidebarOn) {
       menu.className = 'sidebar ' + (sideMode === 'Left' ? 'side-left' : 'side-right');
       menu.hidden = !!PL.sidebar_collapsed;
-      if (logoUrl) { var sl = el('img', 'logo'); sl.src = logoUrl; sl.alt = ''; menu.appendChild(sl); }
+      if (bannerUrl) { var sb = el('img', 'banner'); sb.src = bannerUrl; sb.alt = ''; menu.appendChild(sb); }
       var tabs = [];
       if (P.show_menu) tabs.push(['menu', 'Menu']);
       if (PL.tab_glossary && glossTerms.length) tabs.push(['glossary', 'Glossary']);
@@ -2124,8 +2127,13 @@
     var topH = topbar ? topbar.offsetHeight : 0;
     // A sidebar takes a strip from the left or right; the slide fits what is left.
     var sideW = sidebarOn && menu && !menu.hidden ? menu.offsetWidth : 0;
-    // The sidebar runs the full height beside the slide; the control bar sits under the slide only.
-    if (menu && sidebarOn) { menu.style.top = topH + 'px'; menu.style.bottom = '0px'; }
+    // The sidebar runs the full height; the top bar and the control bar sit beside it, over and under the slide only.
+    if (menu && sidebarOn) { menu.style.top = '0px'; menu.style.bottom = '0px'; }
+    if (topbar) {
+      topbar.style.left = sideMode === 'Left' ? sideW + 'px' : '0px';
+      topbar.style.right = sideMode === 'Right' ? sideW + 'px' : '0px';
+    }
+    if (resPanel) resPanel.style.right = (sideMode === 'Right' ? sideW + 8 : 8) + 'px';
     if (nav) {
       nav.style.left = sideMode === 'Left' ? sideW + 'px' : '0px';
       nav.style.right = sideMode === 'Right' ? sideW + 'px' : '0px';

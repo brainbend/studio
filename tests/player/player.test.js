@@ -1537,13 +1537,71 @@ test('a layer that pauses the base layer stops its timeline while it shows, and 
   assert.deepEqual(errors, []);
 });
 
+// jsdom does no layout, so say how big the sidebar and the top bar are.
+const sidebarSizes = (w) => {
+  Object.defineProperty(w.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return this.id === 'menu' ? 280 : 0; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return this.id === 'topbar' ? 44 : 0; } });
+};
+
+test('player layout: the banner tops the sidebar, the logo sits small beside the title, and the top bar starts beside an open sidebar', () => {
+  const { w, errors } = boot(fixture('playerui'), null, {}, sidebarSizes);
+  const menu = $(w, '#menu');
+  // The banner is the first thing in the sidebar, above the tabs, and is decoration.
+  const banner = $(w, '#menu img.banner');
+  assert.ok(banner && banner.src.length > 0, 'the banner shows the author\'s picture');
+  assert.equal(banner.getAttribute('alt'), '', 'screen readers skip it');
+  assert.equal(menu.firstElementChild, banner, 'it is above the navigation');
+  assert.equal($(w, '#menu img.logo'), null, 'the logo is no longer in the sidebar');
+  // The logo is small, in the top bar, before the title.
+  const logo = $(w, '#topbar img.logo');
+  assert.ok(logo && logo.src.length > 0, 'the logo is in the top bar');
+  assert.ok(logo.compareDocumentPosition($(w, '#topbar .tb-title')) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'next to the title, before it');
+  // The sidebar runs the full height; the top bar starts where it ends, and the slide fits what is left.
+  assert.equal(menu.style.top, '0px', 'the sidebar starts at the very top');
+  assert.equal($(w, '#topbar').style.left, '280px', 'the top bar moves right of the open sidebar');
+  assert.equal($(w, '#topbar').style.right, '0px');
+  assert.equal($(w, '#resources').style.right, '8px');
+  // Collapsing the sidebar gives the top bar the whole width; opening it moves it back.
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal($(w, '#topbar').style.left, '0px', 'collapsed: the top bar spans the window');
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal($(w, '#topbar').style.left, '280px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: with a sidebar on the right the top bar stops short of it', () => {
+  const { w, errors } = boot(fixture('playerui-right'), null, {}, sidebarSizes);
+  assert.equal($(w, '#topbar').style.right, '280px');
+  assert.equal($(w, '#topbar').style.left, '0px');
+  assert.equal($(w, '#resources').style.right, '288px', 'the Resources popup stays under its button');
+  assert.ok($(w, '#menu img.banner'), 'the banner tops the right-hand sidebar too');
+  assert.equal($(w, '#menu').style.top, '0px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: with no sidebar the banner is not shown, but the small logo still is', () => {
+  const { w, errors } = boot(fixture('playerui-icons'));
+  assert.equal($(w, '#menu.sidebar'), null, 'no sidebar in this fixture (the menu is only a slide-over drawer)');
+  assert.equal($(w, 'img.banner'), null, 'a banner belongs to the sidebar, so it is hidden without one');
+  assert.ok($(w, '#topbar img.logo'), 'the logo is in the top bar');
+  assert.equal($(w, '#topbar').style.left, '0px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: a project with no banner has none, whatever else it has', () => {
+  const { w, errors } = boot(fixture('authored'));
+  assert.equal($(w, 'img.banner'), null);
+  assert.deepEqual(errors, []);
+});
+
 test('player sidebar: menu and notes tabs, the title and the logo, a toggle that collapses it, and a right-hand side', () => {
   const { w, errors } = boot(fixture('playerui'));
   const menu = $(w, '#menu');
   assert.ok(menu.classList.contains('sidebar') && menu.classList.contains('side-left'));
   assert.equal(menu.hidden, false, 'the sidebar starts open');
   assert.equal($(w, '#topbar .tb-title').textContent, 'Safety Basics', 'the title falls back to the project name');
-  assert.ok($(w, '#menu img.logo').src.length > 0, 'the logo sits above the navigation');
+  assert.ok($(w, '#menu img.banner').src.length > 0, 'the banner sits above the navigation');
+  assert.ok($(w, '#topbar img.logo').src.length > 0, 'the logo sits beside the title');
   const tab = (name) => $$(w, '#menu .sb-tabs button').find((b) => b.textContent === name);
   assert.deepEqual($$(w, '#menu .sb-tabs button[role=tab]').map((b) => b.textContent), ['Menu', 'Glossary', 'Notes']);
   assert.equal($$(w, '#menu button[data-index]').length, 3, 'one menu entry per slide');

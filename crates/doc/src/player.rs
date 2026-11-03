@@ -91,8 +91,12 @@ pub struct PlayerSettings {
     /// A search box over the sidebar's slide list.
     #[serde(default)]
     pub search: bool,
-    /// A picture (asset key) above the sidebar's navigation, or in the top bar when there is no sidebar.
+    /// A small picture (asset key) in the top bar, next to the title.
     pub logo: Option<String>,
+    /// A picture (asset key) across the top of the sidebar, above the navigation, cropped to fit. It belongs to the
+    /// sidebar, so it shows only when the sidebar is on.
+    #[serde(default)]
+    pub banner: Option<String>,
     pub controls: PlayerControls,
 }
 
@@ -114,6 +118,7 @@ impl Default for PlayerSettings {
             tab_resources: false,
             search: false,
             logo: None,
+            banner: None,
             controls: PlayerControls::default(),
         }
     }
@@ -245,8 +250,16 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_older_projects_get_the_defaults() {
-        let s = PlayerSettings { sidebar: SidebarSide::Left, logo: Some("k".into()), ..Default::default() };
+        let s = PlayerSettings { sidebar: SidebarSide::Left, logo: Some("k".into()), banner: Some("b".into()), ..Default::default() };
         let back: PlayerSettings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn a_project_saved_before_banners_opens_with_none() {
+        let mut v = serde_json::to_value(PlayerSettings::default()).unwrap();
+        v.as_object_mut().unwrap().remove("banner");
+        let old: PlayerSettings = serde_json::from_value(v).unwrap();
+        assert_eq!(old.banner, None);
     }
 }

@@ -29,8 +29,10 @@ impl App {
         let mut changed = false;
         let mut open = true;
         let mut pick_logo = false;
+        let mut pick_banner = false;
         let mut pick_resource: Option<usize> = None;
         let logo_name = proj.player.logo.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone());
+        let banner_name = proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone());
         let name = proj.name.clone();
         let pane = &mut self.player_pane;
         egui::Window::new("Player Properties").id(egui::Id::new("player-properties")).open(&mut open).collapsible(false).resizable(true).default_size([920.0, 600.0]).show(ctx, |ui| {
@@ -45,7 +47,7 @@ impl App {
                     ui.set_width(380.0);
                     egui::ScrollArea::vertical().id_salt("player-left").show(ui, |ui| {
                         if *pane == 0 {
-                            features_pane(ui, proj, &name, &logo_name, &mut changed, &mut pick_logo);
+                            features_pane(ui, proj, &name, &logo_name, &banner_name, &mut changed, &mut pick_logo, &mut pick_banner);
                         } else if *pane == 1 {
                             colors_pane(ui, &mut proj.player, &mut changed);
                         } else {
@@ -63,6 +65,15 @@ impl App {
                 let before = self.project.as_ref().map(Snap::of);
                 if let (Some(p), Some(before)) = (self.project.as_mut(), before) {
                     p.player.logo = Some(key);
+                    self.commit_project_edit(ctx, before);
+                }
+            }
+        }
+        if pick_banner {
+            if let Some((key, _, _, _)) = self.load_image_asset() {
+                let before = self.project.as_ref().map(Snap::of);
+                if let (Some(p), Some(before)) = (self.project.as_mut(), before) {
+                    p.player.banner = Some(key);
                     self.commit_project_edit(ctx, before);
                 }
             }
@@ -94,7 +105,7 @@ impl App {
     }
 }
 
-fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo_name: &Option<String>, changed: &mut bool, pick_logo: &mut bool) {
+fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo_name: &Option<String>, banner_name: &Option<String>, changed: &mut bool, pick_logo: &mut bool, pick_banner: &mut bool) {
     ui.heading("Player tabs");
     ui.horizontal(|ui| {
         *changed |= ui.checkbox(&mut proj.show_menu, "Menu").on_hover_text("Scenes and slides").changed();
@@ -135,7 +146,23 @@ fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo
             None => { if ui.button("+ Logo").clicked() { *pick_logo = true; } }
         }
     });
-    ui.weak("The logo appears above the sidebar's navigation, or in the top bar when there is no sidebar.");
+    ui.weak("The logo appears small in the top bar, next to the title.");
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Banner photo");
+        match banner_name {
+            Some(n) => {
+                ui.label(n);
+                if ui.small_button("Change").clicked() { *pick_banner = true; }
+                if ui.small_button("Remove").clicked() { proj.player.banner = None; *changed = true; }
+            }
+            None => { if ui.button("+ Banner photo").clicked() { *pick_banner = true; } }
+        }
+    });
+    ui.weak("A picture across the top of the sidebar, above the navigation. It is cropped to fit (about 560 x 240 pixels works well). It shows only when there is a sidebar, and not while the sidebar is collapsed.");
+    if proj.player.banner.is_some() && proj.player.sidebar == SidebarSide::Off {
+        ui.colored_label(egui::Color32::from_rgb(230, 160, 60), "Choose a sidebar above to show the banner.");
+    }
     ui.add_space(8.0);
     ui.heading("Navigation");
     *changed |= ui.checkbox(&mut proj.show_nav, "Previous / Next buttons").changed();
@@ -203,17 +230,18 @@ fn preview(ui: &mut egui::Ui, proj: &Project, project_name: &str) {
     let painter = ui.painter().with_clip_rect(rect);
     painter.rect_filled(rect, 4.0, c32(pal.body));
     let text = |pos: egui::Pos2, align: egui::Align2, s: &str, size: f32, col: Rgba| painter.text(pos, align, s, egui::FontId::proportional(size), c32(col));
-    let (top_h, bar_h, side_w) = (if p.show_title || p.tab_resources || p.logo.is_some() && p.sidebar == SidebarSide::Off { 30.0 } else { 0.0 }, 34.0, 120.0);
+    let (top_h, bar_h, side_w) = (if p.show_title || p.tab_resources || p.logo.is_some() || p.sidebar != SidebarSide::Off { 30.0 } else { 0.0 }, 34.0, 120.0);
     let side = p.sidebar != SidebarSide::Off && !p.sidebar_collapsed;
     let mut main = rect;
     if side {
         let s = if p.sidebar == SidebarSide::Left { egui::Rect::from_min_size(rect.min, egui::vec2(side_w, rect.height())) } else { egui::Rect::from_min_size(egui::pos2(rect.right() - side_w, rect.top()), egui::vec2(side_w, rect.height())) };
         painter.rect_filled(s, 0.0, c32(pal.panel));
+        // The banner photo tops the sidebar, edge to edge, above the tabs.
         let mut y = s.top() + 8.0;
-        if p.logo.is_some() {
-            painter.rect_filled(egui::Rect::from_min_size(egui::pos2(s.left() + 10.0, y), egui::vec2(60.0, 22.0)), 3.0, c32(pal.line));
-            text(egui::pos2(s.left() + 40.0, y + 11.0), egui::Align2::CENTER_CENTER, "logo", 10.0, pal.muted);
-            y += 32.0;
+        if p.banner.is_some() {
+            painter.rect_filled(egui::Rect::from_min_size(s.min, egui::vec2(side_w, 38.0)), 0.0, c32(pal.line));
+            text(egui::pos2(s.left() + side_w / 2.0, s.top() + 19.0), egui::Align2::CENTER_CENTER, "banner", 10.0, pal.muted);
+            y = s.top() + 46.0;
         }
         let mut tx = s.left() + 8.0;
         for (on, label) in [(true, "Menu"), (p.tab_glossary, "Glossary"), (p.tab_notes, "Notes")] {
@@ -230,9 +258,15 @@ fn preview(ui: &mut egui::Ui, proj: &Project, project_name: &str) {
     if top_h > 0.0 {
         let t = egui::Rect::from_min_size(main.min, egui::vec2(main.width(), top_h));
         painter.rect_filled(t, 0.0, c32(pal.panel));
-        text(t.left_center() + egui::vec2(10.0, 0.0), egui::Align2::LEFT_CENTER, if p.show_title { p.shown_title(project_name) } else { "" }, 12.0 * p.font_scale as f32 / 100.0, pal.fg);
+        // A small logo, then the title.
+        let mut tx = t.left() + 10.0;
+        if p.logo.is_some() {
+            painter.rect_filled(egui::Rect::from_min_size(egui::pos2(tx, t.top() + 6.0), egui::vec2(28.0, 18.0)), 3.0, c32(pal.line));
+            text(egui::pos2(tx + 14.0, t.top() + 15.0), egui::Align2::CENTER_CENTER, "logo", 8.0, pal.muted);
+            tx += 36.0;
+        }
+        text(egui::pos2(tx, t.center().y), egui::Align2::LEFT_CENTER, if p.show_title { p.shown_title(project_name) } else { "" }, 12.0 * p.font_scale as f32 / 100.0, pal.fg);
         if p.tab_resources { text(t.right_center() - egui::vec2(10.0, 0.0), egui::Align2::RIGHT_CENTER, "RESOURCES", 9.0, pal.fg); }
-        if p.logo.is_some() && p.sidebar == SidebarSide::Off { painter.rect_filled(egui::Rect::from_min_size(egui::pos2(t.right() - 60.0, t.top() + 6.0), egui::vec2(48.0, 18.0)), 3.0, c32(pal.line)); }
     }
     let area = egui::Rect::from_min_max(egui::pos2(main.left() + 10.0, main.top() + top_h + 10.0), egui::pos2(main.right() - 10.0, main.bottom() - bar_h - 10.0));
     painter.rect_filled(area, 2.0, egui::Color32::from_gray(210));

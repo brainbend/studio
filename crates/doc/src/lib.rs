@@ -1782,6 +1782,7 @@ impl Project {
             if let Kind::Slider(Slider { thumb: Some(a), .. }) = &o.kind { out.insert(a.as_str()); }
         }
         if let Some(a) = &self.player.logo { out.insert(a.as_str()); }
+        if let Some(a) = &self.player.banner { out.insert(a.as_str()); }
         out.extend(self.resources.iter().filter_map(|r| r.asset.as_deref()));
         if let Some(l) = &self.lesson {
             for (_, _, b) in l.blocks() { out.extend(b.kind.assets()); }
@@ -1929,6 +1930,20 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_players_logo_and_banner_count_as_used_assets_and_are_not_pruned() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        for k in ["logo", "banner", "spare"] {
+            p.assets.insert(k.into(), Asset { name: k.into(), mime: "image/png".into(), bytes: vec![1], file: None });
+        }
+        p.player.logo = Some("logo".into());
+        p.player.banner = Some("banner".into());
+        assert_eq!(p.referenced_assets().into_iter().collect::<Vec<_>>(), ["banner", "logo"]);
+        assert_eq!(p.prune_unused_assets(), 1, "only the picture nothing uses goes");
+        assert!(p.assets.contains_key("banner") && p.assets.contains_key("logo") && !p.assets.contains_key("spare"));
+    }
+
     #[test]
     fn state_pictures_and_slider_thumbs_count_as_used_assets() {
         let mut p = Project::new("t");

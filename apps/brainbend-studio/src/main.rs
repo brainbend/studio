@@ -7370,6 +7370,60 @@ mod tests {
     }
 
     #[test]
+    fn the_player_dialog_offers_a_banner_photo_and_shows_it_in_its_preview() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Banner photo").is_some(), "the setting is listed beside the logo");
+        assert!(h.query_by_label("+ Banner photo").is_some(), "with nothing chosen it offers to add one");
+        assert!(h.query_by_label("Remove").is_none());
+        // With one chosen it names the file and can change or remove it, and the preview shows a banner strip.
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(16, 3, image::Rgba([3, 83, 158, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let p = h.state_mut().project.as_mut().unwrap();
+        p.assets.insert("ban".into(), Asset { name: "header.png".into(), mime: "image/png".into(), bytes: png.into_inner(), file: None });
+        p.player.banner = Some("ban".into());
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("Choose a sidebar above").is_some(), "a banner with no sidebar says it will not show");
+        h.state_mut().project.as_mut().unwrap().player.sidebar = SidebarSide::Left;
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Choose a sidebar above").is_none(), "with a sidebar the warning goes");
+        assert!(h.query_by_label("header.png").is_some(), "the file's name is shown");
+        assert!(h.query_by_label("+ Banner photo").is_none());
+        assert!(h.query_by_label("Remove").is_some(), "and it can be removed");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("player-banner.png")).unwrap(); }
+        h.get_by_label("Remove").click();
+        h.run_steps(4);
+        assert!(h.state().project.as_ref().unwrap().player.banner.is_none(), "Remove clears it");
+        assert!(h.query_by_label("+ Banner photo").is_some());
+    }
+
+    #[test]
+    fn the_player_preview_shows_the_banner_in_the_sidebar_and_the_logo_by_the_title() {
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 4, image::Rgba([3, 83, 158, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let asset = |name: &str, bytes: Vec<u8>| Asset { name: name.into(), mime: "image/png".into(), bytes, file: None };
+        let p = a.project.as_mut().unwrap();
+        p.assets.insert("ban".into(), asset("header.png", png.get_ref().clone()));
+        p.assets.insert("lg".into(), asset("logo.png", png.into_inner()));
+        p.player.banner = Some("ban".into());
+        p.player.logo = Some("lg".into());
+        p.player.show_title = true;
+        p.player.tab_notes = true;
+        p.show_menu = true;
+        p.player.sidebar = SidebarSide::Left;
+        let mut h = harness(a);
+        h.run_steps(5);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("player-preview-layout.png")).unwrap(); }
+    }
+
+    #[test]
     fn help_tab_offers_docs_issues_community_and_update_check() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
