@@ -8,7 +8,7 @@ jobs:
         include:
           - os: ubuntu-latest
           - os: macos-latest
-          # One test at a time on Windows: a crash there ends the whole test run, and this shows which test caused it.
+          # One test at a time on Windows: the GUI tests crashed there (STATUS_ACCESS_VIOLATION) when run in parallel.
           - os: windows-latest
             test_args: "--test-threads=1"
     runs-on: ${{ matrix.os }}
