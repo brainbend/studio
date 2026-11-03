@@ -133,6 +133,10 @@ struct App {
     /// The States tab's viewed state is on its object for the length of a frame.
     swap: Option<states_panel::Swap>,
     right_tab: usize,
+    /// The selection, layer and slide the side panel last saw: picking another shows its Properties.
+    inspector_seen: Option<(Option<(usize, usize)>, usize, usize)>,
+    /// The Triggers tab picked an owner itself (a group heading), so the side panel should stay on Triggers.
+    trigger_select: bool,
     /// The Triggers tab lists every trigger on the slide, grouped by owner, instead of only the selection's.
     trig_all: bool,
     /// The project's Variables window is open.
@@ -385,7 +389,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -3324,7 +3328,8 @@ impl App {
         });
         self.id_counter = ctr;
         if let Some((li, oi)) = pick {
-            // Clicking a group's heading selects its owner, so Properties shows it too.
+            // Clicking a group's heading selects its owner. That is a move made inside the Triggers tab, so it stays there.
+            self.trigger_select = true;
             if oi == usize::MAX { self.layer = li; self.selected = None; } else { self.layer = li; self.selected = Some((li, oi)); }
         }
         if changed {
@@ -5597,6 +5602,13 @@ impl App {
         egui::Panel::right("inspector").default_size(326.0).show(root, |ui| {
             ui.add_space(6.0);
             let editable = !self.try_mode;
+            // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
+            // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
+            // stays put.
+            let seen = (self.selected, self.layer, self.slide);
+            let from_triggers = std::mem::take(&mut self.trigger_select);
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers { self.right_tab = 0; }
+            self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
             if !self.in_master_view() {
                 egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).show(ui, |ui| {
@@ -8589,6 +8601,81 @@ mod tests {
         assert!(h.query_by_label("double-clicked").is_some(), "the event drop-down still opens");
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
+    }
+
+    /// Two shapes and a layer on a slide, the side panel left on the Triggers tab on purpose.
+    fn on_the_triggers_tab() -> egui_kittest::Harness<'static, App> {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_rect();
+        a.insert_ellipse();
+        a.add_layer();
+        a.layer = 0;
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.state_mut().right_tab = 1;
+        h.run_steps(4);
+        assert_eq!(h.state().right_tab, 1, "Triggers stays open while nothing is picked");
+        h
+    }
+
+    #[test]
+    fn picking_another_object_shows_its_properties_instead_of_staying_on_triggers() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().selected = Some((0, 1));
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "Properties, so the object's settings are not missed");
+        // Going back to Triggers is a choice, and it sticks until something else is picked.
+        h.state_mut().right_tab = 1;
+        h.run_steps(4);
+        assert_eq!(h.state().right_tab, 1);
+    }
+
+    #[test]
+    fn switching_slides_shows_the_new_slides_properties() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().add_slide(SlideKind::Normal);
+        h.run_steps(3);
+        assert_eq!(h.state().slide, 1, "the new slide is showing");
+        assert_eq!(h.state().right_tab, 0, "a new slide shows its own Properties");
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 1, "Triggers stays when it is chosen");
+        h.state_mut().slide = 0;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "going back to the first slide too, even with nothing selected on either");
+    }
+
+    #[test]
+    fn picking_a_layer_or_clearing_the_selection_also_shows_properties() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().selected = None;
+        h.state_mut().layer = 1;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "a layer was picked");
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        h.state_mut().layer = 0;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "back to the base layer");
+    }
+
+    #[test]
+    fn a_group_heading_in_the_triggers_tab_picks_its_owner_without_leaving_the_tab() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = on_the_triggers_tab();
+        let ids: Vec<String> = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect();
+        for id in &ids {
+            h.state_mut().project.as_mut().unwrap().slides[0].triggers.push(Trigger { id: format!("t-{id}"), owner: Owner::Object(id.clone()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        }
+        h.state_mut().trig_all = true;
+        h.run_steps(4);
+        let name1 = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[1].name.clone();
+        h.get_by_label(&format!("{name1}  (1)")).click();
+        h.run_steps(4);
+        assert_eq!(h.state().selected, Some((0, 1)), "the heading picked its object");
+        assert_eq!(h.state().right_tab, 1, "and the panel stayed on Triggers, where the click was made");
     }
 
     #[test]
