@@ -74,6 +74,8 @@ jobs:
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           ./scripts/package-macos.sh universal
           cp dist/brainbend-studio-*-macos-universal.dmg "BrainBend-Studio-${{ needs.check.outputs.tag }}-macos-universal.dmg"
+          # The in-app updater downloads this zip; the DMG is for first installs.
+          ditto -c -k --keepParent "dist/BrainBend Studio.app" "BrainBend-Studio-${{ needs.check.outputs.tag }}-macos-universal.zip"
       - name: Package (Windows)
         if: matrix.name == 'windows'
         shell: pwsh
@@ -91,14 +93,36 @@ jobs:
           path: BrainBend-Studio-*
   publish:
     needs: [check, build]
-    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
+      - name: Sign the downloads
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+        run: |
+          if [ -z "$MINISIGN_KEY" ]; then echo "The MINISIGN_KEY secret is not set, so the downloads cannot be signed."; exit 1; fi
+          sudo apt-get update && sudo apt-get install -y minisign
+          KEY="$RUNNER_TEMP/update-key.sec"
+          printf '%s\n' "$MINISIGN_KEY" > "$KEY"
+          for f in dist/*; do
+            minisign -S -s "$KEY" -m "$f" -x "$f.minisig" -t "BrainBend Studio ${{ needs.check.outputs.tag }}"
+            # The app only trusts the key built into it, so make sure this signature matches that key.
+            minisign -V -p apps/brainbend-studio/update-key.pub -m "$f" -x "$f.minisig"
+          done
+          rm -f "$KEY"
+          ls -la dist
+      - name: Keep the signed downloads (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v5
+        with:
+          name: signed-downloads
+          path: dist/*
       - name: Create the release
+        if: github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

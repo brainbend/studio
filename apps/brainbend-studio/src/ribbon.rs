@@ -1333,14 +1333,19 @@ impl App {
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
                     }
-                    // A newer release is out: a red button to the left of the theme toggle opens its page.
+                    // A newer release is out: a red button to the left of the theme toggle opens the update window.
                     if let Some(r) = self.updater.available().cloned() {
                         ui.add_space(4.0);
                         let white = egui::Color32::WHITE;
-                        let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label: "Update available", caret: false, fill: Some(egui::Color32::from_rgb(200, 36, 36)), ink: white, outline: false, bold: true, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text(format!("Version {} is available. Open the release page.", r.version));
-                        alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Update available"));
-                        if alert.clicked() { update::open_in_browser(&r.url); }
+                        let (label, fill) = match &self.updater.state {
+                            update::State::Downloading { .. } => ("Updating…", egui::Color32::from_rgb(200, 36, 36)),
+                            update::State::Ready { .. } => ("Restart to update", egui::Color32::from_rgb(30, 140, 70)),
+                            _ => ("Update available", egui::Color32::from_rgb(200, 36, 36)),
+                        };
+                        let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label, caret: false, fill: Some(fill), ink: white, outline: false, bold: true, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
+                            .on_hover_text(format!("Version {} is available. Click to update.", r.version));
+                        alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                        if alert.clicked() { self.updater.dialog_open = true; }
                     }
                 });
             });
@@ -1369,12 +1374,12 @@ impl App {
                     match &self.updater.state {
                         update::State::Checking(_) => { ui.weak("Checking…"); }
                         update::State::UpToDate => { ui.weak("You have the latest version."); }
-                        update::State::Available(r) => { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the release page").clicked() { open = Some(r.url.clone()); } }
                         update::State::Failed(e) => { ui.weak(format!("Could not check: {e}")); }
                         update::State::Idle => {}
+                        _ => { if let Some(r) = self.updater.available() { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the update window").clicked() { open = Some(r.tag.clone()); } } }
                     }
                 });
-                if let Some(url) = open { update::open_in_browser(&url); }
+                if open.is_some() { self.updater.dialog_open = true; }
             });
         });
     }

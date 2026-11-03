@@ -222,12 +222,12 @@ impl App {
             match &self.updater.state {
                 update::State::Checking(_) => { ui.add(egui::Spinner::new()); ui.label("Checking for updates…"); }
                 update::State::UpToDate => { ui.label("You have the latest version."); }
-                update::State::Available(r) => {
-                    ui.strong(format!("Version {} is available.", r.version));
-                    if ui.link("See what's new").clicked() { open = Some(r.url.clone()); }
-                }
                 update::State::Failed(e) => { ui.weak(format!("Could not check for updates: {e}")); }
                 update::State::Idle => {}
+                _ => if let Some(r) = self.updater.available() {
+                    ui.strong(format!("Version {} is available.", r.version));
+                    if ui.link("Update").clicked() { open = Some(r.tag.clone()); }
+                },
             }
         });
         ui.add_space(2.0);
@@ -236,7 +236,7 @@ impl App {
             if ui.checkbox(&mut self.updater.on_launch, "Check when BrainBend Studio starts").changed() { self.updater.save(); }
         });
         ui.add_space(6.0);
-        if let Some(url) = open { update::open_in_browser(&url); }
+        if open.is_some() { self.updater.dialog_open = true; }
     }
 
     fn print_page(&mut self, ui: &mut egui::Ui) {

@@ -45,6 +45,7 @@ fn main() -> eframe::Result {
             brainbend_spell::warm();
             install_theme(&cc.egui_ctx);
             let mut app = App::default();
+            update::clean_up_after_update();
             app.updater = update::Updater::load();
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.open_to_story_view = true;
@@ -257,6 +258,8 @@ enum Pending {
     Open,
     /// Open the file waiting in `App::drop_path` (dragged onto the window).
     OpenDropped,
+    /// Close the app so the downloaded update can replace it.
+    Update,
 }
 
 /// Recovery copies live outside the project so they survive crashes: `~/.brainbend-studio/recovery.brainbend`.
@@ -923,6 +926,10 @@ impl App {
         self.leave_master_view();
         match action {
             Pending::Quit => self.allow_close = true,
+            Pending::Update => match self.updater.install_now() {
+                Ok(()) => self.allow_close = true,
+                Err(e) => { self.status = format!("Could not update: {e}"); self.updater.dialog_open = true; }
+            },
             Pending::New => self.new_project(),
             Pending::NewLesson(kind) => self.new_lesson_project(kind),
             Pending::OpenDropped => {
@@ -5434,6 +5441,8 @@ impl App {
                 }
             }
         }
+        self.update_window(ctx);
+        if self.updater.restarting { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if self.recovery_offer {
             let mut done = false;
             egui::Window::new("Recover unsaved work?").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
@@ -7098,6 +7107,62 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("help-tab.png")).unwrap();
         }
+    }
+
+    #[test]
+    fn the_update_window_walks_from_available_to_restart() {
+        use egui_kittest::kittest::Queryable;
+        let suffix = update::platform_suffix().unwrap();
+        let name = format!("BrainBend-Studio-v9.9.9{suffix}");
+        let json = format!(r###"{{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"## What's new\n- Faster saving\n- Fixes","assets":[{{"name":"{name}","browser_download_url":"https://github.com/brainbend/studio/releases/download/v9.9.9/{name}","size":31457280}},{{"name":"{name}.minisig","browser_download_url":"https://github.com/brainbend/studio/releases/download/v9.9.9/{name}.minisig","size":300}}]}}"###);
+        let release = update::parse_release(&json).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        let shot = |h: &mut egui_kittest::Harness<'static, App>, file: &str| {
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join(file)).unwrap(); }
+        };
+        h.run_steps(3);
+        h.state_mut().updater.state = update::State::Available(release.clone());
+        h.state_mut().updater.dialog_open = true;
+        h.run_steps(4);
+        assert!(h.query_by_label("Update now").is_some(), "a signed release offers Update now");
+        assert!(h.query_by_label("Release page").is_some());
+        shot(&mut h, "update-1-available.png");
+
+        let progress = std::sync::Arc::new(update::Progress::default());
+        progress.total.store(31_457_280, std::sync::atomic::Ordering::Relaxed);
+        progress.done.store(12_000_000, std::sync::atomic::Ordering::Relaxed);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Downloading { release: release.clone(), progress, rx };
+        h.run_steps(3);
+        assert!(h.query_by_label("Update now").is_none(), "no second download while one runs");
+        shot(&mut h, "update-2-downloading.png");
+
+        h.state_mut().updater.state = update::State::Ready { release: release.clone(), staged: std::path::PathBuf::from("/nonexistent") };
+        h.run_steps(3);
+        assert!(h.query_by_label("Restart now").is_some());
+        shot(&mut h, "update-3-ready.png");
+
+        h.state_mut().updater.state = update::State::UpdateFailed { release, error: "no permission to replace the app".into() };
+        h.run_steps(3);
+        assert!(h.query_by_label("Try again").is_some());
+        shot(&mut h, "update-4-failed.png");
+    }
+
+    #[test]
+    fn a_release_without_a_signed_download_only_offers_the_release_page() {
+        use egui_kittest::kittest::Queryable;
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r"}"#).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(2);
+        h.state_mut().updater.state = update::State::Available(release);
+        h.state_mut().updater.dialog_open = true;
+        h.run_steps(4);
+        assert!(h.query_by_label("Update now").is_none());
+        assert!(h.query_by_label("Release page").is_some());
     }
 
     #[test]
