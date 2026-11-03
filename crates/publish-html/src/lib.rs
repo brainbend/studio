@@ -221,6 +221,9 @@ body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #nav .nav-controls button{{background:transparent;color:var(--p-fg);border:1px solid var(--p-line);padding:6px 10px;min-width:36px}}
 #nav .nav-controls button:hover{{background:var(--p-hover)}}
 #nav .nav-controls button[aria-pressed=true]{{background:var(--p-accent);color:var(--p-accent-ink);border-color:var(--p-accent)}}
+#nav .nav-controls button:disabled{{opacity:.4;cursor:default}}
+#nav .nav-controls .ctl-seek{{width:200px;max-width:28vw;accent-color:var(--p-accent)}}
+#nav .nav-controls .ctl-time{{font-size:.85em;color:var(--p-muted);white-space:nowrap;font-variant-numeric:tabular-nums}}
 #nav .nav-controls .ctl-volume[aria-pressed=true]{{background:var(--p-hover);color:var(--p-fg);border-color:var(--p-line)}}
 #nav button:focus-visible{{outline:3px solid #6aa8e6}}
 .obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.hidden-by-layer{{display:none !important}}

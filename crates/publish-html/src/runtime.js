@@ -1771,12 +1771,15 @@
   var anyNextTriggers = slides.some(function (_, i) { return nextButtonTriggers(i).length > 0 || prevButtonTriggers(i).length > 0; });
   var PL = P.player || {};
   var PC = PL.controls || {};
-  var wantControls = !!(PC.volume || PC.captions || PC.speed || PC.fullscreen);
+  var wantControls = !!(PC.play_pause || PC.seekbar || PC.replay || PC.volume || PC.captions || PC.speed || PC.fullscreen);
   var navButtons = P.show_nav && (slides.length > 1 || anyNextTriggers);
   // A button as the author chose to draw them: an icon, an icon with its words, or the words alone.
   var ICONS = {
     prev: '<path d="M12 4l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
     next: '<path d="M8 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+    play: '<path d="M6 4l10 6-10 6z" fill="currentColor"/>',
+    pause: '<path d="M6 4h3v12H6zM11 4h3v12h-3z" fill="currentColor"/>',
+    replay: '<path d="M4 10a6 6 0 1 0 2-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 3v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     menu: '<path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
     volume: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5c1.4 1.4 1.4 3.6 0 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     muted: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5l4 5M17 7.5l-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
@@ -1991,6 +1994,90 @@
     var control = function (id, label, icon) {
       var b = el('button', 'ctl-' + id); b.type = 'button'; setButton(b, label, icon); cbox.appendChild(b); return b;
     };
+    // Play / pause, replay and a seekbar for the current slide. They drive its timeline when it has a length, and
+    // otherwise its video or audio; a slide with neither leaves them greyed out.
+    if (PC.play_pause || PC.seekbar || PC.replay) {
+      var tMs = function () { return cur >= 0 ? (slides[cur].layers[0].duration_ms || 0) : 0; };
+      var baseL = function () { return layers[slides[cur].layers[0].id]; };
+      var tMedia = function () { var b = cur >= 0 && baseL(); return b ? b.el.querySelector('video,audio') : null; };
+      var tKind = function () { return cur < 0 ? 'none' : tMs() > 0 ? 'timeline' : tMedia() ? 'media' : 'none'; };
+      var tLength = function () {
+        var k = tKind(); if (k === 'timeline') return tMs();
+        var m = k === 'media' ? tMedia() : null; return m && isFinite(m.duration) ? Math.round(m.duration * 1000) : 0;
+      };
+      var tPos = function () {
+        var k = tKind(); if (k === 'timeline') {
+          if (timelineDone[cur]) return tMs();
+          var b = baseL(); return Math.max(0, Math.min(tMs(), (b.paused ? b.pausedAt : Date.now()) - b.startedAt));
+        }
+        var m = k === 'media' ? tMedia() : null; return m ? Math.round(m.currentTime * 1000) : 0;
+      };
+      var tPaused = function () {
+        var k = tKind(); if (k === 'timeline') return !!baseL().paused || !!timelineDone[cur];
+        var m = k === 'media' ? tMedia() : null; return !m || m.paused;
+      };
+      var fmtTime = function (ms) { var n = Math.max(0, Math.floor(ms / 1000)); return Math.floor(n / 60) + ':' + ('0' + (n % 60)).slice(-2); };
+      var tReplay = function () {
+        var si = cur, k = tKind(); if (k === 'none') return;
+        if (k === 'media') { var m = tMedia(); try { m.currentTime = 0; var pr = m.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {} tRefresh(); return; }
+        resetSlide(si); timelineDone[si] = false;
+        steps = { si: si, order: computeSteps(si), done: 0 };
+        startLayer(slides[si].layers[0].id);
+        tRefresh();
+      };
+      var tToggle = function () {
+        var k = tKind(); if (k === 'none') return;
+        if (k === 'media') { var m = tMedia(); try { if (m.paused) { var pr = m.play(); if (pr && pr.catch) pr.catch(function () {}); } else m.pause(); } catch (e) {} tRefresh(); return; }
+        if (timelineDone[cur]) { tReplay(); return; }
+        var held = pausing[cur] = pausing[cur] || {};
+        if (held.__user) delete held.__user; else if (!baseL().paused) held.__user = true; else return;   // a layer holds it: only closing the layer runs it on
+        basePauseChanged(cur); tRefresh();
+      };
+      var tSeek = function (ms) {
+        var k = tKind(); if (k === 'none') return;
+        if (k === 'media') { try { tMedia().currentTime = ms / 1000; } catch (e) {} tRefresh(); return; }
+        var id = slides[cur].layers[0].id, b = baseL(), was = b.paused;
+        timelineDone[cur] = false;
+        startLayer(id, ms);
+        if (was) {   // seeking while paused shows that moment and stays paused
+          (layerTimers[id] || []).forEach(clearTimeout); layerTimers[id] = []; pauseMedia(b.el);
+          var now = Date.now(); b.pausedAt = now; b.startedAt = now - ms;
+        }
+        tRefresh();
+      };
+      var pb = null, rb = null, sk = null, tm = null, scrubbing = false, lastLabel = '';
+      if (PC.play_pause) { pb = control('play', 'Pause', 'pause'); pb.addEventListener('click', tToggle); }
+      if (PC.replay) { rb = control('replay', 'Replay', 'replay'); rb.addEventListener('click', tReplay); }
+      if (PC.seekbar) {
+        sk = el('input', 'ctl-seek'); sk.type = 'range'; sk.min = '0'; sk.max = '0'; sk.value = '0'; sk.setAttribute('aria-label', 'Seek');
+        tm = el('span', 'ctl-time', '0:00 / 0:00'); tm.setAttribute('aria-hidden', 'true');
+        sk.addEventListener('input', function () { scrubbing = true; tm.textContent = fmtTime(+sk.value) + ' / ' + fmtTime(+sk.max); });
+        sk.addEventListener('change', function () { scrubbing = false; tSeek(+sk.value); });
+        sk.addEventListener('blur', function () { scrubbing = false; });
+        cbox.appendChild(sk); cbox.appendChild(tm);
+      }
+      var tTimer = null;
+      var tRefresh = function () {
+        clearTimeout(tTimer); tTimer = null;
+        var k = tKind(), none = k === 'none', len = tLength();
+        // While something is playing the bar follows it; otherwise there is nothing to poll for.
+        if (!none && !tPaused()) tTimer = setTimeout(tRefresh, 250);
+        if (pb) {
+          var label = none || !tPaused() ? 'Pause' : 'Play';
+          if (label !== lastLabel) { setButton(pb, label, label === 'Pause' ? 'pause' : 'play'); lastLabel = label; }
+          pb.disabled = none;
+        }
+        if (rb) rb.disabled = none;
+        if (sk) {
+          sk.disabled = none || len <= 0;
+          sk.max = String(len); sk.step = len >= 2000 ? '1000' : '100';
+          if (!scrubbing) { var pos = tPos(); sk.value = String(pos); tm.textContent = fmtTime(pos) + ' / ' + fmtTime(len); sk.setAttribute('aria-valuetext', fmtTime(pos) + ' of ' + fmtTime(len)); }
+        }
+      };
+      controlUpdaters.push(tRefresh);
+      ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange'].forEach(function (n) { document.addEventListener(n, tRefresh, true); });
+      tRefresh();
+    }
     if (PC.volume) {
       var vb = control('volume', 'Mute', 'volume'); vb.setAttribute('aria-pressed', 'false');
       vb.addEventListener('click', function () {
@@ -2087,6 +2174,7 @@
     else if (kind === 'Results') buildResults(i);
     if (!(seen && slide.nav && slide.nav.revisit === 'Resume')) resetSlide(i);
     steps = { si: i, order: computeSteps(i), done: 0 };
+    if (pausing[i] && pausing[i].__user) { delete pausing[i].__user; if (!Object.keys(pausing[i]).length) layers[slide.layers[0].id].paused = false; }
     startLayer(slide.layers[0].id);
     if (slide.fade_ms > 0 && !reduceMotion && slideEls[i].animate) {
       slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });

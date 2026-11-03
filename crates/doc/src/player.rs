@@ -35,6 +35,15 @@ pub enum ButtonStyle {
 /// Player controls beyond Previous / Next, each shown only when asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerControls {
+    /// Play and pause the slide: its timeline, or its video or audio when it has no timeline.
+    #[serde(default)]
+    pub play_pause: bool,
+    /// A bar showing how far along the slide is, to move through it by mouse or keyboard.
+    #[serde(default)]
+    pub seekbar: bool,
+    /// Start the slide again from the beginning.
+    #[serde(default)]
+    pub replay: bool,
     /// Mute and unmute the slide's video and audio.
     pub volume: bool,
     /// Turn captions on and off.
@@ -261,5 +270,18 @@ mod tests {
         v.as_object_mut().unwrap().remove("banner");
         let old: PlayerSettings = serde_json::from_value(v).unwrap();
         assert_eq!(old.banner, None);
+    }
+
+    #[test]
+    fn a_project_saved_before_the_playback_controls_opens_with_them_off() {
+        let mut v = serde_json::to_value(PlayerSettings::default()).unwrap();
+        v["controls"] = serde_json::json!({"volume": true, "captions": false, "speed": false, "fullscreen": true});
+        let old: PlayerSettings = serde_json::from_value(v).unwrap();
+        assert!(old.controls.volume && old.controls.fullscreen);
+        assert!(!old.controls.play_pause && !old.controls.seekbar && !old.controls.replay);
+        let mut c = old.clone();
+        c.controls.play_pause = true; c.controls.seekbar = true; c.controls.replay = true;
+        let back: PlayerSettings = serde_json::from_value(serde_json::to_value(&c).unwrap()).unwrap();
+        assert_eq!(back, c);
     }
 }

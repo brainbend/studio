@@ -7374,6 +7374,21 @@ mod tests {
     }
 
     #[test]
+    fn the_player_dialog_offers_play_pause_a_seekbar_and_replay() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for label in ["Play / Pause", "Seekbar", "Replay"] { assert!(h.query_by_label(label).is_some(), "{label} is listed with the player controls"); }
+        assert!(!h.state().project.as_ref().unwrap().player.controls.play_pause);
+        for label in ["Play / Pause", "Seekbar", "Replay"] { h.get_by_label(label).focus(); h.run_steps(2); h.key_press(egui::Key::Space); h.run_steps(3); }   // below the fold, so by keyboard
+        let c = h.state().project.as_ref().unwrap().player.controls;
+        assert!(c.play_pause && c.seekbar && c.replay, "ticking them turns them on");
+    }
+
+    #[test]
     fn the_player_dialog_offers_a_banner_photo_and_shows_it_in_its_preview() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();

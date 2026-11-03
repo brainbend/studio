@@ -173,6 +173,9 @@ fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo
     ui.add_space(8.0);
     ui.heading("Player controls");
     let c = &mut proj.player.controls;
+    *changed |= ui.checkbox(&mut c.play_pause, "Play / Pause").on_hover_text("Pause and resume the slide: its timeline, or its video or audio when it has no timeline").changed();
+    *changed |= ui.checkbox(&mut c.seekbar, "Seekbar").on_hover_text("Shows how far along the slide is, and lets learners move through it with the mouse or the arrow keys").changed();
+    *changed |= ui.checkbox(&mut c.replay, "Replay").on_hover_text("Start the slide again from the beginning").changed();
     *changed |= ui.checkbox(&mut c.volume, "Volume").on_hover_text("Mute and unmute the slide's video and audio").changed();
     *changed |= ui.checkbox(&mut c.captions, "Captions").on_hover_text("Turn captions on and off").changed();
     *changed |= ui.checkbox(&mut c.speed, "Playback speed").on_hover_text("Step through speeds for video and audio").changed();
@@ -294,8 +297,8 @@ fn preview(ui: &mut egui::Ui, proj: &Project, project_name: &str) {
         }
     }
     let mut x = bar.left() + 14.0;
-    for (on, label) in [(p.controls.volume, "\u{1f50a}"), (p.controls.captions, "CC"), (p.controls.speed, "1x"), (p.controls.fullscreen, "\u{26f6}")] {
-        if on { text(egui::pos2(x, bar.center().y), egui::Align2::LEFT_CENTER, label, 12.0, pal.fg); x += 30.0; }
+    for (on, label) in [(p.controls.play_pause, "\u{23ef}"), (p.controls.replay, "\u{21ba}"), (p.controls.seekbar, "\u{2014}\u{25cf}\u{2014}\u{2014}"), (p.controls.volume, "\u{1f50a}"), (p.controls.captions, "CC"), (p.controls.speed, "1x"), (p.controls.fullscreen, "\u{26f6}")] {
+        if on { text(egui::pos2(x, bar.center().y), egui::Align2::LEFT_CENTER, label, 12.0, pal.fg); x += if label.chars().count() > 2 { 56.0 } else { 30.0 }; }
     }
     if proj.show_progress && proj.show_nav { painter.rect_filled(egui::Rect::from_min_size(bar.left_top(), egui::vec2(bar.width() * 0.4, 3.0)), 0.0, c32(pal.progress)); }
 }

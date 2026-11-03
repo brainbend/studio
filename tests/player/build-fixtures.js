@@ -43,6 +43,8 @@ cargo('pause', [path.join(out, 'pause')]);
 cargo('playerui', [path.join(out, 'playerui')]);
 cargo('playerui', [path.join(out, 'playerui-right'), 'right']);
 cargo('playerui', [path.join(out, 'playerui-icons'), 'off', 'icons']);
+cargo('transport', [path.join(out, 'transport')]);
+cargo('transport', [path.join(out, 'transport-icons'), 'icons']);
 cargo('bank', [path.join(out, 'bank')]);
 cargo('bank', [path.join(out, 'bank12.zip'), 'scorm12']);
 unzip(path.join(out, 'bank12.zip'), path.join(out, 'bank12'));

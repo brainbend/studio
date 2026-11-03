@@ -1569,6 +1569,126 @@ test('player layout: the banner tops the sidebar, the logo sits small beside the
   assert.deepEqual(errors, []);
 });
 
+// ---- Play / pause, seekbar and replay ------------------------------------------------------------
+const transport = (w) => ({
+  play: $(w, '.ctl-play'), replay: $(w, '.ctl-replay'), seek: $(w, 'input.ctl-seek'), time: $(w, '.ctl-time'),
+  shown: (name) => $$(w, '.obj').find((o) => o.textContent === name).style.visibility !== 'hidden',
+});
+const seekTo = (w, t, ms) => { t.seek.value = String(ms); t.seek.dispatchEvent(new w.Event('input', { bubbles: true })); t.seek.dispatchEvent(new w.Event('change', { bubbles: true })); };
+
+test('player controls: play/pause, a seekbar and replay appear when asked for, and follow the slide\'s timeline', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  assert.ok(t.play && t.replay && t.seek && t.time, 'all three are in the control bar');
+  assert.equal(t.seek.getAttribute('aria-label'), 'Seek');
+  assert.equal(t.seek.max, '3000', 'the bar is as long as the slide\'s timeline');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'the slide is playing, so the button offers Pause');
+  assert.equal(t.seek.disabled, false);
+  await sleep(1150);
+  assert.ok(Number(t.seek.value) >= 1000 && Number(t.seek.value) < 1500, 'the bar follows the timeline: ' + t.seek.value);
+  assert.match(t.time.textContent, /^0:01 \/ 0:03$/);
+  assert.match(t.seek.getAttribute('aria-valuetext'), /^0:01 of 0:03$/);
+  assert.equal(t.shown('early'), false, 'and the objects follow it too');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: pause holds the timeline and play runs it on from there', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  await sleep(200);
+  click(w, t.play);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'paused: the button now offers Play');
+  const held = t.seek.value;
+  await sleep(1500);
+  assert.equal(t.seek.value, held, 'the bar does not move while paused');
+  assert.equal(t.shown('late'), false, 'and "late" (due at 1.5 s) has not appeared');
+  click(w, t.play);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  await sleep(300);
+  assert.ok(Number(t.seek.value) > Number(held), 'play runs on from where it stopped');
+  assert.ok(Number(t.seek.value) < 1000, 'not from where the clock would have been');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: the seekbar jumps to a moment, even while paused', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  seekTo(w, t, 2000);
+  assert.equal(t.shown('late'), true, 'at 2 s "late" is on');
+  assert.equal(t.shown('early'), false, 'and "early" (gone at 1 s) is off');
+  await sleep(150);
+  assert.ok(Number(t.seek.value) >= 2000, 'it plays on from there');
+  click(w, t.play);
+  seekTo(w, t, 500);
+  assert.equal(t.shown('early'), true, 'back at 0.5 s "early" is on again');
+  assert.equal(t.shown('late'), false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'seeking while paused stays paused');
+  const at = t.seek.value;
+  await sleep(300);
+  assert.equal(t.seek.value, at);
+  // Dragging only moves the readout until it is let go.
+  t.seek.value = '1000'; t.seek.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(t.time.textContent, '0:01 / 0:03');
+  assert.equal(t.shown('early'), true, 'nothing moves until the drag ends');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: replay starts the slide again, and slides with nothing to play grey the controls out', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  seekTo(w, t, 2500);
+  assert.equal(t.shown('late'), true);
+  click(w, t.replay);
+  assert.equal(t.shown('late'), false, 'replay is back at the start');
+  assert.equal(t.shown('early'), true);
+  assert.ok(Number(t.seek.value) < 500);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'and playing');
+  // The second slide has no timeline and no media.
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  assert.equal(currentSlide(w), 1);
+  assert.equal(t.play.disabled && t.replay.disabled && t.seek.disabled, true, 'nothing to play: all three are greyed out');
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  assert.equal(t.play.disabled || t.replay.disabled || t.seek.disabled, false, 'and back on the timed slide they work again');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: a slide with a video is driven through the video', () => {
+  const { w, errors } = boot(fixture('transport'), null, {}, (win) => {
+    win.HTMLMediaElement.prototype.play = function () { this.__paused = false; return Promise.resolve(); };
+    win.HTMLMediaElement.prototype.pause = function () { this.__paused = true; };
+    Object.defineProperty(win.HTMLMediaElement.prototype, 'paused', { configurable: true, get() { return this.__paused !== false; } });
+    Object.defineProperty(win.HTMLMediaElement.prototype, 'duration', { configurable: true, get() { return 90; } });
+  });
+  const t = transport(w);
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  const slide = $$(w, '.slide')[1];
+  const v = w.document.createElement('video'); slide.querySelector('.layer').appendChild(v);
+  w.document.dispatchEvent(new w.Event('loadedmetadata'));
+  assert.equal(t.seek.max, '90000', 'the bar is as long as the video');
+  assert.equal(t.play.disabled, false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'it is not playing yet');
+  click(w, t.play);
+  assert.equal(v.paused, false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  seekTo(w, t, 30000);
+  assert.equal(v.currentTime, 30);
+  click(w, t.replay);
+  assert.equal(v.currentTime, 0);
+  assert.deepEqual(errors, []);
+  w.close();   // the fake video plays forever, and the bar keeps following it
+});
+
+test('player controls: icons, icon-only buttons keep their names, and the controls are off unless asked for', () => {
+  const { w } = boot(fixture('transport-icons'));
+  const t = transport(w);
+  assert.ok(t.play.querySelector('svg'), 'an icon');
+  assert.equal(t.play.textContent, '');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  assert.equal(t.replay.getAttribute('aria-label'), 'Replay');
+  const { w: plain } = boot(fixture('playerui-icons'));
+  assert.equal($(plain, '.ctl-play') || $(plain, '.ctl-replay') || $(plain, '.ctl-seek'), null, 'not shown unless chosen');
+});
+
 test('player layout: the sidebar slides in and out, the top bar moves at once, and the menu hides when the slide ends', () => {
   const anims = [];
   const { w, errors } = boot(fixture('playerui'), null, {}, (win) => {

@@ -36,7 +36,7 @@ fn main() {
     p.player.sidebar = match side.as_str() { "right" => SidebarSide::Right, "off" => SidebarSide::Off, _ => SidebarSide::Left };
     if std::env::args().nth(3).as_deref() == Some("icons") {
         p.player.buttons = ButtonStyle::IconText;
-        p.player.controls = PlayerControls { volume: true, captions: true, speed: true, fullscreen: true };
+        p.player.controls = PlayerControls { volume: true, captions: true, speed: true, fullscreen: true, ..Default::default() };
         p.player.theme = PlayerTheme::Light;
         p.player.accent = Rgba(232, 119, 34, 255);
     }
