@@ -1569,15 +1569,31 @@ test('player layout: the banner tops the sidebar, the logo sits small beside the
   assert.deepEqual(errors, []);
 });
 
-test('button effects: a glow is a halo, soft edges mask the object, a reflection mirrors it, and none of it touches a plain button', () => {
+test('button effects: a glow is a halo, soft edges fade along the outline, a reflection mirrors it, and none of it touches a plain button', () => {
   const { w, errors } = boot(fixture('buttoneffects'));
-  const node = (name) => $$(w, '.obj').find((o) => o.textContent === name);
+  const order = ['glow', 'soft', 'reflect', 'plain', 'star', 'starglow', 'oval'];   // the example's objects, in order
+  const node = (name) => $$(w, '.obj')[order.indexOf(name)];
   assert.match(node('glow').style.boxShadow, /^0 0 24px 6px /, 'a glow is a blurred shadow with no offset');
-  assert.match(node('soft').style.webkitMaskImage, /linear-gradient\(to right,transparent,#000 24px,#000 calc\(100% - 24px\),transparent\),linear-gradient\(to bottom/, 'soft edges fade all four sides');
-  assert.equal(node('soft').style.webkitMaskComposite, 'source-in');
+  // A softened box draws its fill on a smaller, blurred layer behind its text, so rounded corners stay rounded.
+  const soft = node('soft'); const back = soft.querySelector('.soft-back');
+  assert.ok(back, 'the fill moves to a backing layer');
+  assert.equal(back.style.filter, 'blur(6px)');
+  assert.equal(back.style.inset, '12px');
+  assert.equal(back.style.borderRadius, '0px', 'its corners follow the box (a 10 px radius shrunk by the 12 px inset)');
+  assert.match(back.style.background, /rgb\(3, 83, 158\)/, 'the fill is the box\'s own');
+  assert.ok(soft.style.background === 'none' || soft.style.background === '', 'and the box itself has none');
+  assert.equal(soft.style.boxShadow, 'none');
+  assert.equal(soft.textContent, 'soft', 'the text is not part of the fade');
+  assert.equal(node('oval').querySelector('.soft-back').style.borderRadius, '50%', 'an oval fades as an oval');
+  // A freeform shape is blurred whole.
+  const starSvg = node('star').querySelector('svg');
+  assert.equal(starSvg.style.filter, 'blur(6px)');
+  assert.equal(starSvg.style.overflow, 'visible', 'so its tips are not cut off');
+  // A freeform shape's glow follows its outline; its reflection mirrors the element.
+  assert.match(node('starglow').querySelector('svg').style.filter, /drop-shadow\(0 0 12px /);
   assert.match(node('reflect').style.webkitBoxReflect, /^below 6px linear-gradient\(to bottom,transparent,transparent 40%,rgba\(255,255,255,0\.5\)\)$/, 'a reflection shows 60% of the height, strongest at the object');
   const plain = node('plain');
-  assert.ok(!plain.style.webkitMaskImage && !plain.style.webkitBoxReflect, 'a plain button has no mask or reflection');
+  assert.ok(!plain.style.webkitMaskImage && !plain.style.webkitBoxReflect && !plain.querySelector('.soft-back'), 'a plain button has none of it');
   assert.ok(!/24px/.test(plain.style.boxShadow));
   assert.deepEqual(errors, []);
 });

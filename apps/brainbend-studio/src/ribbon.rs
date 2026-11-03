@@ -954,69 +954,6 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
                         });
                     }
                 });
-                if !is_line {
-                    ui.horizontal(|ui| {
-                        icon_popup(ui, DROP, "Effects: shadow, glow, reflection, soft edges and corners", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-                            ui.set_min_width(260.0);
-                            let mut has = obj.shadow.is_some();
-                            if ui.checkbox(&mut has, "Shadow").changed() {
-                                obj.shadow = if has { Some(Shadow { dx: 4.0, dy: 4.0, blur: 8.0, spread: 0.0, color: Rgba(0, 0, 0, 90) }) } else { None };
-                                *changed = true;
-                            }
-                            if let Some(sh) = obj.shadow.as_mut() {
-                                let mut c = Some(sh.color);
-                                ui.horizontal(|ui| {
-                                    ui.label("Shadow color");
-                                    if color_menu(ui, DROP, "Shadow color", &mut c, None) { if let Some(c) = c { sh.color = c; *changed = true; } }
-                                });
-                                *changed |= shadow_options(ui, sh);
-                            }
-                            ui.separator();
-                            let mut glow_on = obj.glow.is_some();
-                            if ui.checkbox(&mut glow_on, "Glow").on_hover_text("A soft halo of colour around the object").changed() {
-                                obj.glow = if glow_on { Some(Glow { radius: 12.0, color: Rgba(255, 190, 40, 200) }) } else { None };
-                                *changed = true;
-                            }
-                            if let Some(g) = obj.glow.as_mut() {
-                                let mut c = Some(g.color);
-                                ui.horizontal(|ui| {
-                                    ui.label("Glow color");
-                                    if color_menu(ui, DROP, "Glow color", &mut c, None) { if let Some(c) = c { g.color = c; *changed = true; } }
-                                    ui.label("Size");
-                                    *changed |= ui.add(egui::DragValue::new(&mut g.radius).range(1.0..=100.0)).changed();
-                                });
-                            }
-                            let mut refl_on = obj.reflection.is_some();
-                            if ui.checkbox(&mut refl_on, "Reflection").on_hover_text("A faded mirror image below the object. Not every browser shows it.").changed() {
-                                obj.reflection = if refl_on { Some(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 }) } else { None };
-                                *changed = true;
-                            }
-                            if let Some(r) = obj.reflection.as_mut() {
-                                ui.horizontal(|ui| {
-                                    ui.label("Size");
-                                    *changed |= ui.add(egui::Slider::new(&mut r.size, 0.1..=1.0).show_value(false)).changed();
-                                    ui.label("Opacity");
-                                    *changed |= ui.add(egui::Slider::new(&mut r.opacity, 0.05..=1.0).show_value(false)).changed();
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Gap");
-                                    *changed |= ui.add(egui::DragValue::new(&mut r.gap).range(0.0..=100.0)).changed();
-                                });
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label("Soft edges").on_hover_text("Fades the object's edges inward. A softened object shows no shadow or glow.");
-                                *changed |= ui.add(egui::DragValue::new(&mut obj.soft_edge).range(0.0..=100.0).suffix(" px")).changed();
-                            });
-                            if !is_pic {
-                                ui.separator();
-                                ui.horizontal(|ui| {
-                                    ui.label("Corner radius");
-                                    *changed |= ui.add(egui::DragValue::new(&mut obj.radius).range(0.0..=400.0)).changed();
-                                });
-                            }
-                        });
-                    });
-                }
             }); }); }); });
         }
 }
@@ -1584,6 +1521,7 @@ impl App {
         } else {
             self.arrange_group(ui, has_sel, n_sel);
             drawing_group(ui, obj, enabled, changed);
+            effects_group(ui, obj, enabled, changed);
         }
         if let Some(st) = list_click { self.set_list_selected(st); }
     }
@@ -1762,7 +1700,7 @@ impl App {
             }
         }
         if matches!(obj.kind, Kind::Hotspot) { self.hotspot_group(ui, obj, true, n_sel); }
-        if !is_media && !matches!(obj.kind, Kind::Hotspot) { drawing_group(ui, obj, true, changed); }
+        if !is_media && !matches!(obj.kind, Kind::Hotspot) { drawing_group(ui, obj, true, changed); effects_group(ui, obj, true, changed); }
         self.arrange_group(ui, has_sel, n_sel);
         obj.w = obj.w.max(1.0);
         obj.h = obj.h.max(1.0);
@@ -2759,51 +2697,240 @@ impl App {
     }
 }
 
-/// Direction pad, distance, blur and spread for a shadow. Returns true when anything changed.
-pub fn shadow_options(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
+/// One effect in the Effects popup: a header with its on/off switch, and its controls underneath while it is on.
+/// Returns true when the switch or anything under it changed.
+fn effect_section(ui: &mut egui::Ui, title: &str, on: &mut bool, body: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let mut changed = ui.checkbox(on, egui::RichText::new(title).strong()).changed();
+    if *on {
+        ui.indent(title, |ui| { changed |= body(ui); });
+    }
+    ui.add_space(4.0);
+    changed
+}
+
+/// A label and a slider with its value, in one tidy row of a grid.
+fn effect_slider(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, suffix: &str) -> bool {
+    effect_slider_if(ui, true, label, value, range, suffix)
+}
+
+/// The same, greyed out and untouchable when `enabled` is false (the row stays in the grid either way).
+fn effect_slider_if(ui: &mut egui::Ui, enabled: bool, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, suffix: &str) -> bool {
+    ui.label(label);
+    let changed = ui.add_enabled(enabled, egui::Slider::new(value, range).suffix(suffix.to_string()).max_decimals(0)).changed();
+    ui.end_row();
+    changed
+}
+
+/// A percentage slider over a 0 to 1 value.
+fn effect_percent(ui: &mut egui::Ui, label: &str, value: &mut f32, min: f32) -> bool {
+    ui.label(label);
+    let changed = ui.add(egui::Slider::new(value, min..=1.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)).custom_parser(|t| t.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0))).changed();
+    ui.end_row();
+    changed
+}
+
+/// A colour button with its label, as one row of a grid.
+fn effect_color(ui: &mut egui::Ui, label: &str, c: &mut Rgba) -> bool {
+    ui.label(label);
+    let mut cur = Some(*c);
+    let mut changed = false;
+    ui.horizontal(|ui| { if color_menu(ui, DROP, label, &mut cur, None) { if let Some(n) = cur { *c = n; changed = true; } } });
+    ui.end_row();
+    changed
+}
+
+/// A round pad for a shadow's direction and distance: drag the dot away from the middle. The sliders beside it do the
+/// same with exact numbers (and by keyboard).
+fn shadow_dial(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
+    const R: f32 = 40.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(R * 2.0 + 8.0, R * 2.0 + 8.0), egui::Sense::click_and_drag());
+    let c = rect.center();
+    let v = ui.visuals();
+    let (ring, ink, accent) = (v.widgets.noninteractive.fg_stroke.color.gamma_multiply(0.5), v.widgets.noninteractive.fg_stroke.color, v.selection.bg_fill);
+    let p = ui.painter();
+    p.circle_filled(c, R, v.extreme_bg_color);
+    p.circle_stroke(c, R, egui::Stroke::new(1.0, ring));
+    p.circle_stroke(c, R / 2.0, egui::Stroke::new(1.0, ring.gamma_multiply(0.5)));
+    p.line_segment([c - egui::vec2(R, 0.0), c + egui::vec2(R, 0.0)], egui::Stroke::new(1.0, ring.gamma_multiply(0.4)));
+    p.line_segment([c - egui::vec2(0.0, R), c + egui::vec2(0.0, R)], egui::Stroke::new(1.0, ring.gamma_multiply(0.4)));
+    let mut changed = false;
+    if resp.dragged() || resp.clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let mut d = pos - c;
+            if d.length() > R { d = d.normalized() * R; }
+            if d.length() < 3.0 { d = egui::Vec2::ZERO; }   // the middle means "straight behind"
+            let (dx, dy) = (d.x.round(), d.y.round());
+            if (dx, dy) != (sh.dx, sh.dy) { sh.dx = dx; sh.dy = dy; changed = true; }
+        }
+    }
+    let off = egui::vec2(sh.dx, sh.dy);
+    let dot = c + if off.length() > R { off.normalized() * R } else { off };
+    ui.painter().line_segment([c, dot], egui::Stroke::new(2.0, accent));
+    ui.painter().circle_filled(dot, 5.5, accent);
+    ui.painter().circle_stroke(dot, 5.5, egui::Stroke::new(1.0, ink));
+    resp.on_hover_text("Drag to set which way the shadow falls and how far");
+    changed
+}
+
+/// The shadow's controls: the dial, distance and angle sliders, blur, spread and colour.
+fn shadow_controls(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        let mut dist = sh.dx.abs().max(sh.dy.abs());
-        let (cx, cy) = (sh.dx.signum() * (sh.dx != 0.0) as i32 as f32, sh.dy.signum() * (sh.dy != 0.0) as i32 as f32);
-        egui::Grid::new("shadow-pad").spacing([2.0, 2.0]).show(ui, |ui| {
-            for gy in [-1.0f32, 0.0, 1.0] {
-                for gx in [-1.0f32, 0.0, 1.0] {
-                    let label = match (gx as i32, gy as i32) {
-                        (-1, -1) => "NW", (0, -1) => "N", (1, -1) => "NE",
-                        (-1, 0) => "W", (0, 0) => "All", (1, 0) => "E",
-                        (-1, 1) => "SW", (0, 1) => "S", _ => "SE",
-                    };
-                    if ui.add(egui::Button::new(label).selected((gx, gy) == (cx, cy)).min_size(egui::vec2(30.0, 22.0))).clicked() {
-                        let d = if gx == 0.0 && gy == 0.0 { 0.0 } else if dist == 0.0 { 4.0 } else { dist };
-                        dist = d;
-                        sh.dx = gx * d;
-                        sh.dy = gy * d;
-                        changed = true;
-                    }
-                }
-                ui.end_row();
-            }
-        });
+        changed |= shadow_dial(ui, sh);
         ui.vertical(|ui| {
-            ui.add_enabled_ui(sh.dx != 0.0 || sh.dy != 0.0, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Distance");
-                    if ui.add(egui::DragValue::new(&mut dist).range(0.0..=100.0)).changed() {
-                        sh.dx = cx * dist;
-                        sh.dy = cy * dist;
-                        changed = true;
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                ui.label("Blur");
-                changed |= ui.add(egui::DragValue::new(&mut sh.blur).range(0.0..=100.0)).changed();
-            });
-            ui.horizontal(|ui| {
-                ui.label("Spread");
-                changed |= ui.add(egui::DragValue::new(&mut sh.spread).range(-50.0..=100.0)).changed();
+            let mut dist = (sh.dx * sh.dx + sh.dy * sh.dy).sqrt();
+            let mut angle = if dist > 0.0 { sh.dy.atan2(sh.dx).to_degrees().rem_euclid(360.0) } else { 90.0 };
+            egui::Grid::new("shadow-dir").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                let d0 = dist;
+                if effect_slider(ui, "Distance", &mut dist, 0.0..=100.0, " px") {
+                    let a = angle.to_radians();
+                    let was_zero = d0 == 0.0;
+                    let a = if was_zero { std::f32::consts::FRAC_PI_2 } else { a };
+                    sh.dx = (dist * a.cos()).round(); sh.dy = (dist * a.sin()).round(); changed = true;
+                }
+                if effect_slider_if(ui, dist > 0.0, "Direction", &mut angle, 0.0..=360.0, "\u{b0}") {
+                    let a = angle.to_radians();
+                    sh.dx = (dist * a.cos()).round(); sh.dy = (dist * a.sin()).round(); changed = true;
+                }
             });
         });
     });
+    egui::Grid::new("shadow-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        changed |= effect_slider(ui, "Blur", &mut sh.blur, 0.0..=100.0, " px");
+        changed |= effect_slider(ui, "Spread", &mut sh.spread, -50.0..=100.0, " px");
+        changed |= effect_color(ui, "Color", &mut sh.color);
+    });
     changed
+}
+
+/// A small sample of the object's look with every effect applied, redrawn as the controls move.
+fn effects_preview(ui: &mut egui::Ui, obj: &Object) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 86.0), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 4.0, egui::Color32::from_gray(238));   // light in both themes, so a dark shadow shows
+    let sample = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 8.0), egui::vec2(110.0, 34.0));
+    // The sample is smaller than a slide, so its effects are drawn at half size.
+    let mut sample_obj = Object::new("sample", "Sample", Kind::Rect, 0.0, 0.0, sample.width(), sample.height());
+    sample_obj.fill = Some(obj.fill.unwrap_or(Rgba(3, 83, 158, 255)));
+    sample_obj.radius = 8.0;
+    sample_obj.shadow = obj.shadow; sample_obj.glow = obj.glow; sample_obj.reflection = obj.reflection; sample_obj.soft_edge = obj.soft_edge;
+    let fill = color(sample_obj.fill.unwrap());
+    super::effects_paint::behind(&p, &sample_obj, sample, 0.5, Some(fill), &|q| q);
+    if obj.soft_edge > 0.0 { super::effects_paint::soft_fill(&p, &super::effects_paint::figures(&sample_obj, sample, 0.5), sample, fill, obj.soft_edge * 0.5, &|q| q); }
+    else { p.rect_filled(sample, 4.0, fill); }
+    p.text(sample.center(), egui::Align2::CENTER_CENTER, "Sample", egui::FontId::proportional(13.0), egui::Color32::WHITE);
+}
+
+/// The effects buttons: one popup each, so none of them is tall.
+#[derive(Clone, Copy, PartialEq)]
+enum EffectPane { Presets, Shadow, Glow, Reflection, Soft, Corners }
+
+/// The contents of one Effects popup: a small preview, then that effect's controls. Returns true when anything changed.
+fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
+    let mut changed = false;
+    ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
+    ui.spacing_mut().slider_width = 96.0;
+    effects_preview(ui, obj);
+    ui.add_space(6.0);
+    match pane {
+        EffectPane::Presets => {
+            for (name, tip) in [("None", "Remove every effect"), ("Soft shadow", "A gentle shadow just below"), ("Warm glow", "A warm halo"), ("Mirror", "A faded reflection below")] {
+                if ui.add(egui::Button::new(name).min_size(egui::vec2(ui.available_width(), 22.0))).on_hover_text(tip).clicked() {
+                    obj.shadow = None; obj.glow = None; obj.reflection = None; obj.soft_edge = 0.0;
+                    match name {
+                        "Soft shadow" => obj.shadow = Some(Shadow { dx: 0.0, dy: 4.0, blur: 14.0, spread: 0.0, color: Rgba(0, 0, 0, 80) }),
+                        "Warm glow" => obj.glow = Some(Glow { radius: 14.0, color: Rgba(255, 190, 40, 220) }),
+                        "Mirror" => obj.reflection = Some(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 }),
+                        _ => {}
+                    }
+                    changed = true;
+                }
+            }
+        }
+        EffectPane::Shadow => {
+            let mut sh = obj.shadow.unwrap_or(Shadow { dx: 4.0, dy: 4.0, blur: 8.0, spread: 0.0, color: Rgba(0, 0, 0, 90) });
+            let mut on = obj.shadow.is_some();
+            changed |= effect_section(ui, "Use shadow", &mut on, |ui| shadow_controls(ui, &mut sh));
+            obj.shadow = if on { Some(sh) } else { None };
+        }
+        EffectPane::Glow => {
+            let mut gl = obj.glow.unwrap_or(Glow { radius: 12.0, color: Rgba(255, 190, 40, 200) });
+            let mut on = obj.glow.is_some();
+            changed |= effect_section(ui, "Use glow", &mut on, |ui| {
+                let mut c = false;
+                egui::Grid::new("glow-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                    c |= effect_slider(ui, "Size", &mut gl.radius, 1.0..=100.0, " px");
+                    c |= effect_color(ui, "Color", &mut gl.color);
+                });
+                c
+            });
+            obj.glow = if on { Some(gl) } else { None };
+        }
+        EffectPane::Reflection => {
+            let mut rf = obj.reflection.unwrap_or(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 });
+            let mut on = obj.reflection.is_some();
+            changed |= effect_section(ui, "Use reflection", &mut on, |ui| {
+                let mut c = false;
+                egui::Grid::new("refl-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                    c |= effect_percent(ui, "Size", &mut rf.size, 0.1);
+                    c |= effect_percent(ui, "Opacity", &mut rf.opacity, 0.05);
+                    c |= effect_slider(ui, "Gap", &mut rf.gap, 0.0..=100.0, " px");
+                });
+                ui.weak("Not every browser shows reflections.");
+                c
+            });
+            obj.reflection = if on { Some(rf) } else { None };
+        }
+        EffectPane::Soft => {
+            let mut soft = obj.soft_edge;
+            let was = soft > 0.0;
+            let mut on = was;
+            changed |= effect_section(ui, "Use soft edges", &mut on, |ui| {
+                let mut c = false;
+                if !was { soft = 10.0; c = true; }   // just switched on: start with a visible fade
+                egui::Grid::new("soft-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| { c |= effect_slider(ui, "Fade", &mut soft, 1.0..=100.0, " px"); });
+                ui.weak("While on, the shadow and glow are hidden.");
+                c
+            });
+            obj.soft_edge = if on { soft.max(1.0) } else { 0.0 };
+        }
+        EffectPane::Corners => {
+            egui::Grid::new("corner-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                changed |= effect_slider(ui, "Radius", &mut obj.radius, 0.0..=300.0, " px");
+            });
+        }
+    }
+    changed
+}
+
+/// The Effects group of the ribbon: a button for each effect, lit while the object uses it.
+fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
+    let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
+    let is_pic = matches!(obj.kind, Kind::Image);
+    if is_line { return; }
+    group(ui, "Effects", |ui| { ui.add_enabled_ui(enabled && !is_media, |ui| {
+        let panes = [
+            (EffectPane::Presets, "Presets", "Ready-made effects", false),
+            (EffectPane::Shadow, "Shadow", "A shadow behind the object", obj.shadow.is_some()),
+            (EffectPane::Glow, "Glow", "A soft halo of colour around the object", obj.glow.is_some()),
+            (EffectPane::Reflection, "Reflection", "A faded mirror image below the object", obj.reflection.is_some()),
+            (EffectPane::Soft, "Soft edges", "Fade the object's edges", obj.soft_edge > 0.0),
+            (EffectPane::Corners, "Corners", "Round the corners of a shape", obj.radius > 0.0),
+        ];
+        for row in panes.chunks(3) {
+            ui.horizontal(|ui| {
+                for &(pane, label, tip, on) in row {
+                    if pane == EffectPane::Corners && is_pic { continue; }
+                    let btn = ui.scope(|ui| {
+                        ui.spacing_mut().button_padding = egui::vec2(6.0, 1.0);
+                        ui.add(egui::Button::new(egui::RichText::new(label).size(12.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+                    }).inner.on_hover_text(tip);
+                    egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                        *changed |= effect_pane(ui, obj, pane);
+                    });
+                }
+            });
+        }
+    }); });
 }

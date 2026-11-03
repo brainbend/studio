@@ -1188,9 +1188,12 @@
     var sh = shadow ? shadow.dx + 'px ' + shadow.dy + 'px ' + shadow.blur + 'px ' + (shadow.spread || 0) + 'px ' + css(shadow.color) : '';
     // A freeform shape's shadow follows its outline (a box shadow would be a rectangle behind it).
     if (entry.node._path && entry.node._path.ownerSVGElement) {
-      var fx = (shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ') ' : '') +
-        (o.glow ? 'drop-shadow(0 0 ' + Math.max(0, o.glow.radius / 2) + 'px ' + css(o.glow.color) + ')' : '');
+      var seP = o.soft_edge || 0;
+      var fx = seP > 0 ? 'blur(' + (seP / 4) + 'px)'
+        : (shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ') ' : '') +
+          (o.glow ? 'drop-shadow(0 0 ' + Math.max(0, o.glow.radius / 2) + 'px ' + css(o.glow.color) + ')' : '');
       entry.node._path.ownerSVGElement.style.filter = fx;
+      entry.node._path.ownerSVGElement.style.overflow = seP > 0 ? 'visible' : '';
       sh = '';
     } else if (o.glow) {
       var gl = '0 0 ' + o.glow.radius + 'px ' + Math.round(o.glow.radius / 4) + 'px ' + css(o.glow.color);
@@ -1199,16 +1202,30 @@
     // The focus ring is dark with a white inner band, so it shows on any background.
     if (entry.ring) sh = (sh ? sh + ',' : '') + '0 0 0 3px #fff';
     entry.node.style.boxShadow = sh || 'none';
-    // Soft edges fade the object out towards its border (and, being a mask, any shadow or glow outside it). A focused
-    // object keeps its edges so the focus ring shows. Reflection is not supported by every browser; where it is not,
-    // the object simply has none.
+    // Soft edges fade the object out towards its border, following its outline. A picture is faded with a mask; a box or
+    // an oval draws its fill on a smaller, blurred layer behind its text; a freeform shape is blurred as a whole (above).
+    // Reflection is not supported by every browser; where it is not, the object simply has none.
     var se = o.soft_edge || 0, mask = '';
-    if (se > 0 && !entry.ring) {
+    if (se > 0 && entry.node._img) {
       var fade = function (dir) { return 'linear-gradient(' + dir + ',transparent,#000 ' + se + 'px,#000 calc(100% - ' + se + 'px),transparent)'; };
       mask = fade('to right') + ',' + fade('to bottom');
     }
     entry.node.style.webkitMaskImage = mask; entry.node.style.maskImage = mask;
     entry.node.style.webkitMaskComposite = mask ? 'source-in' : ''; entry.node.style.maskComposite = mask ? 'intersect' : '';
+    if (se > 0 && !entry.node._img && !entry.node._path && !entry.node._line) {
+      var back = entry._soft;
+      if (!back) {
+        back = el('div', 'soft-back'); back.setAttribute('aria-hidden', 'true');
+        back.style.cssText = 'position:absolute;pointer-events:none;z-index:-1';
+        entry.node.insertBefore(back, entry.node.firstChild); entry._soft = back; entry.node.style.isolation = 'isolate';
+      }
+      back.style.display = '';
+      back.style.inset = se / 2 + 'px';
+      back.style.filter = 'blur(' + se / 4 + 'px)';
+      back.style.borderRadius = o.kind === 'Ellipse' ? '50%' : Math.max(0, (o.radius || 0) - se / 2) + 'px';
+      back.style.background = entry.node.style.background;
+      entry.node.style.background = 'none'; entry.node.style.border = 'none'; entry.node.style.boxShadow = entry.ring ? '0 0 0 3px #fff' : 'none';
+    } else if (entry._soft) entry._soft.style.display = 'none';
     var rf = o.reflection;
     entry.node.style.webkitBoxReflect = rf
       ? 'below ' + rf.gap + 'px linear-gradient(to bottom,transparent,transparent ' + Math.round((1 - rf.size) * 100) + '%,rgba(255,255,255,' + rf.opacity + '))'

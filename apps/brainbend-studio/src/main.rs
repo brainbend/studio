@@ -15,6 +15,7 @@ mod player_dialog;
 mod button_styles;
 mod master_view;
 mod objects_panel;
+mod effects_paint;
 mod ribbon;
 use ribbon::combo;
 mod states_panel;
@@ -647,54 +648,6 @@ pub(crate) fn paint_gradient(painter: &egui::Painter, rect: egui::Rect, angle: f
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-}
-
-/// A solid rectangle whose edges fade out over `edge` screen pixels (the editor's rough picture of "Soft edges").
-fn paint_soft_rect(painter: &egui::Painter, r: egui::Rect, c: egui::Color32, edge: f32) {
-    let e = edge.min(r.width() / 2.0).min(r.height() / 2.0).max(0.0);
-    let xs = [r.left(), r.left() + e, r.right() - e, r.right()];
-    let ys = [r.top(), r.top() + e, r.bottom() - e, r.bottom()];
-    let mut mesh = egui::epaint::Mesh::default();
-    for (j, &y) in ys.iter().enumerate() {
-        for (i, &x) in xs.iter().enumerate() {
-            let inner = (1..=2).contains(&i) && (1..=2).contains(&j);
-            let on_edge = i == 0 || i == 3 || j == 0 || j == 3;
-            mesh.colored_vertex(egui::pos2(x, y), if inner || !on_edge { c } else { egui::Color32::TRANSPARENT });
-        }
-    }
-    for j in 0..3u32 { for i in 0..3u32 {
-        let k = j * 4 + i;
-        mesh.add_triangle(k, k + 1, k + 5);
-        mesh.add_triangle(k, k + 5, k + 4);
-    } }
-    painter.add(egui::Shape::mesh(mesh));
-}
-
-/// The faded mirror image under a filled rectangle: `size` of its height, `opacity` at the top, `gap` below it.
-fn paint_reflection(painter: &egui::Painter, r: egui::Rect, c: egui::Color32, size: f32, opacity: f32, gap: f32) {
-    let h = r.height() * size.clamp(0.0, 1.0);
-    if h <= 0.5 { return; }
-    let top = r.bottom() + gap;
-    let mut mesh = egui::epaint::Mesh::default();
-    mesh.colored_vertex(egui::pos2(r.left(), top), c.gamma_multiply(opacity.clamp(0.0, 1.0)));
-    mesh.colored_vertex(egui::pos2(r.right(), top), c.gamma_multiply(opacity.clamp(0.0, 1.0)));
-    mesh.colored_vertex(egui::pos2(r.right(), top + h), egui::Color32::TRANSPARENT);
-    mesh.colored_vertex(egui::pos2(r.left(), top + h), egui::Color32::TRANSPARENT);
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter.add(egui::Shape::mesh(mesh));
-}
-
-/// A halo of `radius` screen pixels in layers that grow fainter outwards.
-fn paint_glow(painter: &egui::Painter, r: egui::Rect, ellipse: bool, corner: f32, c: egui::Color32, radius: f32) {
-    const STEPS: usize = 8;
-    for i in (1..=STEPS).rev() {
-        let grow = radius * i as f32 / STEPS as f32;
-        let col = c.gamma_multiply(0.5 / STEPS as f32 * 2.0);
-        let gr = r.expand(grow);
-        if ellipse { painter.add(egui::epaint::EllipseShape::filled(gr.center(), gr.size() / 2.0, col)); }
-        else { painter.rect_filled(gr, corner + grow, col); }
-    }
 }
 
 /// Fill a polygon (given in `rect`'s unrotated frame) with a gradient or a flat colour; `map` places each
@@ -4009,19 +3962,12 @@ impl App {
             }
             let ellipse = matches!(o.kind, Kind::Ellipse);
             let boxless = matches!(o.kind, Kind::Path(_) | Kind::Line | Kind::LineUp);
-            // Soft edges replace the shadow and glow (as in the player, where the fade also clips them).
-            let soft = if o.soft_edge > 0.0 && !boxless { Some(o.soft_edge * scale) } else { None };
-            if let (Some(gl), true, false, None) = (o.glow, o.fill.is_some() || matches!(o.kind, Kind::Image), boxless, soft) {
-                paint_glow(painter, r, ellipse, o.radius * scale, color(gl.color), gl.radius * scale);
-            }
-            if let (Some(rf), Some(f), false) = (o.reflection, o.fill, boxless) {
-                paint_reflection(painter, r, color(f), rf.size, rf.opacity, rf.gap * scale);
-            }
-            if let (Some(sh), true, false, None) = (o.shadow, o.fill.is_some() || matches!(o.kind, Kind::Image), boxless, soft) {
-                let mut sr = r.translate(egui::vec2(sh.dx, sh.dy) * scale);
-                sr = sr.expand((sh.spread + if sh.dx == 0.0 && sh.dy == 0.0 { sh.blur * 0.5 } else { 0.0 }) * scale); // spread, plus a rough glow
-                if ellipse { painter.add(egui::epaint::EllipseShape::filled(sr.center(), sr.size() / 2.0, color(sh.color))); }
-                else { painter.rect_filled(sr, o.radius * scale, color(sh.color)); }
+            // Shadow, glow and reflection go behind the object and follow its outline. Soft edges fade the fill itself.
+            let soft = if o.soft_edge > 0.0 && !matches!(o.kind, Kind::Image) { Some(o.soft_edge * scale) } else { None };
+            if o.fill.is_some() || matches!(o.kind, Kind::Image) {
+                if o.shadow.is_some() || o.glow.is_some() || o.reflection.is_some() {
+                    effects_paint::behind(painter, o, r, scale, o.fill.map(color), &|p| p);
+                }
             }
             if let (Some(g), false, true) = (&o.gradient, boxless, !g_is_empty(&o.gradient)) {
                 if !ellipse && o.radius <= 0.5 { paint_gradient(painter, r, g.angle, &g.stops); }
@@ -4030,7 +3976,7 @@ impl App {
                     fill_polygon(painter, &poly, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
                 }
             } else if let (Some(f), false) = (o.fill, boxless) {
-                if let Some(edge) = soft { paint_soft_rect(painter, r, color(f), edge); }
+                if let Some(edge) = soft { effects_paint::soft_fill(painter, &effects_paint::figures(o, r, scale), r, color(f), edge, &|p| p); }
                 else if ellipse { painter.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, color(f))); }
                 else { painter.rect_filled(r, o.radius * scale, color(f)); }
             }
@@ -4038,6 +3984,8 @@ impl App {
                 let figs = path_polygons(cmds, r);
                 if let (Some(g), true) = (&o.gradient, !g_is_empty(&o.gradient)) {
                     fill_figures(painter, &figs, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
+                } else if let (Some(f), Some(edge)) = (o.fill, soft) {
+                    effects_paint::soft_fill(painter, &figs, r, color(f), edge, &|p| p);
                 } else if let Some(f) = o.fill {
                     fill_figures(painter, &figs, &|p| p, &|_| color(f));
                 }
@@ -4212,10 +4160,15 @@ impl App {
         };
         let has_fill = o.fill.is_some() || o.gradient.as_ref().is_some_and(|g| !g.stops.is_empty());
         let stroke = o.stroke.map(|st| egui::Stroke::new((st.width * scale).max(1.0), color(st.color)));
+        let soft = if o.soft_edge > 0.0 { Some(o.soft_edge * scale) } else { None };
+        if (o.fill.is_some() || matches!(o.kind, Kind::Image)) && (o.shadow.is_some() || o.glow.is_some() || o.reflection.is_some()) {
+            effects_paint::behind(painter, o, r, scale, o.fill.map(color), &rot);
+        }
         match &o.kind {
             Kind::Path(cmds) => {
                 let figs = path_polygons(cmds, r);
-                if has_fill { fill_figures(painter, &figs, &rot, &shade); }
+                if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &figs, r, color(f), edge, &rot); }
+                else if has_fill { fill_figures(painter, &figs, &rot, &shade); }
                 if let Some(st) = stroke { for poly in &figs { painter.extend(outline_shapes(poly.iter().map(|p| rot(*p)).collect(), st, o.dash)); } }
             }
             Kind::Slider(sl) => {
@@ -4268,7 +4221,8 @@ impl App {
             }
             _ => {
                 let poly = if matches!(o.kind, Kind::Ellipse) { ellipse_poly(r) } else { rounded_rect_poly(r, o.radius * scale) };
-                if has_fill { fill_polygon(painter, &poly, &rot, &shade); }
+                if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &vec![poly.clone()], r, color(f), edge, &rot); }
+                else if has_fill { fill_polygon(painter, &poly, &rot, &shade); }
                 if let Some(st) = stroke { painter.extend(outline_shapes(poly.iter().map(|p| rot(*p)).collect(), st, o.dash)); }
             }
         }
@@ -9917,23 +9871,95 @@ mod tests {
     }
 
     #[test]
-    fn a_button_with_glow_soft_edges_and_a_reflection_draws_and_keeps_them() {
+    fn effects_follow_the_outline_of_rounded_boxes_ellipses_stars_and_turned_shapes() {
         let mut a = app();
-        for (i, (glow, soft, refl)) in [(true, 0.0, false), (false, 14.0, false), (false, 0.0, true)].into_iter().enumerate() {
-            let mut o = Object::new(&format!("b{i}"), &format!("Button {i}"), Kind::Rect, 100.0 + i as f32 * 420.0, 200.0, 360.0, 120.0);
+        let star: Vec<PathCmd> = {
+            let mut v = vec![];
+            for i in 0..10 {
+                let ang = (i as f32 * 36.0 - 90.0).to_radians();
+                let rad = if i % 2 == 0 { 0.5 } else { 0.2 };
+                let (x, y) = (0.5 + rad * ang.cos(), 0.5 + rad * ang.sin());
+                v.push(if i == 0 { PathCmd::Move(x, y) } else { PathCmd::Line(x, y) });
+            }
+            v.push(PathCmd::Close);
+            v
+        };
+        let mut add = |name: &str, kind: Kind, x: f32, y: f32, f: &dyn Fn(&mut Object)| {
+            let mut o = Object::new(name, name, kind, x, y, 300.0, 140.0);
             o.fill = Some(Rgba(3, 83, 158, 255));
-            o.radius = 8.0;
-            if glow { o.glow = Some(Glow { radius: 20.0, color: Rgba(255, 190, 40, 255) }); }
-            o.soft_edge = soft;
-            if refl { o.reflection = Some(Reflection { size: 0.6, opacity: 0.5, gap: 4.0 }); }
+            f(&mut o);
             a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        }
+        };
+        add("shadow", Kind::Rect, 60.0, 60.0, &|o| { o.radius = 40.0; o.shadow = Some(Shadow { dx: 0.0, dy: 12.0, blur: 30.0, spread: 0.0, color: Rgba(0, 0, 0, 200) }); });
+        add("glow", Kind::Rect, 470.0, 60.0, &|o| { o.radius = 40.0; o.glow = Some(Glow { radius: 30.0, color: Rgba(255, 190, 40, 255) }); });
+        add("soft", Kind::Rect, 880.0, 60.0, &|o| { o.radius = 40.0; o.soft_edge = 30.0; });
+        add("reflect", Kind::Rect, 60.0, 360.0, &|o| { o.radius = 40.0; o.reflection = Some(Reflection { size: 0.6, opacity: 0.5, gap: 6.0 }); });
+        add("star", Kind::Path(star.clone()), 470.0, 330.0, &|o| { o.h = 220.0; o.w = 220.0; o.reflection = Some(Reflection { size: 0.6, opacity: 0.5, gap: 6.0 }); o.glow = Some(Glow { radius: 24.0, color: Rgba(255, 190, 40, 255) }); });
+        add("star-soft", Kind::Path(star), 780.0, 330.0, &|o| { o.h = 220.0; o.w = 220.0; o.soft_edge = 24.0; });
+        add("oval", Kind::Ellipse, 60.0, 700.0, &|o| { o.soft_edge = 30.0; });
+        add("turned", Kind::Rect, 470.0, 700.0, &|o| { o.radius = 30.0; o.rotation = 12.0; o.shadow = Some(Shadow { dx: 14.0, dy: 14.0, blur: 24.0, spread: 0.0, color: Rgba(0, 0, 0, 200) }); });
         let mut h = harness(a);
         h.run_steps(4);
         let img = h.render().expect("renderer");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { img.save(std::path::PathBuf::from(dir).join("button-effects.png")).unwrap(); }
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects;
-        assert!(o[0].glow.is_some() && o[1].soft_edge == 14.0 && o[2].reflection.is_some(), "the effects are kept on the objects");
+        assert!(o[0].shadow.is_some() && o[1].glow.is_some() && o[2].soft_edge == 30.0 && o[3].reflection.is_some(), "the effects are kept on the objects");
+    }
+
+    #[test]
+    fn the_effects_group_has_a_button_and_a_short_popup_for_each_effect() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let mut o = Object::new("b", "Button", Kind::Rect, 100.0, 100.0, 400.0, 120.0);
+        o.fill = Some(Rgba(3, 83, 158, 255));
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.state_mut().ribbon_tab = ribbon::HOME_TAB;
+        h.run_steps(4);
+        let obj = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        for label in ["Presets", "Shadow", "Glow", "Reflection", "Soft edges", "Corners"] {
+            assert!(h.query_by_label(label).is_some(), "{label} has its own button in the Effects group");
+        }
+        assert!(h.query_by_label("Distance").is_none() && h.query_by_label("Fade").is_none(), "nothing is open yet");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("effects-group.png")).unwrap(); }
+        // Presets.
+        h.get_by_label("Presets").click();
+        h.run_steps(4);
+        h.get_by_label("Soft shadow").click();
+        h.run_steps(4);
+        assert!(obj(&h).shadow.is_some() && obj(&h).glow.is_none(), "the preset turns on a shadow");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        // Shadow: the switch, then its controls.
+        h.get_by_label("Shadow").click();
+        h.run_steps(4);
+        for label in ["Use shadow", "Distance", "Direction", "Blur", "Spread"] { assert!(h.query_by_label(label).is_some(), "{label} is in the shadow popup"); }
+        assert!(h.query_by_label("Fade").is_none() && h.query_by_label("Radius").is_none(), "only this effect's controls");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("effects-shadow-popup.png")).unwrap(); }
+        h.get_by_label("Use shadow").click();
+        h.run_steps(4);
+        assert!(obj(&h).shadow.is_none(), "the switch turns the shadow off again");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        // Glow, reflection and soft edges each switch on from their own popup.
+        for (button, switch) in [("Glow", "Use glow"), ("Reflection", "Use reflection"), ("Soft edges", "Use soft edges")] {
+            h.get_by_label(button).click();
+            h.run_steps(4);
+            h.get_by_label(switch).click();
+            h.run_steps(4);
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        let o = obj(&h);
+        assert!(o.glow.is_some() && o.reflection.is_some() && o.soft_edge > 0.0, "{:?}", (o.glow, o.reflection, o.soft_edge));
+        h.get_by_label("Presets").click();
+        h.run_steps(4);
+        h.get_by_label("None").click();
+        h.run_steps(4);
+        let o = obj(&h);
+        assert!(o.shadow.is_none() && o.glow.is_none() && o.reflection.is_none() && o.soft_edge == 0.0, "None clears every effect");
+        assert_eq!(o.fill, Some(Rgba(3, 83, 158, 255)), "and leaves the look alone");
     }
 
     #[test]
