@@ -59,6 +59,33 @@ pub fn is_newer(current: &str, latest: &semver::Version) -> bool {
     semver::Version::parse(current).map(|c| latest > &c).unwrap_or(false)
 }
 
+/// GitHub's release notes as plain text for the update window: no HTML comments, markdown markers or the
+/// "Full Changelog" link line, headings as plain lines, and bullets as dots.
+pub fn clean_notes(raw: &str) -> String {
+    let mut text = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find("<!--") {
+        text.push_str(&rest[..start]);
+        match rest[start..].find("-->") {
+            Some(end) => rest = &rest[start + end + 3..],
+            None => { rest = ""; break; }
+        }
+    }
+    text.push_str(rest);
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.to_lowercase().replace('*', "").trim_start().starts_with("full changelog") { continue; }
+        let line = line.trim_start_matches('#').trim_start();
+        let line = match line.strip_prefix("* ").or_else(|| line.strip_prefix("- ")) { Some(item) => format!("\u{2022} {item}"), None => line.to_string() };
+        let line = line.replace("**", "");
+        if line.is_empty() && lines.last().is_none_or(|l| l.is_empty()) { continue; }
+        lines.push(line);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) { lines.pop(); }
+    lines.join("\n")
+}
+
 /// The ending of the file name that holds this system's update.
 pub fn platform_suffix() -> Option<&'static str> {
     if cfg!(target_os = "macos") {
@@ -450,10 +477,11 @@ impl super::App {
             ui.set_width(380.0);
             ui.strong(format!("BrainBend Studio {} is available", release.version));
             ui.weak(format!("You have version {}.", env!("CARGO_PKG_VERSION")));
-            if !release.notes.trim().is_empty() {
+            let notes = clean_notes(&release.notes);
+            if !notes.is_empty() {
                 ui.add_space(6.0);
                 egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
-                    ui.add(egui::Label::new(release.notes.chars().take(1500).collect::<String>()).wrap());
+                    ui.add(egui::Label::new(notes.chars().take(1500).collect::<String>()).wrap());
                 });
             }
             ui.add_space(8.0);
@@ -512,6 +540,15 @@ mod tests {
         assert!(r.notes.contains("What's new"));
         assert_eq!(r.assets.len(), 3);
         assert_eq!(r.assets[0].size, 1000);
+    }
+
+    #[test]
+    fn release_notes_lose_their_markup() {
+        let raw = "<!-- Release notes generated using configuration in\n.github/release.yml at v0.1.3 -->\n\n## What's Changed\n* Faster saving by @someone in https://github.com/brainbend/studio/pull/4\n- Fixes a crash\n\n**Full Changelog**: https://github.com/brainbend/studio/compare/v0.1.2...v0.1.3";
+        assert_eq!(clean_notes(raw), "What's Changed\n\u{2022} Faster saving by @someone in https://github.com/brainbend/studio/pull/4\n\u{2022} Fixes a crash");
+        assert_eq!(clean_notes("<!-- only a comment -->\n\n**Full Changelog**: https://example.com"), "", "nothing left to show");
+        assert_eq!(clean_notes("Plain text stays."), "Plain text stays.");
+        assert_eq!(clean_notes("Unfinished <!-- comment"), "Unfinished");
     }
 
     #[test]
