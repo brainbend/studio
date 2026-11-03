@@ -8,6 +8,7 @@ pub mod passage;
 pub mod player;
 pub mod shapes;
 pub mod tables;
+pub mod variables;
 pub mod richtext;
 pub use master::{Background, Master, PlaceholderKind, SlideLayout, Theme};
 pub use player::{ButtonStyle, GlossaryTerm, PlayerControls, PlayerPalette, PlayerSettings, PlayerTheme, Resource, SidebarSide};

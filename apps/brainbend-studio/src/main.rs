@@ -145,6 +145,10 @@ struct App {
     var_query: String,
     var_kind: usize,
     var_use: usize,
+    /// A variable being renamed in the window: its id, the name typed so far, and whether the box still needs focus.
+    var_rename: Option<(String, String, bool)>,
+    /// What the last rename or type change did, or why it was refused (true when it was refused).
+    var_note: Option<(String, bool)>,
     /// The Focus Order window (Home > Slide): the reading and tab order of the current layer.
     focus_open: bool,
     /// The Equation window (Insert > Equation, or Edit equation in Properties), while it is open.
@@ -393,7 +397,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -3421,7 +3425,45 @@ impl App {
             ui.add_space(4.0);
             self.variables_panel(ui, ctx);
         });
-        if !open { self.variables_open = false; }
+        if !open { self.variables_open = false; self.var_rename = None; self.var_note = None; }
+    }
+
+    /// Renames a variable, rewriting the `%Name%` text that shows it. One undo step.
+    fn rename_variable(&mut self, id: &str, name: &str) -> Result<(), String> {
+        let p = self.project.as_ref().ok_or("No project is open.")?;
+        let clean = brainbend_doc::variables::check_new_name(p, id, name)?;
+        let old = p.variables.iter().find(|v| v.id == id).map(|v| v.name.clone()).unwrap_or_default();
+        if old == clean { return Ok(()); }
+        self.snapshot();
+        let report = brainbend_doc::variables::rename(self.project.as_mut().unwrap(), id, &clean)?;
+        let mut note = format!("Renamed {old} to {}.", report.name);
+        if report.objects > 0 { note.push_str(&format!(" Updated {} that show{} it in their text.", if report.objects == 1 { "1 object".to_string() } else { format!("{} objects", report.objects) }, if report.objects == 1 { "s" } else { "" })); }
+        if report.javascript { note.push_str(" JavaScript you wrote that uses the old name was not changed."); }
+        self.var_note = Some((note, false));
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Changes a variable's type, converting the values triggers set or compare. Refused (nothing changes) when something
+    /// needs it to stay as it is. One undo step.
+    fn convert_variable(&mut self, id: &str, to: brainbend_doc::variables::VarType) -> Result<(), String> {
+        use brainbend_doc::variables as vars;
+        let p = self.project.as_ref().ok_or("No project is open.")?;
+        let v = p.variables.iter().find(|v| v.id == id).ok_or("That variable no longer exists.")?;
+        let name = v.name.clone();
+        if vars::type_of(&v.initial) == to { return Ok(()); }
+        let blockers = vars::conversion_blockers(p, id, to);
+        if !blockers.is_empty() {
+            return Err(format!("Cannot make \"{name}\" {}. It is used by {}. Change those first, or keep it as it is.", to.label(), blockers.join(" and ")));
+        }
+        self.snapshot();
+        let report = vars::convert(self.project.as_mut().unwrap(), id, to)?;
+        let mut note = format!("\"{name}\" is now {}.", to.label());
+        if report.triggers > 0 { note.push_str(&format!(" Updated the values in {} trigger{}.", report.triggers, if report.triggers == 1 { "" } else { "s" })); }
+        if report.lossy { note.push_str(" Some values could not be carried over exactly."); }
+        self.var_note = Some((note, false));
+        self.dirty = true;
+        Ok(())
     }
 
     /// Project variables (used by triggers): search and filter, add, set the initial value, delete.
@@ -3447,7 +3489,20 @@ impl App {
             }
             ui.add_space(2.0);
         }
+        let mut clear_note = false;
+        if let Some((note, refused)) = &self.var_note {
+            ui.horizontal_wrapped(|ui| {
+                if *refused { ui.colored_label(egui::Color32::from_rgb(230, 90, 80), note.as_str()); } else { ui.label(egui::RichText::new(note.as_str()).color(egui::Color32::from_rgb(90, 180, 120))); }
+                if ui.small_button("OK").clicked() { clear_note = true; }
+            });
+            ui.add_space(2.0);
+        }
+        if clear_note { self.var_note = None; }
         let (query, kind, usage) = (self.var_query.clone(), self.var_kind, self.var_use);
+        let mut start_rename: Option<(String, String)> = None;
+        let mut commit_rename: Option<(String, String)> = None;
+        let mut cancel_rename = false;
+        let mut convert_var: Option<(String, brainbend_doc::variables::VarType)> = None;
         let mut add_var: Option<(String, usize)> = None;
         let mut remove_var: Option<String> = None;
         let mut dup_var: Option<String> = None;
@@ -3457,7 +3512,18 @@ impl App {
             let proj = self.project.as_mut().unwrap();
             for v in proj.variables.iter_mut().filter(|v| !v.built_in && variable_shown(v, &in_triggers, &query, kind, usage)) {
                 let row = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| { ui.style_mut().interaction.selectable_labels = false; ui.horizontal(|ui| {
-                    ui.label(format!("{} =", v.name));
+                    let renaming = self.var_rename.as_ref().is_some_and(|(id, ..)| *id == v.id);
+                    if renaming {
+                        if let Some((_, buf, fresh)) = self.var_rename.as_mut() {
+                            let r = ui.add(egui::TextEdit::singleline(buf).desired_width(120.0));
+                            if *fresh { r.request_focus(); *fresh = false; }
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel_rename = true; }
+                            else if r.lost_focus() { commit_rename = Some((v.id.clone(), buf.clone())); }
+                        }
+                        ui.label("=");
+                    } else if ui.add(egui::Label::new(format!("{} =", v.name)).sense(egui::Sense::click())).on_hover_text("Double-click to rename").double_clicked() {
+                        start_rename = Some((v.id.clone(), v.name.clone()));
+                    }
                     if value_editor(ui, &mut v.initial) { var_edited = true; }
                     if ui.small_button("x").on_hover_text("Delete variable and the triggers that use it").clicked() {
                         remove_var = Some(v.id.clone());
@@ -3466,6 +3532,22 @@ impl App {
                 row.response.context_menu(|ui| {
                     if ui.button("Copy name").clicked() { ui.ctx().copy_text(v.name.clone()); ui.close(); }
                     if ui.button("Duplicate").clicked() { dup_var = Some(v.id.clone()); ui.close(); }
+                    if ui.button("Rename…").clicked() { start_rename = Some((v.id.clone(), v.name.clone())); ui.close(); }
+                    ui.menu_button("Change type", |ui| {
+                        use brainbend_doc::variables::{type_of, VarType};
+                        let now = type_of(&v.initial);
+                        for t in VarType::ALL {
+                            let tip = match (now, t) {
+                                (VarType::Text, VarType::Num) => "Text that is not a number becomes 0",
+                                (VarType::Text, VarType::Bool) => "Only true, 1 or yes become true; anything else becomes false",
+                                (VarType::Num, VarType::Bool) => "0 becomes false and anything else becomes true",
+                                _ => "",
+                            };
+                            let b = ui.add_enabled(t != now, egui::Button::new(if t == now { format!("{} (current)", t.label()) } else { t.label().to_string() }));
+                            let b = if tip.is_empty() { b } else { b.on_hover_text(tip) };
+                            if b.clicked() { convert_var = Some((v.id.clone(), t)); ui.close(); }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Delete").on_hover_text("Deletes the variable and the triggers that use it").clicked() { remove_var = Some(v.id.clone()); ui.close(); }
                 });
@@ -3497,6 +3579,18 @@ impl App {
             self.project.as_mut().unwrap().variables.push(Variable { id, name, initial, built_in: false });
             self.new_var_name.clear();
             self.dirty = true;
+        }
+        if let Some((id, name)) = start_rename { self.var_rename = Some((id, name, true)); self.var_note = None; }
+        if cancel_rename { self.var_rename = None; }
+        if let Some((id, name)) = commit_rename {
+            match self.rename_variable(&id, &name) {
+                Ok(()) => self.var_rename = None,
+                // Stay in the box so the name can be fixed.
+                Err(e) => { self.var_note = Some((e, true)); if let Some(r) = self.var_rename.as_mut() { r.2 = true; } }
+            }
+        }
+        if let Some((id, to)) = convert_var {
+            if let Err(e) = self.convert_variable(&id, to) { self.var_note = Some((e, true)); }
         }
         if let Some(id) = dup_var {
             self.snapshot();
@@ -8719,6 +8813,98 @@ mod tests {
         used.sort();
         assert_eq!(used, ["v1", "v2", "v3", "v4"]);
         assert!(variables_in_triggers(&Project::new("empty")).is_empty());
+    }
+
+    /// A project with variables Score (number), Passed (true/false) and a text box that shows %Score%.
+    fn app_with_variables() -> App {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "You scored %Score% points".into();
+        a.project.as_mut().unwrap().variables.extend(sample_variables());
+        a
+    }
+
+    #[test]
+    fn renaming_a_variable_updates_the_text_that_shows_it_and_is_one_undo_step() {
+        let mut a = app_with_variables();
+        a.rename_variable("v1", "Points").unwrap();
+        let p = a.project.as_ref().unwrap();
+        assert_eq!(p.variables.iter().find(|v| v.id == "v1").unwrap().name, "Points");
+        assert_eq!(p.slides[0].layers[0].objects[0].text, "You scored %Points% points");
+        assert!(a.var_note.as_ref().is_some_and(|(n, refused)| !refused && n.contains("Renamed Score to Points") && n.contains("1 object")), "{:?}", a.var_note);
+        a.undo();
+        let p = a.project.as_ref().unwrap();
+        assert_eq!(p.variables.iter().find(|v| v.id == "v1").unwrap().name, "Score", "undo brings the name back");
+        assert_eq!(p.slides[0].layers[0].objects[0].text, "You scored %Score% points", "and the text, in the same step");
+    }
+
+    #[test]
+    fn a_name_that_is_taken_or_empty_is_refused_and_leaves_everything_alone() {
+        let mut a = app_with_variables();
+        let undo_before = a.undo.len();
+        assert!(a.rename_variable("v1", "Passed").unwrap_err().contains("already exists"));
+        assert!(a.rename_variable("v1", "  ").is_err());
+        assert_eq!(a.undo.len(), undo_before, "a refused rename leaves no undo step");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].text, "You scored %Score% points");
+    }
+
+    #[test]
+    fn changing_a_variables_type_is_one_undo_step_and_refused_when_a_slider_needs_a_number() {
+        use brainbend_doc::variables::VarType;
+        let mut a = app_with_variables();
+        a.convert_variable("v1", VarType::Text).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Text("0".into()));
+        assert!(a.var_note.as_ref().is_some_and(|(n, _)| n.contains("\"Score\" is now text")), "{:?}", a.var_note);
+        a.undo();
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Num(0.0), "undo brings the number back");
+
+        a.insert(Object::new("sl", "Slider", Kind::Slider(Slider { variable: "v1".into(), ..Slider::new() }), 0.0, 0.0, 200.0, 24.0));
+        let undo_before = a.undo.len();
+        let err = a.convert_variable("v1", VarType::Bool).unwrap_err();
+        assert!(err.contains("Cannot make \"Score\" true/false") && err.contains("1 slider"), "{err}");
+        assert_eq!(a.undo.len(), undo_before, "a refused change leaves no undo step");
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Num(0.0));
+    }
+
+    #[test]
+    fn the_rename_box_commits_on_enter_and_cancels_on_escape() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app_with_variables();
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        // Escape puts the old name back.
+        h.state_mut().var_rename = Some(("v1".into(), "Scored".into(), true));
+        h.run_steps(3);
+        assert!(h.query_by_label("Score =").is_none(), "the name is a box while it is renamed");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(h.state().var_rename.is_none());
+        assert!(h.query_by_label("Score =").is_some(), "Escape keeps the old name");
+        // Enter keeps the new one.
+        h.state_mut().var_rename = Some(("v1".into(), "Points".into(), true));
+        h.run_steps(3);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+        assert!(h.state().var_rename.is_none(), "{:?}", h.state().var_rename);
+        assert!(h.query_by_label("Points =").is_some(), "the new name is listed");
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].text, "You scored %Points% points");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-3-renamed.png")).unwrap(); }
+    }
+
+    #[test]
+    fn a_refused_type_change_reads_clearly_in_the_window() {
+        use brainbend_doc::variables::VarType;
+        let mut a = app_with_variables();
+        a.insert(Object::new("sl", "Slider", Kind::Slider(Slider { variable: "v1".into(), ..Slider::new() }), 0.0, 0.0, 200.0, 24.0));
+        a.variables_open = true;
+        let err = a.convert_variable("v1", VarType::Text).unwrap_err();
+        a.var_note = Some((err, true));
+        let mut h = harness(a);
+        h.run_steps(4);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-4-refused.png")).unwrap(); }
     }
 
     #[test]
