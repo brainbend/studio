@@ -3500,6 +3500,7 @@ impl App {
         if clear_note { self.var_note = None; }
         let (query, kind, usage) = (self.var_query.clone(), self.var_kind, self.var_use);
         let mut start_rename: Option<(String, String)> = None;
+        let mut new_var_problem: Option<String> = None;
         let mut commit_rename: Option<(String, String)> = None;
         let mut cancel_rename = false;
         let mut convert_var: Option<(String, brainbend_doc::variables::VarType)> = None;
@@ -3560,11 +3561,13 @@ impl App {
                     }
                 });
                 let name = self.new_var_name.trim().to_string();
-                let clash = proj.variables.iter().any(|v| v.name == name);
-                if ui.add_enabled(!name.is_empty() && !clash, egui::Button::new("Add")).clicked() {
+                let problem = if name.is_empty() { None } else { brainbend_doc::variables::check_name(&name).err().or_else(|| proj.variables.iter().any(|v| v.name == name).then(|| format!("A variable called \"{name}\" already exists."))) };
+                if ui.add_enabled(!name.is_empty() && problem.is_none(), egui::Button::new("Add")).clicked() {
                     add_var = Some((name, self.new_var_kind));
                 }
+                new_var_problem = problem;
             });
+            if let Some(why) = &new_var_problem { ui.colored_label(egui::Color32::from_rgb(230, 90, 80), why); }
         });
         if var_edited {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
@@ -3597,8 +3600,8 @@ impl App {
             let new = self.new_id("var");
             let proj = self.project.as_mut().unwrap();
             if let Some(v) = proj.variables.iter().find(|v| v.id == id).cloned() {
-                let mut name = format!("{} copy", v.name);
-                while proj.variables.iter().any(|x| x.name == name) { name.push_str(" 2"); }
+                let mut name = format!("{}_copy", v.name);
+                while proj.variables.iter().any(|x| x.name == name) { name.push_str("_2"); }
                 proj.variables.push(Variable { id: new, name, initial: v.initial, built_in: false });
             }
             self.dirty = true;
@@ -7097,6 +7100,18 @@ impl App {
                     let grown: f32 = ctx.data(|d| d.get_temp(grown_id)).unwrap_or(0.0);
                     let over = (grown - r.height()).max(0.0);
                     let lift = match o.style.valign { VAlign::Top => 0.0, VAlign::Middle => over / 2.0, VAlign::Bottom => over };
+                    // A %Name% placeholder counts as one character: Backspace or Delete beside it removes all of it.
+                    let (bs, del) = ctx.input(|i| (i.key_pressed(egui::Key::Backspace), i.key_pressed(egui::Key::Delete)));
+                    if bs || del {
+                        if let Some(mut st) = egui::TextEdit::load_state(ctx, edit_id) {
+                            if let Some(range) = st.cursor.char_range().filter(|r| r.primary.index == r.secondary.index) {
+                                if let Some((a, b)) = brainbend_doc::variables::placeholder_to_delete(&text, range.primary.index.0, del && !bs) {
+                                    st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(a), egui::text::CCursor::new(b))));
+                                    st.store(ctx, edit_id);
+                                }
+                            }
+                        }
+                    }
                     egui::Area::new(egui::Id::new("inplace-text")).fixed_pos(r.min - egui::vec2(0.0, lift)).constrain(false).order(egui::Order::Foreground).show(ctx, |ui| {
                         // The box is the object's own frame: no background of its own, the object's margins and text
                         // alignment, and an outline so it is clear where typing goes.
@@ -7174,6 +7189,20 @@ impl App {
                         else if i.key_pressed(egui::Key::U) { Some(Attr::ToggleUnderline) }
                         else { None }
                     });
+                    // The cursor and selection never end inside a placeholder: it is one character.
+                    let prev_id = egui::Id::new("inplace-prev-caret");
+                    let prev: Option<usize> = ctx.data(|d| d.get_temp(prev_id));
+                    if let Some(mut st) = egui::TextEdit::load_state(ctx, edit_id) {
+                        if let Some(r) = st.cursor.char_range() {
+                            let (p, s) = brainbend_doc::variables::snap_to_placeholders(&text, r.primary.index.0, r.secondary.index.0, prev);
+                            if (p, s) != (r.primary.index.0, r.secondary.index.0) {
+                                st.cursor.set_char_range(Some(egui::text::CCursorRange { primary: egui::text::CCursor::new(p), secondary: egui::text::CCursor::new(s), h_pos: None }));
+                                st.store(ctx, edit_id);
+                                ctx.request_repaint();
+                            }
+                            ctx.data_mut(|d| d.insert_temp(prev_id, p));
+                        }
+                    }
                     let cur = egui::TextEdit::load_state(ctx, edit_id).and_then(|st| st.cursor.char_range());
                     if let Some(range) = cur {
                         let (p, q) = (range.primary.index.0, range.secondary.index.0);
@@ -8866,6 +8895,127 @@ mod tests {
         assert!(err.contains("Cannot make \"Score\" true/false") && err.contains("1 slider"), "{err}");
         assert_eq!(a.undo.len(), undo_before, "a refused change leaves no undo step");
         assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Num(0.0));
+    }
+
+    const PLACEHOLDER_TEXT: &str = "Score: %Score% now"; // the placeholder is characters 7..14
+
+    /// Editing a text box that shows %Score%, with the cursor placed by the test.
+    fn editing_placeholder_text() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = PLACEHOLDER_TEXT.into();
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = PLACEHOLDER_TEXT.into();
+        h.run_steps(4);
+        h
+    }
+
+    fn put_cursor(h: &mut egui_kittest::Harness<'static, App>, primary: usize, secondary: usize) {
+        let id = egui::Id::new("inplace-edit");
+        let mut st = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange { primary: egui::text::CCursor::new(primary), secondary: egui::text::CCursor::new(secondary), h_pos: None }));
+        st.store(&h.ctx, id);
+        h.run_steps(3);
+    }
+
+    fn cursor(h: &egui_kittest::Harness<'static, App>) -> (usize, usize) {
+        let r = egui::TextEdit::load_state(&h.ctx, egui::Id::new("inplace-edit")).and_then(|s| s.cursor.char_range()).expect("a cursor");
+        (r.primary.index.0, r.secondary.index.0)
+    }
+
+    fn box_text(h: &egui_kittest::Harness<'static, App>) -> String {
+        let (li, oi) = h.state().selected.unwrap();
+        h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text.clone()
+    }
+
+    #[test]
+    fn the_cursor_will_not_stay_inside_a_variable_in_text() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        assert_eq!(cursor(&h), (14, 14), "after it is fine");
+        put_cursor(&mut h, 10, 10);
+        assert_eq!(cursor(&h), (7, 7), "moved left into it, so it goes to the start");
+        put_cursor(&mut h, 8, 8);
+        assert_eq!(cursor(&h), (14, 14), "moved right into it, so it goes to the end");
+    }
+
+    #[test]
+    fn a_selection_takes_in_all_of_a_variable_it_touches() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 9, 12);
+        assert_eq!(cursor(&h), (7, 14), "a selection inside grows to the whole variable");
+        put_cursor(&mut h, 3, 10);
+        assert_eq!(cursor(&h), (3, 14));
+    }
+
+    #[test]
+    fn backspace_and_delete_remove_a_whole_variable() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score:  now", "one Backspace after it removes all of it");
+
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 7, 7);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score:  now", "one Delete before it removes all of it");
+
+        // Away from a variable the keys work as usual.
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score: %Score%now", "Delete after it removes just the space");
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 6, 6);
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score %Score% now", "Backspace two characters before it removes just the colon");
+    }
+
+    #[test]
+    fn a_new_variable_gets_a_name_without_spaces_and_the_add_box_says_why_not() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.variables_open = true;
+        a.new_var_name = "My Score".into();
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("No spaces").is_some(), "the reason shows under the box");
+        a_add_is_disabled(&h, true);
+        h.state_mut().new_var_name = "MyScore".into();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("No spaces").is_none());
+        a_add_is_disabled(&h, false);
+    }
+
+    fn a_add_is_disabled(h: &egui_kittest::Harness<'static, App>, disabled: bool) {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        assert_eq!(h.get_by_label("Add").accesskit_node().is_disabled(), disabled);
+    }
+
+    #[test]
+    fn a_duplicated_variable_gets_a_name_without_a_space() {
+        let mut a = app_with_variables();
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        // The window's context menu calls the same code; run it the way the menu does.
+        let id = "v1".to_string();
+        let new = h.state_mut().new_id("var");
+        let p = h.state_mut().project.as_mut().unwrap();
+        let v = p.variables.iter().find(|v| v.id == id).cloned().unwrap();
+        let mut name = format!("{}_copy", v.name);
+        while p.variables.iter().any(|x| x.name == name) { name.push_str("_2"); }
+        p.variables.push(Variable { id: new, name: name.clone(), initial: v.initial, built_in: false });
+        assert_eq!(name, "Score_copy");
+        assert!(brainbend_doc::variables::check_name(&name).is_ok());
     }
 
     #[test]

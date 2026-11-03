@@ -98,15 +98,76 @@ pub fn has_javascript(p: &Project) -> bool {
     p.slides.iter().flat_map(|s| s.triggers.iter()).any(|t| matches!(t.action, Action::RunJavaScript(_)))
 }
 
+/// Is `name` a name a variable may have, whatever else exists? Returns it trimmed, or what is wrong with it.
+/// A name is a letter or underscore followed by letters, digits, underscores and dots: exactly what the player can
+/// show as `%Name%` in text, so a name that passes can always be used there.
+pub fn check_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() { return Err("A variable needs a name.".into()); }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap_or(' ');
+    if !(first.is_ascii_alphabetic() || first == '_') || !chars.all(is_name_char) {
+        return Err("Names can only use letters, digits, underscores and dots, and must start with a letter or an underscore. No spaces.".into());
+    }
+    if RESERVED.contains(&name) { return Err(format!("\"{name}\" is a name the player uses itself.")); }
+    Ok(name.to_string())
+}
+
+fn is_name_char(c: char) -> bool { c.is_ascii_alphanumeric() || c == '_' || c == '.' }
+
 /// Is `name` fine for variable `id`? Returns the name trimmed, or what is wrong with it.
 pub fn check_new_name(p: &Project, id: &str, name: &str) -> Result<String, String> {
-    let name = name.trim();
     let Some(v) = p.variables.iter().find(|v| v.id == id) else { return Err("That variable no longer exists.".into()) };
     if v.built_in { return Err("A built-in variable cannot be renamed.".into()); }
-    if name.is_empty() { return Err("A variable needs a name.".into()); }
-    if RESERVED.contains(&name) { return Err(format!("\"{name}\" is a name the player uses itself.")); }
+    let name = check_name(name)?;
     if p.variables.iter().any(|o| o.id != id && o.name == name) { return Err(format!("A variable called \"{name}\" already exists.")); }
-    Ok(name.to_string())
+    Ok(name)
+}
+
+/// Where the `%name%` placeholders are in `chars`, as `(start, end)` with `end` just past the closing `%`. A name
+/// follows the rules of [`check_name`], so ordinary text such as "50% off, 100%" holds none.
+pub fn placeholder_spans(chars: &[char]) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '%' && chars.get(i + 1).is_some_and(|c| c.is_ascii_alphabetic() || *c == '_') {
+            let mut j = i + 2;
+            while j < chars.len() && is_name_char(chars[j]) { j += 1; }
+            if chars.get(j) == Some(&'%') {
+                out.push((i, j + 1));
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Where to put the cursor (`primary`) and the other end of the selection (`secondary`) so that neither lands inside
+/// a placeholder, which counts as one character. A selection grows to take in whole placeholders; a lone cursor goes
+/// to the near edge of the one it is in, on the side it was heading (`was` is where it was a moment ago).
+pub fn snap_to_placeholders(text: &str, primary: usize, secondary: usize, was: Option<usize>) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    let spans = placeholder_spans(&chars);
+    let inside = |i: usize| spans.iter().find(|&&(a, b)| i > a && i < b).copied();
+    if primary == secondary {
+        return match inside(primary) {
+            Some((a, b)) => { let to = if was.is_some_and(|w| w > primary) { a } else { b }; (to, to) }
+            None => (primary, secondary),
+        };
+    }
+    let (mut lo, mut hi) = (primary.min(secondary), primary.max(secondary));
+    if let Some((a, _)) = inside(lo) { lo = a; }
+    if let Some((_, b)) = inside(hi) { hi = b; }
+    if primary > secondary { (hi, lo) } else { (lo, hi) }
+}
+
+/// The placeholder a Backspace (or, with `forward`, a Delete) at `caret` should remove whole, as `(start, end)`: the
+/// one just before the cursor, or just after it for Delete. `None` when the key should act as usual.
+pub fn placeholder_to_delete(text: &str, caret: usize, forward: bool) -> Option<(usize, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    placeholder_spans(&chars).into_iter().find(|&(a, b)| if forward { caret >= a && caret < b } else { caret > a && caret <= b })
 }
 
 /// Rewrites `from` to `to` in a piece of text; true when it changed anything.
@@ -286,6 +347,54 @@ mod tests {
         assert_eq!(convert_value(&t("Yes"), VarType::Bool), (Value::Bool(true), false));
         assert_eq!(convert_value(&t("no"), VarType::Bool), (Value::Bool(false), false));
         assert_eq!(convert_value(&t("maybe"), VarType::Bool), (Value::Bool(false), true));
+    }
+
+    #[test]
+    fn a_name_is_letters_digits_underscores_and_dots_with_no_spaces() {
+        for ok in ["Score", "_score", "Attempts2", "Quiz_Score", "Section.Total", "  Padded  "] {
+            assert!(check_name(ok).is_ok(), "{ok:?} should be fine");
+        }
+        assert_eq!(check_name("  Padded  ").unwrap(), "Padded");
+        for bad in ["Learner Name", "2fast", "Total%", "naïve", "a-b", ".x", "", "   ", "Slide.Number"] {
+            assert!(check_name(bad).is_err(), "{bad:?} should be refused");
+        }
+        assert!(check_name("Learner Name").unwrap_err().contains("No spaces"));
+        let p = project();
+        assert!(check_new_name(&p, "v1", "My Score").unwrap_err().contains("No spaces"), "a rename follows the same rules");
+    }
+
+    #[test]
+    fn placeholders_are_found_only_when_they_look_like_a_variable() {
+        let spans = |t: &str| placeholder_spans(&t.chars().collect::<Vec<_>>());
+        assert_eq!(spans("Score: %Score% now"), [(7, 14)]);
+        assert_eq!(spans("%A% and %B_2.x%"), [(0, 3), (8, 15)]);
+        assert!(spans("50% off, 100%").is_empty(), "ordinary percent signs are not placeholders");
+        assert!(spans("100%100%").is_empty(), "a name cannot start with a digit");
+        assert!(spans("%%").is_empty() && spans("%").is_empty() && spans("%Open").is_empty());
+        assert_eq!(spans("%a%b%"), [(0, 3)], "the leftover b% is just text");
+    }
+
+    #[test]
+    fn the_cursor_and_selections_never_end_inside_a_placeholder() {
+        let t = "Score: %Score% now"; // the placeholder is characters 7..14
+        assert_eq!(snap_to_placeholders(t, 5, 5, Some(4)), (5, 5), "outside: untouched");
+        assert_eq!(snap_to_placeholders(t, 10, 10, Some(14)), (7, 7), "heading left, it goes to the start");
+        assert_eq!(snap_to_placeholders(t, 10, 10, Some(7)), (14, 14), "heading right, it goes to the end");
+        assert_eq!(snap_to_placeholders(t, 10, 10, None), (14, 14), "a click lands after it");
+        assert_eq!(snap_to_placeholders(t, 7, 7, Some(6)), (7, 7), "an edge is fine");
+        assert_eq!(snap_to_placeholders(t, 9, 12, None), (7, 14), "a selection inside takes in all of it");
+        assert_eq!(snap_to_placeholders(t, 3, 10, None), (3, 14), "one end inside grows to the far edge");
+        assert_eq!(snap_to_placeholders(t, 12, 3, None), (14, 3), "and which end is the cursor is kept");
+    }
+
+    #[test]
+    fn backspace_and_delete_take_a_whole_placeholder() {
+        let t = "Score: %Score% now"; // 7..14
+        assert_eq!(placeholder_to_delete(t, 14, false), Some((7, 14)), "backspace just after it");
+        assert_eq!(placeholder_to_delete(t, 7, true), Some((7, 14)), "delete just before it");
+        assert_eq!(placeholder_to_delete(t, 14, true), None, "delete after it is an ordinary delete");
+        assert_eq!(placeholder_to_delete(t, 7, false), None, "backspace before it is ordinary");
+        assert_eq!(placeholder_to_delete(t, 3, false), None);
     }
 
     #[test]
