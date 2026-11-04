@@ -25,7 +25,7 @@ pub fn font_scale_for(_slide_width: f32, slide_height: f32) -> f32 {
 }
 
 mod still;
-pub use still::{add_stills, still_asset, still_asset_from_file, video_still, video_still_from_file};
+pub use still::{add_stills, still_asset, still_asset_at, still_asset_from_file, video_still, video_still_from_file};
 
 pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> {
     let parts = read_parts(reader)?;

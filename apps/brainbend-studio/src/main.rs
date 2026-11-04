@@ -4306,6 +4306,10 @@ impl App {
     }
 }
 
+/// Where an author's chosen poster frame for a video comes from.
+#[derive(Clone, Copy)]
+enum PosterWant { Picture, Frame(f64) }
+
 /// Which kind of file a question editor is asking the app to pick.
 #[derive(Clone, Copy, PartialEq)]
 enum AssetWant {
@@ -5789,6 +5793,7 @@ impl App {
         let mut want_equation: Option<(usize, usize)> = None;
         let mut want_pano: Option<(usize, usize)> = None;
         let mut want_thumb: Option<(usize, usize)> = None;
+        let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
         egui::Panel::right("inspector").default_size(326.0).show(root, |ui| {
             ui.add_space(6.0);
@@ -6009,6 +6014,21 @@ impl App {
                 });
             }
             if pick_captions { want_captions = Some((li, oi)); }
+            if matches!(obj.kind, Kind::Video) {
+                // The picture shown before the video plays: its first frame unless the author picks another.
+                ui.label("Poster frame").on_hover_text("The picture shown before the video plays. It starts as the video's first frame.");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Choose picture…").on_hover_text("Use a picture from a file").clicked() { want_poster = Some((li, oi, PosterWant::Picture)); }
+                    if ui.button("First frame").on_hover_text("Go back to the video's first frame").clicked() { want_poster = Some((li, oi, PosterWant::Frame(0.0))); }
+                });
+                ui.horizontal(|ui| {
+                    let id = ui.id().with(("poster-secs", &obj.id));
+                    let mut secs: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+                    ui.add(egui::DragValue::new(&mut secs).speed(0.1).range(0.0..=36000.0).suffix(" s"));
+                    ui.data_mut(|d| d.insert_temp(id, secs));
+                    if ui.button("Use frame at this time").clicked() { want_poster = Some((li, oi, PosterWant::Frame(secs))); }
+                });
+            }
             if let Some(e) = &obj.equation {
                 ui.horizontal(|ui| {
                     ui.label("Equation");
@@ -6156,6 +6176,24 @@ impl App {
         }
         if let Some(t) = want_equation { self.open_equation_dialog(Some(t)); }
         if let Some(t) = want_pano { self.open_pano_dialog(t); }
+        if let Some((li, oi, want)) = want_poster {
+            let key = match want {
+                PosterWant::Picture => self.load_image_asset_titled("Choose Poster Frame").map(|(k, _, _, _)| k),
+                PosterWant::Frame(secs) => {
+                    let video = self.project.as_ref().and_then(|p| p.slides[slide_idx].layers.get(li)).and_then(|l| l.objects.get(oi)).and_then(|o| o.asset.clone());
+                    let still = video.and_then(|k| self.project.as_ref().and_then(|p| p.assets.get(&k))).and_then(|v| brainbend_import_legacy::still_asset_at(v, secs));
+                    match still {
+                        Some(a) => { let k = self.new_id("asset"); self.project.as_mut().map(|p| p.assets.insert(k.clone(), a)); Some(k) }
+                        None => { self.status = "Could not make a frame at that time. Studio needs ffmpeg for this, and the time must be inside the video. You can also choose a picture.".into(); None }
+                    }
+                }
+            };
+            if let Some(key) = key {
+                self.snapshot();
+                if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.poster = Some(key); }
+                self.dirty = true;
+            }
+        }
         if let Some((li, oi)) = want_captions {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
