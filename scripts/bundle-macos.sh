@@ -17,6 +17,8 @@ cp "$BINARY" "$APP/Contents/MacOS/BrainBend Studio"
 ICONSET="$(mktemp -d)/BrainBend Studio.iconset"
 python3 scripts/make-icon.py "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/BrainBend Studio.icns"
+# The licenses travel with the app: ours, and the notices the open-source parts require.
+cp LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.md "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
