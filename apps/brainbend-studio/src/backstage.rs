@@ -142,14 +142,16 @@ impl App {
             });
         // Every page shares one column: left-aligned, starting at the same place under its heading, up to 980px wide.
         egui::CentralPanel::default().frame(egui::Frame::new().fill(root.visuals().panel_fill).inner_margin(egui::Margin::symmetric(48, 36))).show(root, |ui| {
+            let area = ui.max_rect();
             let w = 980.0_f32.min(ui.available_width());
-            ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
+            let used = ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 match self.file_page {
                     FilePage::Info if has_project => self.info_page(ui),
                     FilePage::Open => open_action = self.open_page(ui),
                     _ => create = self.new_page(ui),
                 }
-            });
+            }).response.rect;
+            draw_watermark(ui, area, used);
         });
         match choice {
             Some(Choice::Back) => self.file_view = false,
@@ -337,6 +339,31 @@ impl App {
             Err(e) => format!("Wrote {} but could not open it: {e}", file.display()),
         };
     }
+}
+
+/// The BrainBend logo, faint, in the bottom-right corner of the page. It only appears where it fits without touching
+/// the page's content: below it or beside it. It shrinks to the room there is, and is left out when there is little.
+fn draw_watermark(ui: &egui::Ui, area: egui::Rect, content: egui::Rect) {
+    const MARGIN: f32 = 16.0;
+    let room_below = area.bottom() - content.bottom() - MARGIN;
+    let room_beside = area.right() - content.right() - MARGIN;
+    let size = room_below.max(room_beside).min(area.width().min(area.height()) * 0.6).min(480.0);
+    if size < 90.0 { return; }
+    let id = egui::Id::new("brainbend-logo-texture");
+    let ctx = ui.ctx();
+    let tex = match ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        Some(t) => t,
+        None => {
+            let Ok(img) = image::load_from_memory(include_bytes!("../../../assets/brainbend-logo.png")) else { return };
+            let img = img.to_rgba8();
+            let size = [img.width() as usize, img.height() as usize];
+            let t = ctx.load_texture("brainbend-logo", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR);
+            ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+            t
+        }
+    };
+    let rect = egui::Rect::from_min_size(area.right_bottom() - egui::vec2(size, size) - egui::vec2(8.0, 8.0), egui::vec2(size, size));
+    ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::from_white_alpha(60));
 }
 
 #[cfg(test)]

@@ -25,9 +25,17 @@ mod states_panel;
 mod update;
 mod lesson_view;
 
+/// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
+const MIN_WINDOW: [f32; 2] = [1000.0, 640.0];
+
 /// On macOS the content extends under a transparent title bar so our own bar can sit beside the native window buttons.
 fn window_builder() -> egui::ViewportBuilder {
-    let b = egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]).with_title("BrainBend Studio");
+    let mut b = egui::ViewportBuilder::default()
+        .with_inner_size([1400.0, 900.0])
+        .with_min_inner_size(MIN_WINDOW)
+        .with_title("BrainBend Studio");
+    // macOS takes its icon from the app bundle; the other systems need it handed over.
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/brainbend-icon-256.png")) { b = b.with_icon(icon); }
     if cfg!(target_os = "macos") {
         b.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false)
     } else {
@@ -10918,6 +10926,20 @@ mod tests {
         assert!(h.query_by_label("PDF").is_some());
         let waiting: Vec<_> = publish_dialog::PublishPage::ALL.iter().filter(|p| !p.available()).map(|p| p.label()).collect();
         assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS", "Video", "Word"]);
+    }
+
+    /// Renders the New page at the smallest allowed window, where the logo must not touch the text.
+    #[test]
+    fn the_file_page_fits_the_smallest_window() {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(MIN_WINDOW[0], MIN_WINDOW[1]))
+            .build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+        install_fonts(&h.ctx);
+        install_theme(&h.ctx);
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("file-new-min-window.png")).unwrap();
+        }
     }
 
     #[test]
