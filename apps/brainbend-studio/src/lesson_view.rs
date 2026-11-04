@@ -174,7 +174,7 @@ impl App {
         egui::Panel::top("lessonbar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 6))).show_separator_line(true).show(root, |ui| {
             // Preview and Publish stay at the right; the editing controls wrap in the space that is left.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                ui.menu_button("Publish", |ui| self.publish_items(ui));
+                if ui.button("Publish").clicked() { self.publish_open = true; }
                 ui.menu_button("Preview", |ui| self.preview_items(ui));
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.horizontal_wrapped(|ui| {

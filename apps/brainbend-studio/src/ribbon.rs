@@ -2158,20 +2158,14 @@ impl App {
                     v.widgets.hovered.weak_bg_fill = hover;
                     v.widgets.active.weak_bg_fill = hover;
                     v.widgets.open.weak_bg_fill = hover;
-                    big_menu(ui, EXPORT, "Publish", "Export the project", |ui| self.publish_items(ui))
+                    big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
                 }).inner;
+                if resp.clicked() { self.publish_open = true; }
                 ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, ORANGE));
             });
         });
     }
 
-    pub(super) fn publish_items(&mut self, ui: &mut egui::Ui) {
-        ui.set_min_width(220.0);
-        if menu_item(ui, EXPORT, "Web (HTML5)").clicked() { self.export_html(); }
-        if menu_item(ui, EXPORT, "SCORM 1.2 (most LMSs, Canvas)").clicked() { self.export_scorm(brainbend_publish_html::Lms::Scorm12); }
-        if menu_item(ui, EXPORT, "SCORM 2004 4th Edition").clicked() { self.export_scorm(brainbend_publish_html::Lms::Scorm2004); }
-        if !self.project.as_ref().is_some_and(|p| p.is_web()) && menu_item(ui, EXPORT, "PowerPoint (.pptx)").clicked() { self.export_pptx(); }
-    }
 
     /// The Preview choices, shared by the title bar and the Home tab.
     pub(super) fn preview_items(&mut self, ui: &mut egui::Ui) {

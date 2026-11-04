@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use brainbend_doc::Project;
 mod print;
-pub use print::print_html;
+pub use print::{print_html, print_html_with, HandoutOptions, HandoutOrientation};
 
 mod web;
 

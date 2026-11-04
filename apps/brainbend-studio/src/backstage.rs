@@ -1,11 +1,10 @@
-//! The full-screen File view ("backstage"): Back to Project, Project Info, New, Open, Save, Save As, Print.
+//! The full-screen File view ("backstage"): Back to Project, Project Info, New, Open, Save, Save As, Publish.
 //! Project Info, New and Open are pages, like tabs. With no project open it is the app's start page, showing New.
 use super::*;
 use super::ribbon::{icons, tint, ORANGE, RIBBON_RADIUS};
 
 const BACK: char = '\u{e058}';
 const INFO: char = '\u{e2ce}';
-const PRINTER: char = '\u{e3dc}';
 const SAVE_AS: char = '\u{eaf4}';
 const NEW: char = '\u{e236}';
 const OPEN: char = '\u{e256}';
@@ -21,13 +20,14 @@ pub enum FilePage {
     New,
     Open,
     Info,
-    Print,
 }
 
 enum Choice {
     Back,
     Save,
     SaveAs,
+    /// Back to the project with the Publish dialog open.
+    Publish,
     Page(FilePage),
 }
 
@@ -100,7 +100,7 @@ impl App {
         if !ctx.fonts(|f| f.families().contains(&icons())) { return false; }
         let has_project = self.project.is_some();
         if has_project && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.file_view = false; return false; }
-        // With nothing open there is no Project Info or Print to show.
+        // With nothing open there is no Project Info to show.
         if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open) { self.file_page = FilePage::New; }
         let mut choice: Option<Choice> = None;
         let mut create: Option<ProjectKind> = None;
@@ -119,7 +119,7 @@ impl App {
                     (OPEN, "Open", Choice::Page(FilePage::Open), true),
                     (SAVE, "Save", Choice::Save, has_project),
                     (SAVE_AS, "Save As", Choice::SaveAs, has_project),
-                    (PRINTER, "Print", Choice::Page(FilePage::Print), has_project),
+                    (ribbon::EXPORT, "Publish", Choice::Publish, has_project),
                 ];
                 for (n, (icon, label, ch, enabled)) in items.into_iter().enumerate() {
                     // The first entry is the way out; keep it apart from the file commands.
@@ -146,7 +146,6 @@ impl App {
             ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 match self.file_page {
                     FilePage::Info if has_project => self.info_page(ui),
-                    FilePage::Print if has_project => self.print_page(ui),
                     FilePage::Open => open_action = self.open_page(ui),
                     _ => create = self.new_page(ui),
                 }
@@ -156,6 +155,7 @@ impl App {
             Some(Choice::Back) => self.file_view = false,
             Some(Choice::Save) => { self.save(false); self.file_view = false; }
             Some(Choice::SaveAs) => { self.save(true); self.file_view = false; }
+            Some(Choice::Publish) => { self.file_view = false; self.publish_open = true; }
             Some(Choice::Page(p)) => self.file_page = p,
             None => {}
         }
@@ -322,28 +322,15 @@ impl App {
         if open.is_some() { self.updater.dialog_open = true; }
     }
 
-    fn print_page(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Print");
-        ui.add_space(10.0);
-        ui.label("Print a handout with one slide per page. The slides open in your browser, which shows its print dialog; choose a printer or \"Save as PDF\" there.");
-        ui.add_space(6.0);
-        ui.weak("Question slides print the question and its answers (correct ones ticked). Video and audio print as a placeholder.");
-        ui.add_space(16.0);
-        if ui.add(egui::Button::new(egui::RichText::new("Print…").strong()).corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(140.0, 34.0))).clicked() {
-            self.print();
-        }
-        if !self.status.is_empty() {
-            ui.add_space(10.0);
-            ui.weak(self.status.clone());
-        }
-    }
-
     pub(super) fn print(&mut self) {
-        let Some(p) = &self.project else { return };
+        let Some(whole) = &self.project else { return };
+        // A Web Lesson has no slides to pick from; a slide project prints the range the author chose.
+        let part = if whole.is_web() { whole.clone() } else { whole.subset(&self.handout_slides()) };
+        let p = &part;
         let dir = std::env::temp_dir().join("brainbend-print");
         if let Err(e) = std::fs::create_dir_all(&dir) { self.status = format!("Could not prepare the print view: {e}"); return; }
         let file = dir.join("handout.html");
-        if let Err(e) = std::fs::write(&file, brainbend_publish_html::print_html(p)) { self.status = format!("Could not write the print view: {e}"); return; }
+        if let Err(e) = std::fs::write(&file, brainbend_publish_html::print_html_with(p, &self.handout)) { self.status = format!("Could not write the print view: {e}"); return; }
         let opener = if cfg!(target_os = "macos") { "open" } else if cfg!(target_os = "windows") { "explorer" } else { "xdg-open" };
         self.status = match std::process::Command::new(opener).arg(&file).spawn() {
             Ok(_) => "Print view opened in your browser".into(),

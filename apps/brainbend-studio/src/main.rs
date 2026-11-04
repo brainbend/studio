@@ -8,6 +8,7 @@ mod icons;
 mod markers;
 mod backstage;
 mod recent;
+mod publish_dialog;
 mod controls;
 mod doc_tabs;
 mod crop;
@@ -170,6 +171,13 @@ struct App {
     scene_view: bool,
     /// The Player Properties window, and which pane of it is showing.
     player_open: bool,
+    /// The Publish dialog is open, which destination is showing, and the SCORM version chosen for Other LMS.
+    publish_open: bool,
+    publish_page: publish_dialog::PublishPage,
+    publish_lms: brainbend_publish_html::Lms,
+    /// How the PDF handout is laid out (Publish > PDF).
+    handout: brainbend_publish_html::HandoutOptions,
+    handout_range: publish_dialog::HandoutRange,
     player_pane: usize,
     /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Story View).
     tabs: Vec<doc_tabs::SlideTab>,
@@ -412,7 +420,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -5684,6 +5692,7 @@ impl App {
             }
         }
         self.update_window(ctx);
+        self.publish_window(ctx);
         if self.updater.restarting { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if self.recovery_offer {
             let mut done = false;
@@ -7910,8 +7919,6 @@ mod tests {
         shot(&mut h, "6d-file-open.png");
         h.state_mut().file_page = backstage::FilePage::Info;
         shot(&mut h, "6a-file-info.png");
-        h.state_mut().file_page = backstage::FilePage::Print;
-        shot(&mut h, "6b-file-print.png");
         h.state_mut().file_view = false;
         h.state_mut().file_page = backstage::FilePage::Info;
         h.state_mut().ribbon_tab = 1;
@@ -10809,6 +10816,96 @@ mod tests {
     }
 
     #[test]
+    fn the_publish_button_opens_a_dialog_listing_every_destination() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = harness(app());
+        h.run_steps(3);
+        h.state_mut().file_view = false;
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+        // The ribbon's Publish button is the only thing labelled Publish until the dialog is up.
+        h.get_by_label("Publish").click();
+        h.run_steps(4);
+        assert!(h.state().publish_open, "Publish opens the dialog instead of a menu");
+        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video (coming soon)", "Web", "PDF", "Word (coming soon)", "PowerPoint"] {
+            assert!(h.get_all_by_label(name).count() >= 1, "{name} is listed");
+        }
+        assert!(h.state().publish_page == publish_dialog::PublishPage::Web, "it opens on Web, the first one that works");
+        assert!(h.query_by_label("Cancel").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("publish-dialog.png")).unwrap(); }
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+    }
+
+    #[test]
+    fn a_destination_that_is_not_ready_cannot_be_published_to_and_other_lms_picks_the_scorm_version() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let disabled_publish = |h: &egui_kittest::Harness<'_, App>| h.get_all_by_label("Publish").any(|n| n.accesskit_node().is_disabled());
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(!disabled_publish(&h), "Web can be published");
+        h.get_by_label("Video (coming soon)").click();
+        h.run_steps(3);
+        assert!(h.state().publish_page == publish_dialog::PublishPage::Video, "clicking a destination shows it");
+        assert!(h.query_by_label("Coming soon").is_some(), "the page says so");
+        assert!(disabled_publish(&h), "Publish is off for a destination that does not exist yet");
+        h.get_by_label("Other LMS").click();
+        h.run_steps(3);
+        assert!(!disabled_publish(&h));
+        assert!(h.state().publish_lms == brainbend_publish_html::Lms::Scorm12);
+        h.get_by_label("SCORM 2004 4th Edition").click();
+        h.run_steps(3);
+        assert!(h.state().publish_lms == brainbend_publish_html::Lms::Scorm2004, "the choice is kept");
+    }
+
+    #[test]
+    fn the_pdf_page_offers_orientation_slides_per_page_a_range_and_what_to_include() {
+        use egui_kittest::kittest::Queryable;
+        use brainbend_publish_html::HandoutOrientation;
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        a.publish_page = publish_dialog::PublishPage::Pdf;
+        let mut h = harness(a);
+        h.run_steps(8);
+        assert!(h.query_by_label("Pass mark").is_some(), "the properties list shows under the options");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("publish-pdf.png")).unwrap(); }
+        for label in ["Landscape", "Portrait", "1 slide", "2 slides", "3 slides", "All slides (1)", "The current scene (1)", "The selected slides (1)", "Correct answers", "Space for notes", "Slide notes", "Alt text"] {
+            assert!(h.query_by_label(label).is_some(), "{label} is offered");
+        }
+        let o = h.state().handout;
+        assert!(o.orientation == HandoutOrientation::Landscape && o.per_page == 1 && o.correct_answers && !o.note_lines && !o.slide_notes && !o.alt_text, "it starts as the plain handout the File menu always made");
+        // One click at a time: clicks queued together land on whichever widget the pointer ended on.
+        for label in ["Portrait", "3 slides", "Space for notes", "Alt text", "Correct answers", "The selected slides (1)"] {
+            h.get_by_label(label).click();
+            h.run_steps(3);
+        }
+        let o = h.state().handout;
+        assert!(o.orientation == HandoutOrientation::Portrait && o.per_page == 3 && o.note_lines && o.alt_text && !o.correct_answers, "{o:?}");
+        assert!(h.state().handout_range == publish_dialog::HandoutRange::Selected);
+        assert_eq!(h.state().handout_slides(), vec![0], "only the slide that is selected");
+    }
+
+    #[test]
+    fn a_web_lesson_does_not_offer_powerpoint_and_the_unfinished_destinations_wait_for_later() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.file_view = false;
+        a.publish_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("PowerPoint").is_none());
+        assert!(h.query_by_label("PDF").is_some());
+        let waiting: Vec<_> = publish_dialog::PublishPage::ALL.iter().filter(|p| !p.available()).map(|p| p.label()).collect();
+        assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS", "Video", "Word"]);
+    }
+
+    #[test]
     fn the_open_page_lists_recent_projects_and_clicking_one_opens_it() {
         use egui_kittest::kittest::Queryable;
         let path = saved_project("Safety Course");
@@ -10884,13 +10981,31 @@ mod tests {
         a.file_view = true;
         let mut h = harness(a);
         h.run_steps(3);
-        // Save As / Save need a dialog or path, so just exercise navigation: Print page, then Home closes.
-        h.get_by_label("Print").click();
+        // Save As / Save need a dialog or path, so just exercise navigation: Open page, then Back to Project closes.
+        h.get_by_label("Open").click();
         h.run_steps(3);
-        assert!(h.state().file_page == backstage::FilePage::Print);
+        assert!(h.state().file_page == backstage::FilePage::Open);
+        assert!(h.query_by_label("Print").is_none(), "Print is now a Publish option");
         h.get_by_label("Back to Project").click();
         h.run_steps(3);
         assert!(!h.state().file_view);
+    }
+
+    #[test]
+    fn file_publish_returns_to_the_project_with_the_publish_dialog_open() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = true;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+        h.get_by_label("Publish").click();
+        h.run_steps(4);
+        assert!(!h.state().file_view, "the File view closes");
+        assert!(h.state().publish_open, "and the Publish dialog is open over the project");
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        assert!(!h.state().publish_open && !h.state().file_view);
     }
 
     #[test]
