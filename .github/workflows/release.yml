@@ -52,7 +52,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # Pinned: macos-latest moved to macOS 26, where a runner was often not available within the 15 minutes a job waits.
+          # The app's minimum macOS (11.0) comes from the build settings, not from this runner.
+          - os: macos-15
             name: macos
           - os: windows-latest
             name: windows
