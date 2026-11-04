@@ -1568,7 +1568,7 @@ impl App {
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(w + 8.0, h + 8.0), egui::Sense::click());
         let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(w, h));
         let painter = ui.painter_at(rect);
-        if selected { painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(0, 90, 170)); }
+        if selected { painter.rect_filled(rect, 4.0, ribbon::ACCENT); }
         match &sl.kind {
             SlideKind::Normal => {
                 self.paint_backdrop(ctx, &painter.with_clip_rect(thumb), thumb.min, w / sl.width, &sl);
@@ -1741,7 +1741,7 @@ impl App {
                 let icon = if targets[0] < i { ribbon::ARROW_UP } else { ribbon::ARROW_DOWN };
                 let chip = egui::Rect::from_center_size(egui::pos2(r.left() + 4.0 + tw - 11.0, r.top() + 4.0 + th - 11.0), egui::vec2(16.0, 16.0));
                 let resp = ui.interact(chip, egui::Id::new(("jump-chip", i)), egui::Sense::click());
-                let fill = if resp.hovered() { egui::Color32::from_rgb(0, 140, 240) } else { egui::Color32::from_rgb(0, 100, 190) };
+                let fill = if resp.hovered() { ribbon::ACCENT_HOVER } else { ribbon::ACCENT };
                 ui.painter().circle_filled(chip.center(), 8.0, fill);
                 ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(11.0, ribbon::icons()), egui::Color32::WHITE);
                 let tip: Vec<String> = targets.iter().map(|&j| p.slides[j].name.clone()).collect();
@@ -1753,7 +1753,7 @@ impl App {
             }
         }
         if let Some((from, to)) = hover_line {
-            let c = egui::Color32::from_rgb(0, 140, 240);
+            let c = ribbon::ACCENT;
             ui.painter().line_segment([from, to.center()], egui::Stroke::new(2.0, c));
             ui.painter().rect_stroke(to, 3.0, egui::Stroke::new(2.0, c), egui::StrokeKind::Outside);
         }
@@ -2552,7 +2552,7 @@ impl App {
                         let (row, _) = ui.allocate_exact_size(egui::vec2(avail - 8.0, ROW_H), egui::Sense::hover());
                         row_rects.push((top, row));
                         let selected = members.iter().all(|&m| in_selection.contains(&(li, m)));
-                        if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40)); }
+                        if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40)); }
                         let name_rect = egui::Rect::from_min_size(row.min, egui::vec2(LABEL_W - 6.0, ROW_H));
                         let name_resp = ui.interact(name_rect, ui.id().with(("tl-group", gid.as_str())), egui::Sense::click_and_drag());
                         let fg = if selected { egui::Color32::WHITE } else { egui::Color32::LIGHT_GRAY };
@@ -2615,7 +2615,7 @@ impl App {
                         let spans: Vec<(f32, f32)> = timings.iter().filter_map(|(_, t)| t.as_ref()).map(|t| (t.start_ms as f32, t.dur_ms.map(|d| t.start_ms as f32 + d as f32).unwrap_or(total))).collect();
                         let (a, b) = if spans.is_empty() { (0.0, total) } else { (spans.iter().map(|s| s.0).fold(f32::MAX, f32::min), spans.iter().map(|s| s.1).fold(0.0, f32::max)) };
                         let bar = egui::Rect::from_min_max(egui::pos2(left + a * px, track.top()), egui::pos2((left + b * px).max(left + a * px + 4.0), track.bottom()));
-                        ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { egui::Color32::from_rgb(40, 120, 220) });
+                        ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { ribbon::ACCENT });
                         let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
                         let gid_id = ui.id().with(("tlg", gid.as_str()));
                         let edge_resp = ui.interact(edge, gid_id.with("edge"), egui::Sense::drag());
@@ -2656,7 +2656,7 @@ impl App {
                 let (row, _) = ui.allocate_exact_size(egui::vec2(avail - 8.0, ROW_H), egui::Sense::hover());
                 row_rects.push((oi, row));
                 let selected = in_selection.contains(&(li, oi));
-                if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40)); }
+                if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40)); }
                 // The name column is the object list: select (⌘/⇧ adds), rename by double-click, drag to reorder, eye to hide.
                 let name_rect = egui::Rect::from_min_size(row.min + egui::vec2(indent, 0.0), egui::vec2(LABEL_W - 6.0 - indent, ROW_H));
                 let name_resp = ui.interact(name_rect, ui.id().with(("tl-name", oi)), egui::Sense::click_and_drag());
@@ -2710,7 +2710,7 @@ impl App {
                 let (start, dur) = timing.map(|t| (t.start_ms as f32, t.dur_ms.map(|d| d as f32))).unwrap_or((0.0, None));
                 let end = dur.map(|d| start + d).unwrap_or(total).min(total.max(start + 1.0));
                 let bar = egui::Rect::from_min_max(egui::pos2(left + start * px, track.top()), egui::pos2((left + end * px).max(left + start * px + 4.0), track.bottom()));
-                let col = if timing.is_some() { egui::Color32::from_rgb(40, 120, 220) } else { egui::Color32::from_gray(80) };
+                let col = if timing.is_some() { ribbon::ACCENT } else { egui::Color32::from_gray(80) };
                 ui.painter().rect_filled(bar, 3.0, col);
                 // Interaction: right-edge handle (duration) first, then the body (move / select).
                 let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
@@ -2770,7 +2770,7 @@ impl App {
                 if let Some((_, r)) = row_rects.iter().find(|(i, _)| *i == dst) {
                     if dst != src {
                         let y = if dst > src { r.top() } else { r.bottom() };
-                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)));
+                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, ribbon::ACCENT));
                     }
                 }
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -3814,7 +3814,7 @@ impl App {
                 if let Some((_, r)) = rows.iter().find(|(l, _)| *l == dst) {
                     let y = if dst > src { r.top() } else if dst < src { r.bottom() } else { f32::NAN };
                     if !y.is_nan() {
-                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)));
+                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, ribbon::ACCENT));
                     }
                 }
                 ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -4032,7 +4032,7 @@ impl App {
                 if !show_hidden && selected != Some((li, oi)) { continue; }
                 painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(150)), egui::StrokeKind::Inside);
                 if selected == Some((li, oi)) {
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                 }
                 continue;
             }
@@ -4042,7 +4042,7 @@ impl App {
                     let c = r.center();
                     let a = o.rotation.to_radians();
                     let pts: Vec<egui::Pos2> = rounded_rect_poly(r, 0.0).into_iter().map(|p| { let d = p - c; c + egui::vec2(d.x * a.cos() - d.y * a.sin(), d.x * a.sin() + d.y * a.cos()) }).collect();
-                    painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255))));
+                    painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, ribbon::ACCENT)));
                 }
                 continue;
             }
@@ -4086,7 +4086,7 @@ impl App {
             }
             if matches!(o.kind, Kind::Hotspot) {
                 // Invisible in the published lesson; shown here so it can be found and selected.
-                let (tint, edge) = (egui::Color32::from_rgba_unmultiplied(0, 140, 255, 36), egui::Color32::from_rgba_unmultiplied(0, 140, 255, 150));
+                let (tint, edge) = (egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36), egui::Color32::from_rgba_unmultiplied(10, 110, 235, 150));
                 match o.hit_area.as_ref().filter(|a| a.len() > 2) {
                     // An outlined hotspot is clickable only inside its outline.
                     Some(area) => {
@@ -4222,7 +4222,7 @@ impl App {
                 else { painter.rect_stroke(r, o.radius * scale, stroke, egui::StrokeKind::Inside); }
             }
             if selected == Some((li, oi)) {
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
             }
         }
         // The selected marker's card, as the learner will see it when they click the marker.
@@ -5284,7 +5284,7 @@ fn install_theme(ctx: &egui::Context) {
         style.visuals.widgets.open.corner_radius = r;
         style.visuals.window_corner_radius = egui::CornerRadius::same(4);
         style.visuals.menu_corner_radius = egui::CornerRadius::same(4);
-        style.visuals.selection.bg_fill = egui::Color32::from_rgb(3, 83, 158);
+        style.visuals.selection.bg_fill = ribbon::ACCENT;
         style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
         style.visuals.disabled_alpha = 0.62;
         style.visuals.hyperlink_color = egui::Color32::from_rgb(70, 150, 230);
@@ -6432,7 +6432,7 @@ impl App {
                             if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
                             if let Some((a, b)) = self.hot_drag {
                                 let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
-                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40), egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                                 if resp.drag_stopped() || !resp.dragged() {
                                     self.hot_drag = None;
                                     let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
@@ -6465,7 +6465,7 @@ impl App {
                     "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
                 // The question's own area: a frame with a grip to move it and handles on its edges and corners to resize it.
                 if let (Some(sr), false) = (area_screen, self.try_mode) {
-                    let accent = egui::Color32::from_rgb(0, 140, 255);
+                    let accent = ribbon::ACCENT;
                     painter.rect_stroke(sr, 0.0, egui::Stroke::new(1.5, accent), egui::StrokeKind::Outside);
                     let grip = egui::Rect::from_min_size(sr.left_top() - egui::vec2(0.0, 20.0), egui::vec2(120.0, 20.0));
                     painter.rect_filled(grip, 3.0, accent);
@@ -6643,7 +6643,7 @@ impl App {
             if sel_all.len() > 1 && !one_group {
                 for &(l, k) in &sel_all {
                     if let Some(o) = slide.layers.get(l).and_then(|ly| ly.objects.get(k)) {
-                        painter.rect_stroke(to_screen(o.x, o.y, o.w, o.h), 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                        painter.rect_stroke(to_screen(o.x, o.y, o.w, o.h), 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                     }
                 }
             }
@@ -6698,7 +6698,7 @@ impl App {
             let rotate_pos = |r: egui::Rect| turn(r, egui::pos2(r.center().x, r.top() - 26.0));
             if let (Some(r), true) = (sel_rect, outlining) {
                 // Outline mode: the frame is only a dashed guide; the corners of the outline are what move.
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Outside);
             }
             let outline_pts: Vec<egui::Pos2> = match (outlining, self.selected_object()) {
                 (true, Some(o)) => o.hit_area.as_ref().map(|a| a.iter().map(|&f| { let p = outline::to_slide(o, f); origin + egui::vec2(p.0, p.1) * scale }).collect()).unwrap_or_default(),
@@ -6713,7 +6713,7 @@ impl App {
                 painter.rect_stroke(hr, 1.0, egui::Stroke::new(if chosen { 3.0 } else { 1.5 }, if chosen { orange } else { egui::Color32::WHITE }), egui::StrokeKind::Inside);
             }
             if let (Some(r), false) = (sel_rect, outlining) {
-                let handle_color = if cropping { egui::Color32::from_rgb(226, 91, 28) } else { egui::Color32::from_rgb(0, 120, 255) };
+                let handle_color = if cropping { egui::Color32::from_rgb(226, 91, 28) } else { ribbon::ACCENT };
                 for h in HANDLES {
                     let hr = egui::Rect::from_center_size(handle_pos(r, h), egui::Vec2::splat(HANDLE_PX));
                     painter.rect_filled(hr, 1.0, if cropping { handle_color } else { egui::Color32::WHITE });
@@ -6721,10 +6721,10 @@ impl App {
                 }
                 if sel_all.len() == 1 && !cropping {
                     let (top, knob) = (handle_pos(r, (0, -1)), rotate_pos(r));
-                    painter.line_segment([top, knob], egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)));
-                    painter.circle(knob, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 120, 255)));
+                    painter.line_segment([top, knob], egui::Stroke::new(1.0, ribbon::ACCENT));
+                    painter.circle(knob, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(1.5, ribbon::ACCENT));
                 } else {
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                 }
             }
             // The selected object's motion path: a line through draggable points.
@@ -6773,8 +6773,8 @@ impl App {
             if let (Some(g), Some((_, blk))) = (&table_group, self.cell_block()) {
                 if let Some((x, y, w, h)) = brainbend_doc::tables::range_rect(&slide.layers[sel_all[0].0].objects, g, blk) {
                     let r = to_screen(x, y, w, h);
-                    painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 36));
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                    painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36));
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                 }
             }
             let border_at = |pos: egui::Pos2| table_lines.iter().find(|(_, _, l)| l.expand(5.0).contains(pos) && handle_at(pos).is_none() && !rotate_at(pos)).map(|&(v, i, _)| (v, i));
@@ -6782,7 +6782,7 @@ impl App {
                 if let Some((vertical, i)) = border_at(hp) {
                     ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeColumn } else { egui::CursorIcon::ResizeRow });
                     if let Some((_, _, l)) = table_lines.iter().find(|(v, j, _)| *v == vertical && *j == i) {
-                        painter.line_segment([l.min, l.max], egui::Stroke::new(3.0, egui::Color32::from_rgb(0, 120, 255)));
+                        painter.line_segment([l.min, l.max], egui::Stroke::new(3.0, ribbon::ACCENT));
                     }
                 }
             }
@@ -6848,7 +6848,7 @@ impl App {
                 let mut line = screen.clone();
                 if let Some(t) = tail { line.push(t); }
                 if screen.len() >= outline::MIN_POINTS {
-                    painter.add(egui::Shape::convex_polygon(screen.clone(), egui::Color32::from_rgba_unmultiplied(0, 140, 255, 36), egui::Stroke::NONE));
+                    painter.add(egui::Shape::convex_polygon(screen.clone(), egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36), egui::Stroke::NONE));
                 }
                 painter.add(egui::Shape::line(line, egui::Stroke::new(2.0, orange)));
                 for (i, p) in screen.iter().enumerate() {
@@ -7155,7 +7155,7 @@ impl App {
                         let cur = to_slide(pos).to_pos2();
                         let band = egui::Rect::from_two_pos(start, cur);
                         painter.rect(egui::Rect::from_min_max(origin + band.min.to_vec2() * scale, origin + band.max.to_vec2() * scale),
-                            0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 30), egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                            0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 30), egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                         // Select every visible object on the topmost layer that has any inside the band.
                         let mut found: Vec<(usize, usize)> = vec![];
                         for &li in shown.iter().rev() {

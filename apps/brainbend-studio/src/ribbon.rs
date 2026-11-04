@@ -145,11 +145,17 @@ fn text_col(ui: &egui::Ui) -> egui::Color32 {
 
 pub const ORANGE: egui::Color32 = egui::Color32::from_rgb(226, 91, 28);
 
+/// The one blue of the app: selected tabs and ribbon items, buttons, the selected slide and layer, selection handles,
+/// and the File menu's list. White text on it reads clearly.
+pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(10, 110, 235);
+/// The accent under the pointer.
+pub const ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(52, 140, 250);
+
 /// Icon colours give the ribbon its pop; each icon keeps one hue across the app.
 pub fn tint(icon: char) -> egui::Color32 {
     let c = |r, g, b| egui::Color32::from_rgb(r, g, b);
     match icon {
-        PASTE | FILE_PLUS | FRAME | MAGNIFY | ACCESS | FOLDER | SAVE | CLICK => c(52, 112, 220),
+        PASTE | FILE_PLUS | FRAME | MAGNIFY | ACCESS | FOLDER | SAVE | CLICK => ACCENT,
         TEXTBOX | TEXT_T => c(40, 60, 120),
         IMAGE | PLAY | CHECK => c(48, 160, 100),
         VIDEO | TRASH => c(214, 74, 84),
@@ -157,7 +163,7 @@ pub fn tint(icon: char) -> egui::Color32 {
         RECT | CIRCLE | EXPORT | TIMER | QUESTION | SLIDERS => c(236, 112, 40),
         LINE | RADIO | LIST_NUM | COPY => c(0, 150, 160),
         MOON | SUN => c(240, 170, 20),
-        _ => c(52, 112, 220),
+        _ => ACCENT,
     }
 }
 
@@ -618,7 +624,7 @@ fn swatch_row(ui: &mut egui::Ui, colours: &[Rgba], cur: Option<Rgba>) -> Option<
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
             ui.painter().rect_filled(rect, 3.0, color(*c));
             let on = cur.is_some_and(|k| (k.0, k.1, k.2) == (c.0, c.1, c.2));
-            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { egui::Color32::from_rgb(0, 140, 255) } else { egui::Color32::from_gray(110) }), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::from_gray(110) }), egui::StrokeKind::Inside);
             if resp.on_hover_text(c.hex()).clicked() { picked = Some(*c); }
         }
     });
@@ -829,7 +835,7 @@ fn table_picker(ui: &mut egui::Ui) -> Option<(u16, u16)> {
         for c in 0..C {
             let on = hover.is_some_and(|(hr, hc)| r <= hr && c <= hc);
             let sq = egui::Rect::from_min_size(rect.min + egui::vec2(c as f32 * (cell + 2.0), r as f32 * (cell + 2.0)), egui::vec2(cell, cell));
-            ui.painter().rect_filled(sq, 2.0, if on { egui::Color32::from_rgb(0, 120, 215) } else { ui.visuals().text_color().gamma_multiply(0.12) });
+            ui.painter().rect_filled(sq, 2.0, if on { ACCENT } else { ui.visuals().text_color().gamma_multiply(0.12) });
         }
     }
     match hover { Some((r, c)) => ui.label(format!("{} x {} table", r + 1, c + 1)), None => ui.weak("Choose a size") };
@@ -1058,7 +1064,7 @@ impl App {
                 // What the groups on Home act on, as a tinted tag after the tabs.
                 if let Some(title) = self.format_title().filter(|_| self.ribbon_tab == HOME_TAB) {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(title).size(10.5).color(egui::Color32::from_rgb(70, 150, 230)).background_color(egui::Color32::from_rgba_unmultiplied(0, 140, 255, 38)));
+                    ui.label(egui::RichText::new(title).size(10.5).color(egui::Color32::from_rgb(70, 150, 230)).background_color(egui::Color32::from_rgba_unmultiplied(10, 110, 235, 38)));
                 }
             });
         });
@@ -1575,7 +1581,7 @@ impl App {
                         }
                     }
                     let on = self.table_style == st;
-                    ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { egui::Color32::from_rgb(0, 120, 255) } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
+                    ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
                     if resp.on_hover_text(st.label()).clicked() { pick = Some(st); }
                 }
                 ui.vertical(|ui| {

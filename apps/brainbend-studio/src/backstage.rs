@@ -105,7 +105,7 @@ impl App {
         let mut choice: Option<Choice> = None;
         let mut create: Option<ProjectKind> = None;
         let mut open_action: Option<OpenAction> = None;
-        let nav_fill = egui::Color32::from_rgb(24, 34, 56);
+        let nav_fill = ribbon::ACCENT;
         egui::Panel::left("backstage-nav")
             .exact_size(250.0)
             .frame(egui::Frame::new().fill(nav_fill).inner_margin(egui::Margin::symmetric(12, 14)))
@@ -128,13 +128,13 @@ impl App {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 42.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
                     if selected || (enabled && resp.hovered()) {
-                        ui.painter().rect_filled(rect, RIBBON_RADIUS, egui::Color32::from_white_alpha(if selected { 34 } else { 18 }));
+                        ui.painter().rect_filled(rect, RIBBON_RADIUS, egui::Color32::from_white_alpha(if selected { 48 } else { 26 }));
                     }
                     if selected {
-                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, ORANGE);
+                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, egui::Color32::WHITE);
                     }
-                    let alpha = if enabled { 255 } else { 90 };
-                    let icon_col = if enabled { tint(icon).gamma_multiply(1.25) } else { egui::Color32::from_white_alpha(alpha) };
+                    let alpha = if enabled { 255 } else { 130 };
+                    let icon_col = egui::Color32::from_white_alpha(alpha);
                     ui.painter().text(egui::pos2(rect.left() + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(20.0, icons()), icon_col);
                     ui.painter().text(egui::pos2(rect.left() + 54.0, rect.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(15.0), egui::Color32::from_white_alpha(alpha));
                     if enabled && resp.clicked() { choice = Some(ch); }
