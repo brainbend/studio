@@ -49,7 +49,8 @@ jobs:
           else
             VERSION=$(scripts/version.sh)
             TAG="v$VERSION"
-            if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then RELEASE=false; else RELEASE=true; fi
+            # Ask the remote: checking out a specific commit does not bring the tags with it.
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then RELEASE=false; else RELEASE=true; fi
           fi
           case "$VERSION" in *-*) PRE=true ;; *) PRE=false ;; esac
           echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
