@@ -1,5 +1,5 @@
 //! The full-screen File view ("backstage"): Back to Project, Project Info, New, Open, Save, Save As, Print.
-//! With no project open it is the app's start page, showing New.
+//! Project Info, New and Open are pages, like tabs. With no project open it is the app's start page, showing New.
 use super::*;
 use super::ribbon::{icons, tint, ORANGE, RIBBON_RADIUS};
 
@@ -11,22 +11,71 @@ const NEW: char = '\u{e236}';
 const OPEN: char = '\u{e256}';
 const SAVE: char = '\u{e248}';
 const WEB: char = '\u{e0f6}';
+const CLOSE: char = '\u{e4f6}';
+const IMPORT: char = '\u{e20c}';
 const MEDIA: char = '\u{e656}';
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum FilePage {
     #[default]
     New,
+    Open,
     Info,
     Print,
 }
 
 enum Choice {
     Back,
-    Open,
     Save,
     SaveAs,
     Page(FilePage),
+}
+
+/// The bottom of a tile: an orange button, or a plain tag for something that is not ready.
+#[derive(Clone, Copy)]
+enum Footer { Action(&'static str), Tag(&'static str) }
+
+/// A tile of the New and Open pages: a big icon, a name, a few words about it and a footer. Returns true when clicked
+/// (a tile that is not `available` cannot be).
+fn card(ui: &mut egui::Ui, height: f32, icon: char, name: &str, blurb: &str, footer: Footer, available: bool) -> bool {
+    let dark = ui.visuals().dark_mode;
+    let card_fill = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(232.0, height), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, available, name));
+    let hot = available && resp.hovered();
+    ui.painter().rect_filled(rect, RIBBON_RADIUS, card_fill);
+    ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ORANGE } else { ui.visuals().text_color().gamma_multiply(0.18) }), egui::StrokeKind::Inside);
+    let text = ui.visuals().text_color();
+    let muted = if available { text } else { text.gamma_multiply(0.55) };
+    let icon_col = if available { tint(icon) } else { tint(icon).gamma_multiply(0.45) };
+    ui.painter().text(rect.left_top() + egui::vec2(20.0, 20.0), egui::Align2::LEFT_TOP, icon, egui::FontId::new(40.0, icons()), icon_col);
+    ui.painter().text(rect.left_top() + egui::vec2(20.0, 76.0), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(17.0), muted);
+    let galley = ui.painter().layout(blurb.to_string(), egui::FontId::proportional(12.5), muted.gamma_multiply(0.8), rect.width() - 40.0);
+    ui.painter().galley(rect.left_top() + egui::vec2(20.0, 106.0), galley, muted);
+    let footer_rect = egui::Rect::from_min_size(rect.left_bottom() + egui::vec2(20.0, -44.0), egui::vec2(rect.width() - 40.0, 26.0));
+    match footer {
+        Footer::Action(label) => {
+            ui.painter().rect_filled(footer_rect, RIBBON_RADIUS, ORANGE);
+            ui.painter().text(footer_rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.5), egui::Color32::WHITE);
+        }
+        Footer::Tag(label) => {
+            ui.painter().rect_stroke(footer_rect, RIBBON_RADIUS, egui::Stroke::new(1.0, text.gamma_multiply(0.3)), egui::StrokeKind::Inside);
+            ui.painter().text(footer_rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), text.gamma_multiply(0.6));
+        }
+    }
+    available && resp.clicked()
+}
+
+/// What the Open page asks for.
+enum OpenAction {
+    /// Pick a project file in a dialog.
+    Browse,
+    /// Pick a Storyline or PowerPoint file in a dialog.
+    Import,
+    /// Reopen a project from the Recent list.
+    Recent(std::path::PathBuf),
+    /// Take a project off the Recent list.
+    Forget(std::path::PathBuf),
 }
 
 /// What the New page offers. Only the media lesson can be created today; web lessons are marked Coming soon until their
@@ -51,12 +100,13 @@ impl App {
         if !ctx.fonts(|f| f.families().contains(&icons())) { return false; }
         let has_project = self.project.is_some();
         if has_project && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.file_view = false; return false; }
-        if !has_project && self.file_page != FilePage::New { self.file_page = FilePage::New; }
+        // With nothing open there is no Project Info or Print to show.
+        if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open) { self.file_page = FilePage::New; }
         let mut choice: Option<Choice> = None;
         let mut create: Option<ProjectKind> = None;
+        let mut open_action: Option<OpenAction> = None;
         let nav_fill = egui::Color32::from_rgb(24, 34, 56);
-        // With nothing open this is the start page: just the New page, no sidebar.
-        if has_project { egui::Panel::left("backstage-nav")
+        egui::Panel::left("backstage-nav")
             .exact_size(250.0)
             .frame(egui::Frame::new().fill(nav_fill).inner_margin(egui::Margin::symmetric(12, 14)))
             .show_separator_line(false)
@@ -66,7 +116,7 @@ impl App {
                     (BACK, "Back to Project", Choice::Back, has_project),
                     (INFO, "Project Info", Choice::Page(FilePage::Info), has_project),
                     (NEW, "New", Choice::Page(FilePage::New), true),
-                    (OPEN, "Open", Choice::Open, true),
+                    (OPEN, "Open", Choice::Page(FilePage::Open), true),
                     (SAVE, "Save", Choice::Save, has_project),
                     (SAVE_AS, "Save As", Choice::SaveAs, has_project),
                     (PRINTER, "Print", Choice::Page(FilePage::Print), has_project),
@@ -89,31 +139,32 @@ impl App {
                     ui.painter().text(egui::pos2(rect.left() + 54.0, rect.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(15.0), egui::Color32::from_white_alpha(alpha));
                     if enabled && resp.clicked() { choice = Some(ch); }
                 }
-            }); }
-        // The New page's content block (about 980px wide) is centred in the window.
+            });
+        // Every page shares one column: left-aligned, starting at the same place under its heading, up to 980px wide.
         egui::CentralPanel::default().frame(egui::Frame::new().fill(root.visuals().panel_fill).inner_margin(egui::Margin::symmetric(48, 36))).show(root, |ui| {
-            match self.file_page {
-                FilePage::Info if has_project => self.info_page(ui),
-                FilePage::Print if has_project => self.print_page(ui),
-                _ => {
-                    let top = ((ui.available_height() - 470.0) / 3.0).max(0.0);
-                    let w = 980.0_f32.min(ui.available_width());
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(top);
-                        ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
-                            create = self.new_page(ui);
-                        });
-                    });
+            let w = 980.0_f32.min(ui.available_width());
+            ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
+                match self.file_page {
+                    FilePage::Info if has_project => self.info_page(ui),
+                    FilePage::Print if has_project => self.print_page(ui),
+                    FilePage::Open => open_action = self.open_page(ui),
+                    _ => create = self.new_page(ui),
                 }
-            }
+            });
         });
         match choice {
             Some(Choice::Back) => self.file_view = false,
-            // The view closes once a file is actually opened, so cancelling the dialog leaves it up.
-            Some(Choice::Open) => self.open_requested = true,
             Some(Choice::Save) => { self.save(false); self.file_view = false; }
             Some(Choice::SaveAs) => { self.save(true); self.file_view = false; }
             Some(Choice::Page(p)) => self.file_page = p,
+            None => {}
+        }
+        // The view closes once a file is actually opened, so cancelling the dialog leaves it up.
+        match open_action {
+            Some(OpenAction::Browse) => self.open_requested = true,
+            Some(OpenAction::Import) => self.guard(Pending::Import),
+            Some(OpenAction::Recent(path)) => { self.drop_path = Some(path); self.guard(Pending::OpenDropped); }
+            Some(OpenAction::Forget(path)) => self.forget_recent(&path),
             None => {}
         }
         if let Some(kind) = create {
@@ -129,50 +180,81 @@ impl App {
     fn new_page(&mut self, ui: &mut egui::Ui) -> Option<ProjectKind> {
         let mut picked = None;
         ui.heading("New");
-        ui.add_space(4.0);
+        ui.add_space(10.0);
         ui.label(egui::RichText::new("What would you like to create?").size(15.0));
-        ui.add_space(18.0);
-        let dark = ui.visuals().dark_mode;
-        let card_fill = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+        ui.add_space(14.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(16.0, 16.0);
             for t in &TEMPLATES {
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(232.0, 236.0), egui::Sense::click());
-                let name = t.kind.label();
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, t.available, name));
-                let hot = t.available && resp.hovered();
-                ui.painter().rect_filled(rect, RIBBON_RADIUS, card_fill);
-                ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ORANGE } else { ui.visuals().text_color().gamma_multiply(0.18) }), egui::StrokeKind::Inside);
-                let text = ui.visuals().text_color();
-                let muted = if t.available { text } else { text.gamma_multiply(0.55) };
-                let icon_col = if t.available { tint(t.icon) } else { tint(t.icon).gamma_multiply(0.45) };
-                ui.painter().text(rect.left_top() + egui::vec2(20.0, 20.0), egui::Align2::LEFT_TOP, t.icon, egui::FontId::new(40.0, icons()), icon_col);
-                ui.painter().text(rect.left_top() + egui::vec2(20.0, 76.0), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(17.0), muted);
-                let galley = ui.painter().layout(t.blurb.to_string(), egui::FontId::proportional(12.5), muted.gamma_multiply(0.8), rect.width() - 40.0);
-                ui.painter().galley(rect.left_top() + egui::vec2(20.0, 106.0), galley, muted);
-                // Footer: Create (orange) or a Coming soon tag.
-                let footer = egui::Rect::from_min_size(rect.left_bottom() + egui::vec2(20.0, -44.0), egui::vec2(rect.width() - 40.0, 26.0));
-                if t.available {
-                    ui.painter().rect_filled(footer, RIBBON_RADIUS, ORANGE);
-                    ui.painter().text(footer.center(), egui::Align2::CENTER_CENTER, "Create", egui::FontId::proportional(13.5), egui::Color32::WHITE);
-                } else {
-                    ui.painter().rect_stroke(footer, RIBBON_RADIUS, egui::Stroke::new(1.0, text.gamma_multiply(0.3)), egui::StrokeKind::Inside);
-                    ui.painter().text(footer.center(), egui::Align2::CENTER_CENTER, "Coming soon", egui::FontId::proportional(13.0), text.gamma_multiply(0.6));
-                }
-                if t.available && resp.clicked() { picked = Some(t.kind); }
+                let footer = if t.available { Footer::Action("Create") } else { Footer::Tag("Coming soon") };
+                if card(ui, 236.0, t.icon, t.kind.label(), t.blurb, footer, t.available) { picked = Some(t.kind); }
             }
         });
         ui.add_space(22.0);
         if self.project.is_some() {
-            ui.weak("Or choose Open in the list on the left to open an existing .brainbend, .story or .pptx file.");
+            ui.weak("Or choose Open in the list on the left to open a recent project or an existing .brainbend, .story or .pptx file.");
         } else {
             ui.horizontal(|ui| {
                 ui.weak("Or");
-                if ui.link("open an existing project").clicked() { self.open_requested = true; }
+                if ui.link("open an existing project").clicked() { self.file_page = FilePage::Open; }
                 ui.weak("(.brainbend, .story or .pptx). You can also drop a file on this window.");
             });
         }
         picked
+    }
+
+    /// The Open page: recent projects (one click to reopen), a way to find one that is not listed, and a way to import a
+    /// Storyline or PowerPoint file.
+    fn open_page(&mut self, ui: &mut egui::Ui) -> Option<OpenAction> {
+        let mut action = None;
+        ui.heading("Open");
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("What would you like to open?").size(15.0));
+        ui.add_space(14.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(16.0, 16.0);
+            if card(ui, 236.0, OPEN, "Browse", "Open a .brainbend project that is not in the list below.", Footer::Action("Browse…"), true) { action = Some(OpenAction::Browse); }
+            if card(ui, 236.0, IMPORT, "Import", "Bring in a Storyline .story or PowerPoint .pptx file as a new project.", Footer::Action("Import…"), true) { action = Some(OpenAction::Import); }
+        });
+        ui.add_space(6.0);
+        ui.weak("You can also drop a .brainbend, .story or .pptx file on this window.");
+        ui.add_space(22.0);
+        ui.label(egui::RichText::new("Recent").size(17.0));
+        ui.add_space(6.0);
+        if self.recent.is_empty() {
+            ui.weak("Projects you open or save will be listed here.");
+            return action;
+        }
+        let dark = ui.visuals().dark_mode;
+        let card_fill = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+        let (text, now) = (ui.visuals().text_color(), recent::now());
+        let width = ui.available_width().min(760.0);
+        ui.spacing_mut().item_spacing.y = 8.0;
+        for (i, r) in self.recent.iter().enumerate() {
+            let found = r.path.exists();
+            let name = r.path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled");
+            let folder = r.path.parent().map(|d| d.display().to_string()).unwrap_or_default();
+            let when = if found { recent::ago(now, r.opened) } else { "Not found".to_string() };
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 56.0), if found { egui::Sense::click() } else { egui::Sense::hover() });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, found, format!("{name}, {folder}, {when}")));
+            let hot = found && resp.hovered();
+            ui.painter().rect_filled(rect, RIBBON_RADIUS, card_fill);
+            ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ORANGE } else { text.gamma_multiply(0.18) }), egui::StrokeKind::Inside);
+            let ink = if found { text } else { text.gamma_multiply(0.55) };
+            ui.painter().text(rect.left_top() + egui::vec2(16.0, 10.0), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(15.0), ink);
+            ui.painter().text(rect.left_top() + egui::vec2(16.0, 32.0), egui::Align2::LEFT_TOP, &folder, egui::FontId::proportional(12.0), ink.gamma_multiply(0.7));
+            ui.painter().text(egui::pos2(rect.right() - 52.0, rect.center().y), egui::Align2::RIGHT_CENTER, &when, egui::FontId::proportional(12.5), if found { ink.gamma_multiply(0.7) } else { ui.visuals().warn_fg_color });
+            // A button over the right end takes the project off the list (the file itself is not touched).
+            let x_rect = egui::Rect::from_center_size(egui::pos2(rect.right() - 24.0, rect.center().y), egui::vec2(28.0, 28.0));
+            let x = ui.interact(x_rect, ui.id().with(("recent-forget", i)), egui::Sense::click());
+            x.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Remove {name} from the list")));
+            if x.hovered() { ui.painter().rect_filled(x_rect, RIBBON_RADIUS, text.gamma_multiply(0.12)); }
+            ui.painter().text(x_rect.center(), egui::Align2::CENTER_CENTER, CLOSE, egui::FontId::new(14.0, icons()), ink.gamma_multiply(0.8));
+            x.clone().on_hover_text("Remove from the list. The file is not deleted.");
+            if x.clicked() { action = Some(OpenAction::Forget(r.path.clone())); }
+            else if found && resp.clicked() { action = Some(OpenAction::Recent(r.path.clone())); }
+        }
+        action
     }
 
     fn info_page(&mut self, ui: &mut egui::Ui) {

@@ -7,6 +7,7 @@ mod panos;
 mod icons;
 mod markers;
 mod backstage;
+mod recent;
 mod controls;
 mod doc_tabs;
 mod crop;
@@ -48,6 +49,8 @@ fn main() -> eframe::Result {
             install_theme(&cc.egui_ctx);
             let mut app = App::default();
             update::clean_up_after_update();
+            app.recent_file = recent::list_path();
+            if let Some(f) = &app.recent_file { app.recent = recent::load_from(f); }
             app.updater = update::Updater::load();
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.open_to_story_view = true;
@@ -187,6 +190,10 @@ struct App {
     layer_edit: Option<usize>,
     layer_drag: Option<usize>,
     open_requested: bool,
+    /// Projects opened or saved lately (File > Open), and the file that remembers them. Tests leave the file unset so they
+    /// never touch the real list.
+    recent: Vec<recent::RecentProject>,
+    recent_file: Option<PathBuf>,
     /// The full-screen File view is open.
     file_view: bool,
     file_page: backstage::FilePage,
@@ -281,6 +288,8 @@ enum Pending {
     /// A new Web Lesson.
     NewLesson(ProjectKind),
     Open,
+    /// Pick a Storyline or PowerPoint file to bring in.
+    Import,
     /// Open the file waiting in `App::drop_path` (dragged onto the window).
     OpenDropped,
     /// Close the app so the downloaded update can replace it.
@@ -403,7 +412,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -885,6 +894,7 @@ impl App {
                 self.undo.clear();
                 self.redo.clear();
                 self.dirty = ext == "story" || ext == "pptx";
+                self.remember(path);
             }
             Err(e) => self.status = format!("Could not open {}: {e}", file_label(&path)),
         }
@@ -920,6 +930,21 @@ impl App {
         self.visible = vis;
     }
 
+    /// Adds a saved project to the Recent list. Imports (which have no file of their own yet) and the recovery copy are
+    /// not listed.
+    fn remember(&mut self, path: &std::path::Path) {
+        let is_project = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("brainbend"));
+        if !is_project || recovery_path().is_some_and(|r| r == path) { return; }
+        recent::touch(&mut self.recent, path, recent::now());
+        if let Some(f) = &self.recent_file { recent::save_to(f, &self.recent); }
+    }
+
+    /// Takes a project off the Recent list (it was moved or deleted, or the author just does not want it there).
+    fn forget_recent(&mut self, path: &std::path::Path) {
+        recent::forget(&mut self.recent, path);
+        if let Some(f) = &self.recent_file { recent::save_to(f, &self.recent); }
+    }
+
     fn save(&mut self, as_new: bool) {
         self.end_state_swap();
         self.leave_master_view();
@@ -935,9 +960,10 @@ impl App {
         match res {
             Ok(()) => {
                 self.status = format!("Saved {}", file_label(&target));
-                self.path = Some(target);
+                self.path = Some(target.clone());
                 self.dirty = false;
                 Self::clear_recovery();
+                self.remember(&target);
             }
             Err(e) => self.status = format!("Save failed: {e}"),
         }
@@ -981,6 +1007,11 @@ impl App {
             Pending::NewLesson(kind) => self.new_lesson_project(kind),
             Pending::OpenDropped => {
                 if let Some(p) = self.drop_path.take() { self.open(&p); }
+            }
+            Pending::Import => {
+                if let Some(p) = rfd::FileDialog::new().set_title("Import a Storyline or PowerPoint file").add_filter("Storyline or PowerPoint files", &["story", "storyapp", "pptx"]).pick_file() {
+                    self.open(&p);
+                }
             }
             Pending::Open => {
                 if let Some(p) = rfd::FileDialog::new().add_filter("BrainBend Studio, .story or PowerPoint files", &["brainbend", "storyapp", "story", "pptx"]).pick_file() {
@@ -7875,6 +7906,8 @@ mod tests {
         h.state_mut().file_view = true;
         h.state_mut().file_page = backstage::FilePage::New;
         shot(&mut h, "6c-file-new.png");
+        h.state_mut().file_page = backstage::FilePage::Open;
+        shot(&mut h, "6d-file-open.png");
         h.state_mut().file_page = backstage::FilePage::Info;
         shot(&mut h, "6a-file-info.png");
         h.state_mut().file_page = backstage::FilePage::Print;
@@ -9798,6 +9831,7 @@ mod tests {
 
     #[test]
     fn autosave_streams_a_project_with_media_and_leaves_it_whole() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!("bb-home-media-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&home);
         std::env::set_var("HOME", &home);
@@ -10497,6 +10531,7 @@ mod tests {
 
     #[test]
     fn autosave_writes_a_recoverable_copy_and_saving_clears_it() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!("brainbend-home-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var("HOME", &home);
@@ -10756,6 +10791,77 @@ mod tests {
         }
     }
 
+    /// Tests that point HOME at a folder of their own take this first: HOME is shared by the whole test process, so two of
+    /// them at once would write each other's files.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A saved .brainbend file in a temp folder of its own, for the Recent list to point at.
+    fn saved_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bb-recent-gui-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut p = app().project.unwrap();
+        p.name = name.into();
+        let mut cur = std::io::Cursor::new(Vec::new());
+        p.write_package(&mut cur).unwrap();
+        let path = dir.join(format!("{name}.brainbend"));
+        std::fs::write(&path, cur.into_inner()).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_open_page_lists_recent_projects_and_clicking_one_opens_it() {
+        use egui_kittest::kittest::Queryable;
+        let path = saved_project("Safety Course");
+        let mut a = App::default();
+        a.recent = vec![recent::RecentProject { path: path.clone(), opened: recent::now() }];
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label("Open").click();
+        h.run_steps(3);
+        assert!(h.state().file_page == backstage::FilePage::Open);
+        assert!(h.query_by_label("Recent").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("open-page.png")).unwrap();
+        }
+        assert!(h.query_by_label_contains("Safety Course, ").is_some(), "the project is listed by name");
+        assert!(h.query_by_label("Browse").is_some() && h.query_by_label("Import").is_some(), "Browse and Import are tiles");
+        h.get_by_label_contains("Safety Course, ").click();
+        h.run_steps(4);
+        assert_eq!(h.state().project.as_ref().map(|p| p.name.as_str()), Some("Safety Course"), "clicking the entry opens the project");
+        assert_eq!(h.state().path.as_ref(), Some(&path));
+        assert!(!h.state().file_view, "the File view closes once it is open");
+        assert_eq!(h.state().recent[0].path, path, "and it stays at the top of the list");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_recent_project_that_has_gone_is_marked_and_can_be_removed() {
+        use egui_kittest::kittest::Queryable;
+        let gone = std::env::temp_dir().join("bb-recent-gui-missing").join("Gone.brainbend");
+        let mut a = App::default();
+        a.recent = vec![recent::RecentProject { path: gone.clone(), opened: recent::now() }];
+        a.file_page = backstage::FilePage::Open;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Not found").is_some());
+        h.get_by_label_contains("Remove Gone from the list").click();
+        h.run_steps(3);
+        assert!(h.state().recent.is_empty(), "removed from the list");
+        assert!(h.query_by_label("Projects you open or save will be listed here.").is_some());
+    }
+
+    #[test]
+    fn saving_and_opening_projects_feeds_the_recent_list_but_imports_and_recovery_do_not() {
+        let mut a = App::default();
+        a.remember(std::path::Path::new("/tmp/a.brainbend"));
+        a.remember(std::path::Path::new("/tmp/b.pptx"));
+        a.remember(std::path::Path::new("/tmp/c.story"));
+        assert_eq!(a.recent.len(), 1, "only a saved .brainbend is listed");
+        if let Some(r) = recovery_path() { a.remember(&r); }
+        assert_eq!(a.recent.len(), 1, "the recovery copy is not a project of the author's");
+        assert!(a.recent_file.is_none(), "tests never write the real list");
+    }
+
     #[test]
     fn app_starts_on_the_new_page_and_creating_a_media_lesson_opens_the_editor() {
         use egui_kittest::kittest::Queryable;
@@ -10763,7 +10869,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().file_view && h.state().project.is_none());
         assert!(h.state().file_page == backstage::FilePage::New);
-        assert!(h.query_by_label("Project Info").is_none(), "no sidebar on the start page");
+        assert!(h.query_by_label("Open").is_some() && h.query_by_label("Project Info").is_some(), "the start page has the sidebar, with Open on it");
         h.get_by_label("Media Lesson").click();
         h.run_steps(4);
         let st = h.state();
