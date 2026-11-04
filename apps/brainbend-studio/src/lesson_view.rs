@@ -172,6 +172,11 @@ impl App {
     pub(super) fn lesson_toolbar(&mut self, root: &mut egui::Ui, _ctx: &egui::Context) {
         let bg = root.visuals().panel_fill;
         egui::Panel::top("lessonbar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 6))).show_separator_line(true).show(root, |ui| {
+            // Preview and Publish stay at the right; the editing controls wrap in the space that is left.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                if ui.button("Publish").clicked() { self.publish_open = true; }
+                ui.menu_button("Preview", |ui| self.preview_items(ui));
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.menu_button("+ Add block", |ui| {
                     for (group, kinds) in BlockKind::catalog() {
@@ -194,6 +199,8 @@ impl App {
                 if ui.button("Spelling").on_hover_text("Check spelling (F7)").clicked() { self.open_spelling(); }
                 if ui.button("Check").on_hover_text("Check the lesson for problems").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
                 if ui.button("Lesson settings").clicked() { self.lesson_settings = true; }
+            });
+                });
             });
         });
     }

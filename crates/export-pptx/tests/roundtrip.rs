@@ -43,6 +43,9 @@ fn project() -> Project {
     rect.radius = 24.0;
     rect.stroke = Some(Stroke { color: Rgba(0, 0, 0, 255), width: 4.0 });
     rect.shadow = Some(Shadow { dx: 6.0, dy: 6.0, blur: 10.0, spread: 0.0, color: Rgba(0, 0, 0, 90) });
+    rect.glow = Some(Glow { radius: 12.0, color: Rgba(255, 200, 0, 150) });
+    rect.reflection = Some(Reflection { size: 0.5, opacity: 0.4, gap: 4.0 });
+    rect.soft_edge = 6.0;
     rect.rotation = 15.0;
     rect.text = "Go to details".into();
     rect.style.align = Align::Center;
@@ -159,6 +162,11 @@ fn a_project_survives_export_and_import() {
     assert_eq!(card.stroke.unwrap().color, Rgba(0, 0, 0, 255));
     assert!((card.stroke.unwrap().width - 4.0).abs() < 0.6);
     assert!(card.shadow.is_some());
+    let glow = card.glow.expect("glow survives");
+    assert!((glow.radius - 12.0).abs() < 1.0 && glow.color.0 == 255 && glow.color.1 == 200, "{glow:?}");
+    let refl = card.reflection.expect("reflection survives");
+    assert!((refl.size - 0.5).abs() < 0.01 && (refl.opacity - 0.4).abs() < 0.01 && (refl.gap - 4.0).abs() < 1.0, "{refl:?}");
+    assert!((card.soft_edge - 6.0).abs() < 1.0, "soft edges survive: {}", card.soft_edge);
     assert_eq!(card.alt, "Jump to the details slide");
     assert!(matches!(&s.triggers[0].action, Action::JumpToSlide(id) if *id == back.slides[1].id), "link survives");
     assert_eq!(find("Gradient box").gradient.as_ref().unwrap().stops.len(), 2);

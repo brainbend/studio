@@ -237,14 +237,19 @@ impl Part<'_> {
     }
 
     fn effects_xml(&self, o: &Object) -> String {
-        match o.shadow {
-            Some(s) => {
-                let dist = (s.dx * s.dx + s.dy * s.dy).sqrt();
-                let dir = if dist > 0.0 { s.dy.atan2(s.dx).to_degrees().rem_euclid(360.0) } else { 0.0 };
-                format!("<a:effectLst><a:outerShdw blurRad=\"{}\" dist=\"{}\" dir=\"{}\" algn=\"ctr\" rotWithShape=\"0\">{}</a:outerShdw></a:effectLst>", emu(s.blur), emu(dist), (dir * 60000.0).round() as i64, color_xml(s.color))
-            }
-            None => String::new(),
+        // The order PowerPoint expects: glow, shadow, reflection, soft edges.
+        let mut x = String::new();
+        if let Some(g) = o.glow { let _ = write!(x, "<a:glow rad=\"{}\">{}</a:glow>", emu(g.radius), color_xml(g.color)); }
+        if let Some(s) = o.shadow {
+            let dist = (s.dx * s.dx + s.dy * s.dy).sqrt();
+            let dir = if dist > 0.0 { s.dy.atan2(s.dx).to_degrees().rem_euclid(360.0) } else { 0.0 };
+            let _ = write!(x, "<a:outerShdw blurRad=\"{}\" dist=\"{}\" dir=\"{}\" algn=\"ctr\" rotWithShape=\"0\">{}</a:outerShdw>", emu(s.blur), emu(dist), (dir * 60000.0).round() as i64, color_xml(s.color));
         }
+        if let Some(r) = o.reflection {
+            let _ = write!(x, "<a:reflection blurRad=\"0\" stA=\"{}\" endA=\"0\" endPos=\"{}\" dist=\"{}\" dir=\"5400000\" sy=\"-100000\" algn=\"bl\" rotWithShape=\"0\"/>", (r.opacity.clamp(0.0, 1.0) * 100000.0).round() as i64, (r.size.clamp(0.0, 1.0) * 100000.0).round() as i64, emu(r.gap));
+        }
+        if o.soft_edge > 0.0 { let _ = write!(x, "<a:softEdge rad=\"{}\"/>", emu(o.soft_edge)); }
+        if x.is_empty() { x } else { format!("<a:effectLst>{x}</a:effectLst>") }
     }
 
     fn geometry_xml(&mut self, o: &Object) -> String {

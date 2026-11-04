@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 use brainbend_doc::Project;
 mod print;
-pub use print::print_html;
+pub use print::{print_html, print_html_with, HandoutOptions, HandoutOrientation};
 
 mod web;
 
@@ -13,14 +13,6 @@ const QUESTION_CSS: &str = include_str!("question.css");
 const RUNTIME_SRC: &str = include_str!("runtime.js");
 const LMS_JS: &str = include_str!("shared_lms.js");
 const QUESTIONS_JS: &str = include_str!("shared_questions.js");
-// Montserrat is licensed under the SIL OFL 1.1 (assets/fonts/OFL.txt); the license text is
-// written next to the font in every export.
-const FONT_MONTSERRAT: &[u8] = include_bytes!("../../../assets/fonts/Montserrat[wght].ttf");
-const FONT_LICENSE: &str = include_str!("../../../assets/fonts/OFL-Montserrat.txt");
-// Open Sans: SIL OFL 1.1 (assets/fonts/OFL-OpenSans.txt).
-const FONT_OPEN_SANS: &[u8] = include_bytes!("../../../assets/fonts/OpenSans[wdth,wght].ttf");
-const FONT_LICENSE_OPEN_SANS: &str = include_str!("../../../assets/fonts/OFL-OpenSans.txt");
-
 /// Which LMS packaging the player should expect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lms {
@@ -40,14 +32,31 @@ impl Lms {
 }
 
 /// Build every file of the export in memory: (relative path, bytes).
-/// The font files every export carries.
-fn base_files() -> Vec<(String, Vec<u8>)> {
-    vec![
-        ("fonts/Montserrat.ttf".into(), FONT_MONTSERRAT.to_vec()),
-        ("fonts/OFL-Montserrat.txt".into(), FONT_LICENSE.as_bytes().to_vec()),
-        ("fonts/OpenSans.ttf".into(), FONT_OPEN_SANS.to_vec()),
-        ("fonts/OFL-OpenSans.txt".into(), FONT_LICENSE_OPEN_SANS.as_bytes().to_vec()),
-    ]
+/// The fonts a lesson needs: every family it names, plus the two the player falls back to.
+fn fonts_needed(project: &Project) -> std::collections::BTreeSet<String> {
+    let mut used = project.fonts_used();
+    used.insert("Open Sans".into());
+    used.insert("Montserrat".into());
+    used
+}
+
+/// The font files an export carries and the `@font-face` rules that load them.
+fn font_assets(project: &Project) -> (Vec<(String, Vec<u8>)>, String) {
+    let e = brainbend_fonts::embed(&fonts_needed(project), "fonts/");
+    (e.files, e.css)
+}
+
+/// Which of the fonts a lesson names travel with it, and which do not (the learner's own copy is used if they
+/// have one). For the Publish dialog.
+#[derive(Clone, Default)]
+pub struct FontsReport {
+    pub embedded: Vec<String>,
+    pub fallback: Vec<String>,
+}
+
+pub fn fonts_report(project: &Project) -> FontsReport {
+    let e = brainbend_fonts::embed(&project.fonts_used(), "fonts/");
+    FontsReport { embedded: e.embedded, fallback: e.fallback }
 }
 
 /// Add the media something references to `files` and return asset key -> file path.
@@ -122,7 +131,7 @@ pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, Stri
     if project.slides.is_empty() {
         return Err("project has no slides".into());
     }
-    let mut files = base_files();
+    let (mut files, font_css) = font_assets(project);
     let mut urls = package_assets(project, &mut files);
     let pano_tags = package_panos(project, &mut files, &mut urls);
 
@@ -155,9 +164,7 @@ pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, Stri
 <title>{title}</title>
 <style>
 :root{{{pvars}}}
-@font-face{{font-family:Montserrat;src:url(fonts/Montserrat.ttf);font-weight:100 900}}
-@font-face{{font-family:"Open Sans";src:url(fonts/OpenSans.ttf);font-weight:300 800;font-stretch:75% 100%}}
-html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
+{font_css}html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
 #stage{{position:absolute;left:50%;top:50%;transform-origin:center;background:#fff;overflow:hidden}}
 .slide,.layer{{position:absolute;inset:0}}
 .q{{position:absolute;inset:0;box-sizing:border-box;padding:110px 180px;background:#f4f6f9;font-family:"Open Sans",Arial,sans-serif;color:#1b2a3a;overflow:auto}}
@@ -180,10 +187,12 @@ html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
 #topbar .tb-toggle:hover{{background:var(--p-hover)}}
 #topbar .tb-title{{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 #topbar .logo{{height:28px;max-width:140px;object-fit:contain}}
+body.side-anim #topbar,body.side-anim #nav{{transition:left .22s ease,right .22s ease}}
+body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #menu.sidebar{{width:280px;box-shadow:none;z-index:3}}
 #menu.side-left{{border-right:1px solid var(--p-line)}}
 #menu.side-right{{left:auto;right:0;border-left:1px solid var(--p-line)}}
-#menu .logo{{display:block;max-width:calc(100% - 32px);max-height:72px;margin:16px auto 8px;object-fit:contain}}
+#menu .banner{{display:block;width:100%;height:120px;object-fit:cover}}
 #menu .sb-tabs{{display:flex;border-bottom:1px solid var(--p-line);margin-top:4px}}
 #menu .sb-tabs button{{flex:1;border-radius:0;text-align:center;padding:10px 8px;border-bottom:3px solid transparent;color:var(--p-muted)}}
 #menu .sb-tabs button[aria-selected=true]{{color:var(--p-fg);border-bottom-color:var(--p-accent);background:transparent}}
@@ -219,6 +228,9 @@ html,body{{margin:0;height:100%;background:var(--p-body);overflow:hidden}}
 #nav .nav-controls button{{background:transparent;color:var(--p-fg);border:1px solid var(--p-line);padding:6px 10px;min-width:36px}}
 #nav .nav-controls button:hover{{background:var(--p-hover)}}
 #nav .nav-controls button[aria-pressed=true]{{background:var(--p-accent);color:var(--p-accent-ink);border-color:var(--p-accent)}}
+#nav .nav-controls button:disabled{{opacity:.4;cursor:default}}
+#nav .nav-controls .ctl-seek{{width:200px;max-width:28vw;accent-color:var(--p-accent)}}
+#nav .nav-controls .ctl-time{{font-size:.85em;color:var(--p-muted);white-space:nowrap;font-variant-numeric:tabular-nums}}
 #nav .nav-controls .ctl-volume[aria-pressed=true]{{background:var(--p-hover);color:var(--p-fg);border-color:var(--p-line)}}
 #nav button:focus-visible{{outline:3px solid #6aa8e6}}
 .obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.hidden-by-layer{{display:none !important}}
@@ -379,6 +391,24 @@ mod tests {
             scene: String::new(),
         });
         p
+    }
+
+    #[test]
+    fn the_fonts_a_lesson_uses_travel_with_it_and_the_rest_are_named_as_fallbacks() {
+        let mut p = tiny();
+        p.player.font = "Lora".into();
+        p.theme.heading_font = "No Such Font".into();
+        let files = build(&p, Lms::None).unwrap();
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.iter().any(|n| n.starts_with("fonts/Lora-") && n.ends_with(".ttf")), "{names:?}");
+        assert!(names.contains(&"fonts/Lora-license.txt"));
+        assert!(names.iter().any(|n| n.starts_with("fonts/Open-Sans-")), "the player's own font always ships");
+        assert!(!names.iter().any(|n| n.contains("No-Such")));
+        let html = String::from_utf8(files.iter().find(|(n, _)| n == "index.html").unwrap().1.clone()).unwrap();
+        assert!(html.contains("font-family:'Lora'") && html.contains("font-family:'Open Sans'"));
+        let r = fonts_report(&p);
+        assert!(r.embedded.contains(&"Lora".to_string()));
+        assert_eq!(r.fallback, vec!["No Such Font".to_string()]);
     }
 
     #[test]

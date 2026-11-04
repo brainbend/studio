@@ -7,7 +7,7 @@ fn main() {
     let mut intro = Slide::new("intro", "Intro", 1920.0, 1080.0);
     intro.layers[0].objects.push(Object {
         id: "go".into(), name: "Start".into(), kind: Kind::Rect, x: 700.0, y: 400.0, w: 500.0, h: 140.0,
-        fill: Some(Rgba(3, 83, 158, 255)), stroke: None, shadow: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich: None, entrance: None, exit: None, timing: None, text: "Start quiz".into(),
+        fill: Some(Rgba(3, 83, 158, 255)), stroke: None, shadow: None, glow: None, soft_edge: 0.0, reflection: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich: None, entrance: None, exit: None, timing: None, text: "Start quiz".into(),
         style: TextStyle { font_family: "Open Sans".into(), size: 48.0, bold: true, italic: false, underline: false, color: Rgba(255, 255, 255, 255), align: Align::Center, valign: VAlign::Middle },
         asset: None, states: vec![], initial_state: String::new(), placeholder: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
     });

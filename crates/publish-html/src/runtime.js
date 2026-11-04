@@ -245,7 +245,7 @@
           media.src = P.assetUrls[o.asset]; media.preload = 'metadata';
           if (o.poster && P.assetUrls[o.poster]) media.poster = P.assetUrls[o.poster];
           var mp = o.media || { autoplay: false, controls: true, looped: false, muted: false, volume: 1 };
-          media.controls = mp.controls; media.loop = mp.looped; media.muted = mp.muted; media.dataset.authorMuted = mp.muted ? '1' : ''; media.volume = mp.volume;
+          media.controls = o.kind === 'Audio' && mp.controls; media.loop = mp.looped; media.muted = mp.muted; media.dataset.authorMuted = mp.muted ? '1' : ''; media.volume = mp.volume;
           media.setAttribute('aria-label', o.alt || o.name || (o.kind === 'Video' ? 'Video' : 'Audio'));
           // Cue points: "media reaches" fires once each time playback passes the time (again after seeking back).
           var cues = {};
@@ -1159,7 +1159,7 @@
     if (entry.drawCheck) entry.drawCheck();
     var o = entry.o, s = stateFor(entry);
     var fill = s ? s.fill : o.fill, text = s ? s.text : o.text, st = s ? s.style : o.style, rich = s ? s.rich : o.rich;
-    var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow;
+    var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow, grad = s ? s.gradient : o.gradient;
     if (entry.node._path) {
       entry.node.style.background = 'none';
       entry.node._path.setAttribute('fill', (!s && entry.node._gradId) ? 'url(#' + entry.node._gradId + ')' : fill ? css(fill) : 'none');
@@ -1167,11 +1167,11 @@
       entry.node._path.setAttribute('stroke-width', stroke ? stroke.width : 0);
       entry.node._path.setAttribute('stroke-dasharray', stroke ? dashArray(o.dash, stroke.width) : '');
       stroke = null;
-    } else if (s && s.shine && fill) {
+    } else if (s && s.shine && (fill || grad)) {
       // A button's "shine": a light gradient over the fill, stronger on hover.
       var sh = s.shine;
-      entry.node.style.background = 'linear-gradient(' + (sh.reverse ? '0deg' : '180deg') + ',rgba(255,255,255,' + sh.alpha + '),rgba(255,255,255,' + (sh.alpha * 0.1) + ')),' + css(fill);
-    } else entry.node.style.background = (!s && o.gradient) ? gradCss(o.gradient) : css(fill);
+      entry.node.style.background = 'linear-gradient(' + (sh.reverse ? '0deg' : '180deg') + ',rgba(255,255,255,' + sh.alpha + '),rgba(255,255,255,' + (sh.alpha * 0.1) + ')),' + (grad ? gradCss(grad) : css(fill));
+    } else entry.node.style.background = grad ? gradCss(grad) : css(fill);
     if (entry.node._line) {
       entry.node.style.border = 'none';
       entry.node._line.setAttribute('stroke', stroke ? css(stroke.color) : 'none');
@@ -1188,12 +1188,48 @@
     var sh = shadow ? shadow.dx + 'px ' + shadow.dy + 'px ' + shadow.blur + 'px ' + (shadow.spread || 0) + 'px ' + css(shadow.color) : '';
     // A freeform shape's shadow follows its outline (a box shadow would be a rectangle behind it).
     if (entry.node._path && entry.node._path.ownerSVGElement) {
-      entry.node._path.ownerSVGElement.style.filter = shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ')' : '';
+      var seP = o.soft_edge || 0;
+      var fx = seP > 0 ? 'blur(' + (seP / 4) + 'px)'
+        : (shadow ? 'drop-shadow(' + shadow.dx + 'px ' + shadow.dy + 'px ' + Math.max(0, shadow.blur / 2) + 'px ' + css(shadow.color) + ') ' : '') +
+          (o.glow ? 'drop-shadow(0 0 ' + Math.max(0, o.glow.radius / 2) + 'px ' + css(o.glow.color) + ')' : '');
+      entry.node._path.ownerSVGElement.style.filter = fx;
+      entry.node._path.ownerSVGElement.style.overflow = seP > 0 ? 'visible' : '';
       sh = '';
+    } else if (o.glow) {
+      var gl = '0 0 ' + o.glow.radius + 'px ' + Math.round(o.glow.radius / 4) + 'px ' + css(o.glow.color);
+      sh = sh ? sh + ',' + gl : gl;
     }
     // The focus ring is dark with a white inner band, so it shows on any background.
     if (entry.ring) sh = (sh ? sh + ',' : '') + '0 0 0 3px #fff';
     entry.node.style.boxShadow = sh || 'none';
+    // Soft edges fade the object out towards its border, following its outline. A picture is faded with a mask; a box or
+    // an oval draws its fill on a smaller, blurred layer behind its text; a freeform shape is blurred as a whole (above).
+    // Reflection is not supported by every browser; where it is not, the object simply has none.
+    var se = o.soft_edge || 0, mask = '';
+    if (se > 0 && entry.node._img) {
+      var fade = function (dir) { return 'linear-gradient(' + dir + ',transparent,#000 ' + se + 'px,#000 calc(100% - ' + se + 'px),transparent)'; };
+      mask = fade('to right') + ',' + fade('to bottom');
+    }
+    entry.node.style.webkitMaskImage = mask; entry.node.style.maskImage = mask;
+    entry.node.style.webkitMaskComposite = mask ? 'source-in' : ''; entry.node.style.maskComposite = mask ? 'intersect' : '';
+    if (se > 0 && !entry.node._img && !entry.node._path && !entry.node._line) {
+      var back = entry._soft;
+      if (!back) {
+        back = el('div', 'soft-back'); back.setAttribute('aria-hidden', 'true');
+        back.style.cssText = 'position:absolute;pointer-events:none;z-index:-1';
+        entry.node.insertBefore(back, entry.node.firstChild); entry._soft = back; entry.node.style.isolation = 'isolate';
+      }
+      back.style.display = '';
+      back.style.inset = se / 2 + 'px';
+      back.style.filter = 'blur(' + se / 4 + 'px)';
+      back.style.borderRadius = o.kind === 'Ellipse' ? '50%' : Math.max(0, (o.radius || 0) - se / 2) + 'px';
+      back.style.background = entry.node.style.background;
+      entry.node.style.background = 'none'; entry.node.style.border = 'none'; entry.node.style.boxShadow = entry.ring ? '0 0 0 3px #fff' : 'none';
+    } else if (entry._soft) entry._soft.style.display = 'none';
+    var rf = o.reflection;
+    entry.node.style.webkitBoxReflect = rf
+      ? 'below ' + rf.gap + 'px linear-gradient(to bottom,transparent,transparent ' + Math.round((1 - rf.size) * 100) + '%,rgba(255,255,255,' + rf.opacity + '))'
+      : '';
     if (entry.clickable && !entry.drawCheck) {
       if (entry.state === 'Disabled') entry.node.setAttribute('aria-disabled', 'true'); else entry.node.removeAttribute('aria-disabled');
     }
@@ -1771,12 +1807,15 @@
   var anyNextTriggers = slides.some(function (_, i) { return nextButtonTriggers(i).length > 0 || prevButtonTriggers(i).length > 0; });
   var PL = P.player || {};
   var PC = PL.controls || {};
-  var wantControls = !!(PC.volume || PC.captions || PC.speed || PC.fullscreen);
+  var wantControls = !!(PC.play_pause || PC.seekbar || PC.replay || PC.volume || PC.captions || PC.speed || PC.fullscreen);
   var navButtons = P.show_nav && (slides.length > 1 || anyNextTriggers);
   // A button as the author chose to draw them: an icon, an icon with its words, or the words alone.
   var ICONS = {
     prev: '<path d="M12 4l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
     next: '<path d="M8 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+    play: '<path d="M6 4l10 6-10 6z" fill="currentColor"/>',
+    pause: '<path d="M6 4h3v12H6zM11 4h3v12h-3z" fill="currentColor"/>',
+    replay: '<path d="M4 10a6 6 0 1 0 2-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 3v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
     menu: '<path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
     volume: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5c1.4 1.4 1.4 3.6 0 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     muted: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5l4 5M17 7.5l-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
@@ -1828,7 +1867,10 @@
   var sideMode = PL.sidebar || 'Off';
   var sidebarOn = sideMode !== 'Off' && (!!P.show_menu || !!PL.tab_notes || !!PL.tab_glossary);
   var logoUrl = PL.logo && P.assetUrls[PL.logo] ? P.assetUrls[PL.logo] : null;
-  var menu = null, menuBtn = null, progress = null, topbar = null, sideToggle = null, notesBody = null, sbTabs = {};
+  // A banner photo: a picture across the top of the sidebar, above the navigation. It belongs to the sidebar, so a
+  // player without one (or with it collapsed) does not show it. It is decoration, so it has no alt text.
+  var bannerUrl = PL.banner && P.assetUrls[PL.banner] ? P.assetUrls[PL.banner] : null;
+  var menu = null, menuBtn = null, progress = null, topbar = null, sideToggle = null, notesBody = null, sbTabs = {}, resPanel = null;
   function filterMenu(q) {
     q = (q || '').trim().toLowerCase();
     if (!menu) return;
@@ -1847,8 +1889,8 @@
   }).filter(Boolean);
   var glossTerms = (P.glossary || []).filter(function (g) { return (g.term || '').trim(); }).sort(function (a, b) { return a.term.localeCompare(b.term); });
   var showResources = !!PL.tab_resources && resLinks.length > 0;
-  // The top bar: the sidebar's toggle, the logo when there is no sidebar to hold it, and the title.
-  if (sidebarOn || PL.show_title || showResources || (logoUrl && !sidebarOn)) {
+  // The top bar: the sidebar's toggle, the small logo and the title. It starts beside an open left sidebar (see fit).
+  if (sidebarOn || PL.show_title || showResources || logoUrl) {
     topbar = el('header'); topbar.id = 'topbar';
     if (sidebarOn) {
       sideToggle = el('button', 'tb-toggle'); sideToggle.type = 'button';
@@ -1856,7 +1898,7 @@
       sideToggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
       topbar.appendChild(sideToggle);
     }
-    if (logoUrl && !sidebarOn) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
+    if (logoUrl) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
     if (PL.show_title) { var tt = el('span', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
     if (showResources) {
       var rb = el('button', 'tb-resources', 'Resources'); rb.type = 'button'; rb.setAttribute('aria-expanded', 'false'); rb.setAttribute('aria-controls', 'resources');
@@ -1870,7 +1912,7 @@
       rp.appendChild(rl);
       rb.addEventListener('click', function () { rp.hidden = !rp.hidden; rb.setAttribute('aria-expanded', String(!rp.hidden)); });
       document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && !rp.hidden) { rp.hidden = true; rb.setAttribute('aria-expanded', 'false'); rb.focus(); } });
-      topbar.appendChild(rb); document.body.appendChild(rp);
+      topbar.appendChild(rb); document.body.appendChild(rp); resPanel = rp;
     }
     document.body.appendChild(topbar);
   }
@@ -1880,7 +1922,7 @@
     if (sidebarOn) {
       menu.className = 'sidebar ' + (sideMode === 'Left' ? 'side-left' : 'side-right');
       menu.hidden = !!PL.sidebar_collapsed;
-      if (logoUrl) { var sl = el('img', 'logo'); sl.src = logoUrl; sl.alt = ''; menu.appendChild(sl); }
+      if (bannerUrl) { var sb = el('img', 'banner'); sb.src = bannerUrl; sb.alt = ''; menu.appendChild(sb); }
       var tabs = [];
       if (P.show_menu) tabs.push(['menu', 'Menu']);
       if (PL.tab_glossary && glossTerms.length) tabs.push(['glossary', 'Glossary']);
@@ -1949,9 +1991,9 @@
     if (sidebarOn) {
       sideToggle.setAttribute('aria-expanded', String(!menu.hidden));
       sideToggle.addEventListener('click', function () {
-        menu.hidden = !menu.hidden;
-        sideToggle.setAttribute('aria-expanded', String(!menu.hidden));
-        fit();
+        var opening = menu.hidden || sideClosing;
+        sideToggle.setAttribute('aria-expanded', String(opening));
+        slideSidebar(opening);
       });
     } else {
       menuBtn = el('button'); menuBtn.type = 'button'; setButton(menuBtn, 'Menu', 'menu');
@@ -1988,6 +2030,90 @@
     var control = function (id, label, icon) {
       var b = el('button', 'ctl-' + id); b.type = 'button'; setButton(b, label, icon); cbox.appendChild(b); return b;
     };
+    // Play / pause, replay and a seekbar for the current slide. They drive its timeline when it has a length, and
+    // otherwise its video or audio; a slide with neither leaves them greyed out.
+    if (PC.play_pause || PC.seekbar || PC.replay) {
+      var tMs = function () { return cur >= 0 ? (slides[cur].layers[0].duration_ms || 0) : 0; };
+      var baseL = function () { return layers[slides[cur].layers[0].id]; };
+      var tMedia = function () { var b = cur >= 0 && baseL(); return b ? b.el.querySelector('video,audio') : null; };
+      var tKind = function () { return cur < 0 ? 'none' : tMs() > 0 ? 'timeline' : tMedia() ? 'media' : 'none'; };
+      var tLength = function () {
+        var k = tKind(); if (k === 'timeline') return tMs();
+        var m = k === 'media' ? tMedia() : null; return m && isFinite(m.duration) ? Math.round(m.duration * 1000) : 0;
+      };
+      var tPos = function () {
+        var k = tKind(); if (k === 'timeline') {
+          if (timelineDone[cur]) return tMs();
+          var b = baseL(); return Math.max(0, Math.min(tMs(), (b.paused ? b.pausedAt : Date.now()) - b.startedAt));
+        }
+        var m = k === 'media' ? tMedia() : null; return m ? Math.round(m.currentTime * 1000) : 0;
+      };
+      var tPaused = function () {
+        var k = tKind(); if (k === 'timeline') return !!baseL().paused || !!timelineDone[cur];
+        var m = k === 'media' ? tMedia() : null; return !m || m.paused;
+      };
+      var fmtTime = function (ms) { var n = Math.max(0, Math.floor(ms / 1000)); return Math.floor(n / 60) + ':' + ('0' + (n % 60)).slice(-2); };
+      var tReplay = function () {
+        var si = cur, k = tKind(); if (k === 'none') return;
+        if (k === 'media') { var m = tMedia(); try { m.currentTime = 0; var pr = m.play(); if (pr && pr.catch) pr.catch(function () {}); } catch (e) {} tRefresh(); return; }
+        resetSlide(si); timelineDone[si] = false;
+        steps = { si: si, order: computeSteps(si), done: 0 };
+        startLayer(slides[si].layers[0].id);
+        tRefresh();
+      };
+      var tToggle = function () {
+        var k = tKind(); if (k === 'none') return;
+        if (k === 'media') { var m = tMedia(); try { if (m.paused) { var pr = m.play(); if (pr && pr.catch) pr.catch(function () {}); } else m.pause(); } catch (e) {} tRefresh(); return; }
+        if (timelineDone[cur]) { tReplay(); return; }
+        var held = pausing[cur] = pausing[cur] || {};
+        if (held.__user) delete held.__user; else if (!baseL().paused) held.__user = true; else return;   // a layer holds it: only closing the layer runs it on
+        basePauseChanged(cur); tRefresh();
+      };
+      var tSeek = function (ms) {
+        var k = tKind(); if (k === 'none') return;
+        if (k === 'media') { try { tMedia().currentTime = ms / 1000; } catch (e) {} tRefresh(); return; }
+        var id = slides[cur].layers[0].id, b = baseL(), was = b.paused;
+        timelineDone[cur] = false;
+        startLayer(id, ms);
+        if (was) {   // seeking while paused shows that moment and stays paused
+          (layerTimers[id] || []).forEach(clearTimeout); layerTimers[id] = []; pauseMedia(b.el);
+          var now = Date.now(); b.pausedAt = now; b.startedAt = now - ms;
+        }
+        tRefresh();
+      };
+      var pb = null, rb = null, sk = null, tm = null, scrubbing = false, lastLabel = '';
+      if (PC.play_pause) { pb = control('play', 'Pause', 'pause'); pb.addEventListener('click', tToggle); }
+      if (PC.replay) { rb = control('replay', 'Replay', 'replay'); rb.addEventListener('click', tReplay); }
+      if (PC.seekbar) {
+        sk = el('input', 'ctl-seek'); sk.type = 'range'; sk.min = '0'; sk.max = '0'; sk.value = '0'; sk.setAttribute('aria-label', 'Seek');
+        tm = el('span', 'ctl-time', '0:00 / 0:00'); tm.setAttribute('aria-hidden', 'true');
+        sk.addEventListener('input', function () { scrubbing = true; tm.textContent = fmtTime(+sk.value) + ' / ' + fmtTime(+sk.max); });
+        sk.addEventListener('change', function () { scrubbing = false; tSeek(+sk.value); });
+        sk.addEventListener('blur', function () { scrubbing = false; });
+        cbox.appendChild(sk); cbox.appendChild(tm);
+      }
+      var tTimer = null;
+      var tRefresh = function () {
+        clearTimeout(tTimer); tTimer = null;
+        var k = tKind(), none = k === 'none', len = tLength();
+        // While something is playing the bar follows it; otherwise there is nothing to poll for.
+        if (!none && !tPaused()) tTimer = setTimeout(tRefresh, 250);
+        if (pb) {
+          var label = none || !tPaused() ? 'Pause' : 'Play';
+          if (label !== lastLabel) { setButton(pb, label, label === 'Pause' ? 'pause' : 'play'); lastLabel = label; }
+          pb.disabled = none;
+        }
+        if (rb) rb.disabled = none;
+        if (sk) {
+          sk.disabled = none || len <= 0;
+          sk.max = String(len); sk.step = len >= 2000 ? '1000' : '100';
+          if (!scrubbing) { var pos = tPos(); sk.value = String(pos); tm.textContent = fmtTime(pos) + ' / ' + fmtTime(len); sk.setAttribute('aria-valuetext', fmtTime(pos) + ' of ' + fmtTime(len)); }
+        }
+      };
+      controlUpdaters.push(tRefresh);
+      ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange'].forEach(function (n) { document.addEventListener(n, tRefresh, true); });
+      tRefresh();
+    }
     if (PC.volume) {
       var vb = control('volume', 'Mute', 'volume'); vb.setAttribute('aria-pressed', 'false');
       vb.addEventListener('click', function () {
@@ -2084,6 +2210,7 @@
     else if (kind === 'Results') buildResults(i);
     if (!(seen && slide.nav && slide.nav.revisit === 'Resume')) resetSlide(i);
     steps = { si: i, order: computeSteps(i), done: 0 };
+    if (pausing[i] && pausing[i].__user) { delete pausing[i].__user; if (!Object.keys(pausing[i]).length) layers[slide.layers[0].id].paused = false; }
     startLayer(slide.layers[0].id);
     if (slide.fade_ms > 0 && !reduceMotion && slideEls[i].animate) {
       slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });
@@ -2119,13 +2246,37 @@
   });
 
   // ---- fit stage to window ----------------------------------------------------------------
+  // The sidebar slides in and out while the top bar, control bar and slide glide to their new places. With reduced motion
+  // (or no animation support) it simply appears or disappears.
+  var sideClosing = false, sideAnimTimer = null;
+  function slideSidebar(open) {
+    if (reduceMotion || !menu.animate) { menu.hidden = !open; sideClosing = false; fit(); return; }
+    var away = sideMode === 'Right' ? '100%' : '-100%';
+    document.body.classList.add('side-anim');
+    clearTimeout(sideAnimTimer);
+    sideAnimTimer = setTimeout(function () { document.body.classList.remove('side-anim'); }, 300);
+    if (open) {
+      sideClosing = false; menu.hidden = false; fit();
+      menu.animate([{ transform: 'translateX(' + away + ')' }, { transform: 'none' }], { duration: 220, easing: 'ease' });
+    } else {
+      sideClosing = true; fit();
+      var a = menu.animate([{ transform: 'none' }, { transform: 'translateX(' + away + ')' }], { duration: 220, easing: 'ease', fill: 'forwards' });
+      var done = function () { if (sideClosing) { menu.hidden = true; sideClosing = false; } if (a && a.cancel) a.cancel(); };
+      if (a) a.onfinish = done; else done();
+    }
+  }
   function fit() {
     var navH = nav ? nav.offsetHeight : 0;
     var topH = topbar ? topbar.offsetHeight : 0;
     // A sidebar takes a strip from the left or right; the slide fits what is left.
-    var sideW = sidebarOn && menu && !menu.hidden ? menu.offsetWidth : 0;
-    // The sidebar runs the full height beside the slide; the control bar sits under the slide only.
-    if (menu && sidebarOn) { menu.style.top = topH + 'px'; menu.style.bottom = '0px'; }
+    var sideW = sidebarOn && menu && !menu.hidden && !sideClosing ? menu.offsetWidth : 0;
+    // The sidebar runs the full height; the top bar and the control bar sit beside it, over and under the slide only.
+    if (menu && sidebarOn) { menu.style.top = '0px'; menu.style.bottom = '0px'; }
+    if (topbar) {
+      topbar.style.left = sideMode === 'Left' ? sideW + 'px' : '0px';
+      topbar.style.right = sideMode === 'Right' ? sideW + 'px' : '0px';
+    }
+    if (resPanel) resPanel.style.right = (sideMode === 'Right' ? sideW + 8 : 8) + 'px';
     if (nav) {
       nav.style.left = sideMode === 'Left' ? sideW + 'px' : '0px';
       nav.style.right = sideMode === 'Right' ? sideW + 'px' : '0px';

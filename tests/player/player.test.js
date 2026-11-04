@@ -1537,13 +1537,254 @@ test('a layer that pauses the base layer stops its timeline while it shows, and 
   assert.deepEqual(errors, []);
 });
 
+// jsdom does no layout, so say how big the sidebar and the top bar are.
+const sidebarSizes = (w) => {
+  Object.defineProperty(w.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return this.id === 'menu' ? 280 : 0; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return this.id === 'topbar' ? 44 : 0; } });
+};
+
+test('player layout: the banner tops the sidebar, the logo sits small beside the title, and the top bar starts beside an open sidebar', () => {
+  const { w, errors } = boot(fixture('playerui'), null, {}, sidebarSizes);
+  const menu = $(w, '#menu');
+  // The banner is the first thing in the sidebar, above the tabs, and is decoration.
+  const banner = $(w, '#menu img.banner');
+  assert.ok(banner && banner.src.length > 0, 'the banner shows the author\'s picture');
+  assert.equal(banner.getAttribute('alt'), '', 'screen readers skip it');
+  assert.equal(menu.firstElementChild, banner, 'it is above the navigation');
+  assert.equal($(w, '#menu img.logo'), null, 'the logo is no longer in the sidebar');
+  // The logo is small, in the top bar, before the title.
+  const logo = $(w, '#topbar img.logo');
+  assert.ok(logo && logo.src.length > 0, 'the logo is in the top bar');
+  assert.ok(logo.compareDocumentPosition($(w, '#topbar .tb-title')) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'next to the title, before it');
+  // The sidebar runs the full height; the top bar starts where it ends, and the slide fits what is left.
+  assert.equal(menu.style.top, '0px', 'the sidebar starts at the very top');
+  assert.equal($(w, '#topbar').style.left, '280px', 'the top bar moves right of the open sidebar');
+  assert.equal($(w, '#topbar').style.right, '0px');
+  assert.equal($(w, '#resources').style.right, '8px');
+  // Collapsing the sidebar gives the top bar the whole width; opening it moves it back.
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal($(w, '#topbar').style.left, '0px', 'collapsed: the top bar spans the window');
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal($(w, '#topbar').style.left, '280px');
+  assert.deepEqual(errors, []);
+});
+
+test('button styles: a state can be a gradient, so a button keeps its look when hovered', () => {
+  const { w, errors } = boot(fixture('buttonstyle'));
+  const btn = $$(w, '.obj')[0];
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(110,179,215,1\) 0%,rgba\(47,78,162,1\) 100%\)/, 'the resting face is the gradient');
+  assert.match(btn.style.boxShadow, /^0px 4px 3\.5px 0px /, 'with its drop shadow');
+  btn.dispatchEvent(new w.MouseEvent('mouseenter'));
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat colour');
+  btn.dispatchEvent(new w.MouseEvent('mouseleave'));
+  assert.match(btn.style.background, /rgba\(110,179,215,1\)/, 'and it goes back');
+  assert.deepEqual(errors, []);
+});
+
+test('button effects: a glow is a halo, soft edges fade along the outline, a reflection mirrors it, and none of it touches a plain button', () => {
+  const { w, errors } = boot(fixture('buttoneffects'));
+  const order = ['glow', 'soft', 'reflect', 'plain', 'star', 'starglow', 'oval'];   // the example's objects, in order
+  const node = (name) => $$(w, '.obj')[order.indexOf(name)];
+  assert.match(node('glow').style.boxShadow, /^0 0 24px 6px /, 'a glow is a blurred shadow with no offset');
+  // A softened box draws its fill on a smaller, blurred layer behind its text, so rounded corners stay rounded.
+  const soft = node('soft'); const back = soft.querySelector('.soft-back');
+  assert.ok(back, 'the fill moves to a backing layer');
+  assert.equal(back.style.filter, 'blur(6px)');
+  assert.equal(back.style.inset, '12px');
+  assert.equal(back.style.borderRadius, '0px', 'its corners follow the box (a 10 px radius shrunk by the 12 px inset)');
+  assert.match(back.style.background, /rgb\(3, 83, 158\)/, 'the fill is the box\'s own');
+  assert.ok(soft.style.background === 'none' || soft.style.background === '', 'and the box itself has none');
+  assert.equal(soft.style.boxShadow, 'none');
+  assert.equal(soft.textContent, 'soft', 'the text is not part of the fade');
+  assert.equal(node('oval').querySelector('.soft-back').style.borderRadius, '50%', 'an oval fades as an oval');
+  // A freeform shape is blurred whole.
+  const starSvg = node('star').querySelector('svg');
+  assert.equal(starSvg.style.filter, 'blur(6px)');
+  assert.equal(starSvg.style.overflow, 'visible', 'so its tips are not cut off');
+  // A freeform shape's glow follows its outline; its reflection mirrors the element.
+  assert.match(node('starglow').querySelector('svg').style.filter, /drop-shadow\(0 0 12px /);
+  assert.match(node('reflect').style.webkitBoxReflect, /^below 6px linear-gradient\(to bottom,transparent,transparent 40%,rgba\(255,255,255,0\.5\)\)$/, 'a reflection shows 60% of the height, strongest at the object');
+  const plain = node('plain');
+  assert.ok(!plain.style.webkitMaskImage && !plain.style.webkitBoxReflect && !plain.querySelector('.soft-back'), 'a plain button has none of it');
+  assert.ok(!/24px/.test(plain.style.boxShadow));
+  assert.deepEqual(errors, []);
+});
+
+// ---- Play / pause, seekbar and replay ------------------------------------------------------------
+const transport = (w) => ({
+  play: $(w, '.ctl-play'), replay: $(w, '.ctl-replay'), seek: $(w, 'input.ctl-seek'), time: $(w, '.ctl-time'),
+  shown: (name) => $$(w, '.obj').find((o) => o.textContent === name).style.visibility !== 'hidden',
+});
+const seekTo = (w, t, ms) => { t.seek.value = String(ms); t.seek.dispatchEvent(new w.Event('input', { bubbles: true })); t.seek.dispatchEvent(new w.Event('change', { bubbles: true })); };
+
+test('player controls: play/pause, a seekbar and replay appear when asked for, and follow the slide\'s timeline', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  assert.ok(t.play && t.replay && t.seek && t.time, 'all three are in the control bar');
+  assert.equal(t.seek.getAttribute('aria-label'), 'Seek');
+  assert.equal(t.seek.max, '3000', 'the bar is as long as the slide\'s timeline');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'the slide is playing, so the button offers Pause');
+  assert.equal(t.seek.disabled, false);
+  await sleep(1150);
+  assert.ok(Number(t.seek.value) >= 1000 && Number(t.seek.value) < 1500, 'the bar follows the timeline: ' + t.seek.value);
+  assert.match(t.time.textContent, /^0:01 \/ 0:03$/);
+  assert.match(t.seek.getAttribute('aria-valuetext'), /^0:01 of 0:03$/);
+  assert.equal(t.shown('early'), false, 'and the objects follow it too');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: pause holds the timeline and play runs it on from there', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  await sleep(200);
+  click(w, t.play);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'paused: the button now offers Play');
+  const held = t.seek.value;
+  await sleep(1500);
+  assert.equal(t.seek.value, held, 'the bar does not move while paused');
+  assert.equal(t.shown('late'), false, 'and "late" (due at 1.5 s) has not appeared');
+  click(w, t.play);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  await sleep(300);
+  assert.ok(Number(t.seek.value) > Number(held), 'play runs on from where it stopped');
+  assert.ok(Number(t.seek.value) < 1000, 'not from where the clock would have been');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: the seekbar jumps to a moment, even while paused', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  seekTo(w, t, 2000);
+  assert.equal(t.shown('late'), true, 'at 2 s "late" is on');
+  assert.equal(t.shown('early'), false, 'and "early" (gone at 1 s) is off');
+  await sleep(150);
+  assert.ok(Number(t.seek.value) >= 2000, 'it plays on from there');
+  click(w, t.play);
+  seekTo(w, t, 500);
+  assert.equal(t.shown('early'), true, 'back at 0.5 s "early" is on again');
+  assert.equal(t.shown('late'), false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'seeking while paused stays paused');
+  const at = t.seek.value;
+  await sleep(300);
+  assert.equal(t.seek.value, at);
+  // Dragging only moves the readout until it is let go.
+  t.seek.value = '1000'; t.seek.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(t.time.textContent, '0:01 / 0:03');
+  assert.equal(t.shown('early'), true, 'nothing moves until the drag ends');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: replay starts the slide again, and slides with nothing to play grey the controls out', async () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  seekTo(w, t, 2500);
+  assert.equal(t.shown('late'), true);
+  click(w, t.replay);
+  assert.equal(t.shown('late'), false, 'replay is back at the start');
+  assert.equal(t.shown('early'), true);
+  assert.ok(Number(t.seek.value) < 500);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'and playing');
+  // The second slide has no timeline and no media.
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  assert.equal(currentSlide(w), 1);
+  assert.equal(t.play.disabled && t.replay.disabled && t.seek.disabled, true, 'nothing to play: all three are greyed out');
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  assert.equal(t.play.disabled || t.replay.disabled || t.seek.disabled, false, 'and back on the timed slide they work again');
+  assert.deepEqual(errors, []);
+});
+
+test('player controls: a slide with a video is driven through the video', () => {
+  const { w, errors } = boot(fixture('transport'), null, {}, (win) => {
+    win.HTMLMediaElement.prototype.play = function () { this.__paused = false; return Promise.resolve(); };
+    win.HTMLMediaElement.prototype.pause = function () { this.__paused = true; };
+    Object.defineProperty(win.HTMLMediaElement.prototype, 'paused', { configurable: true, get() { return this.__paused !== false; } });
+    Object.defineProperty(win.HTMLMediaElement.prototype, 'duration', { configurable: true, get() { return 90; } });
+  });
+  const t = transport(w);
+  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  const slide = $$(w, '.slide')[1];
+  const v = w.document.createElement('video'); slide.querySelector('.layer').appendChild(v);
+  w.document.dispatchEvent(new w.Event('loadedmetadata'));
+  assert.equal(t.seek.max, '90000', 'the bar is as long as the video');
+  assert.equal(t.play.disabled, false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'it is not playing yet');
+  click(w, t.play);
+  assert.equal(v.paused, false);
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  seekTo(w, t, 30000);
+  assert.equal(v.currentTime, 30);
+  click(w, t.replay);
+  assert.equal(v.currentTime, 0);
+  assert.deepEqual(errors, []);
+  w.close();   // the fake video plays forever, and the bar keeps following it
+});
+
+test('player controls: icons, icon-only buttons keep their names, and the controls are off unless asked for', () => {
+  const { w } = boot(fixture('transport-icons'));
+  const t = transport(w);
+  assert.ok(t.play.querySelector('svg'), 'an icon');
+  assert.equal(t.play.textContent, '');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  assert.equal(t.replay.getAttribute('aria-label'), 'Replay');
+  const { w: plain } = boot(fixture('playerui-icons'));
+  assert.equal($(plain, '.ctl-play') || $(plain, '.ctl-replay') || $(plain, '.ctl-seek'), null, 'not shown unless chosen');
+});
+
+test('player layout: the sidebar slides in and out, the top bar moves at once, and the menu hides when the slide ends', () => {
+  const anims = [];
+  const { w, errors } = boot(fixture('playerui'), null, {}, (win) => {
+    sidebarSizes(win);
+  });
+  const menu = $(w, '#menu'); const bar = $(w, '#topbar');
+  menu.animate = function (frames) { const a = { frames, cancel() {} }; anims.push(a); return a; };
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal(anims.length, 1, 'closing starts a slide');
+  assert.equal(anims[0].frames[1].transform, 'translateX(-100%)', 'it slides off to the left');
+  assert.equal(menu.hidden, false, 'it stays on screen while it slides');
+  assert.equal(bar.style.left, '0px', 'the top bar starts moving at once');
+  assert.ok(w.document.body.classList.contains('side-anim'), 'the layout glides rather than jumps');
+  anims[0].onfinish();
+  assert.equal(menu.hidden, true, 'and is gone when the slide ends');
+  click(w, $(w, '#topbar .tb-toggle'));
+  assert.equal(menu.hidden, false);
+  assert.equal(anims[1].frames[0].transform, 'translateX(-100%)', 'opening slides in from the left');
+  assert.equal(bar.style.left, '280px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: with a sidebar on the right the top bar stops short of it', () => {
+  const { w, errors } = boot(fixture('playerui-right'), null, {}, sidebarSizes);
+  assert.equal($(w, '#topbar').style.right, '280px');
+  assert.equal($(w, '#topbar').style.left, '0px');
+  assert.equal($(w, '#resources').style.right, '288px', 'the Resources popup stays under its button');
+  assert.ok($(w, '#menu img.banner'), 'the banner tops the right-hand sidebar too');
+  assert.equal($(w, '#menu').style.top, '0px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: with no sidebar the banner is not shown, but the small logo still is', () => {
+  const { w, errors } = boot(fixture('playerui-icons'));
+  assert.equal($(w, '#menu.sidebar'), null, 'no sidebar in this fixture (the menu is only a slide-over drawer)');
+  assert.equal($(w, 'img.banner'), null, 'a banner belongs to the sidebar, so it is hidden without one');
+  assert.ok($(w, '#topbar img.logo'), 'the logo is in the top bar');
+  assert.equal($(w, '#topbar').style.left, '0px');
+  assert.deepEqual(errors, []);
+});
+
+test('player layout: a project with no banner has none, whatever else it has', () => {
+  const { w, errors } = boot(fixture('authored'));
+  assert.equal($(w, 'img.banner'), null);
+  assert.deepEqual(errors, []);
+});
+
 test('player sidebar: menu and notes tabs, the title and the logo, a toggle that collapses it, and a right-hand side', () => {
   const { w, errors } = boot(fixture('playerui'));
   const menu = $(w, '#menu');
   assert.ok(menu.classList.contains('sidebar') && menu.classList.contains('side-left'));
   assert.equal(menu.hidden, false, 'the sidebar starts open');
   assert.equal($(w, '#topbar .tb-title').textContent, 'Safety Basics', 'the title falls back to the project name');
-  assert.ok($(w, '#menu img.logo').src.length > 0, 'the logo sits above the navigation');
+  assert.ok($(w, '#menu img.banner').src.length > 0, 'the banner sits above the navigation');
+  assert.ok($(w, '#topbar img.logo').src.length > 0, 'the logo sits beside the title');
   const tab = (name) => $$(w, '#menu .sb-tabs button').find((b) => b.textContent === name);
   assert.deepEqual($$(w, '#menu .sb-tabs button[role=tab]').map((b) => b.textContent), ['Menu', 'Glossary', 'Notes']);
   assert.equal($$(w, '#menu button[data-index]').length, 3, 'one menu entry per slide');

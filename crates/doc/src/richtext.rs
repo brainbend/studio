@@ -73,6 +73,13 @@ impl Object {
     }
 
     pub(crate) fn set_chars(&mut self, chars: Vec<(char, Fmt)>) {
+        let mut chars = chars;
+        // A `%Name%` placeholder is one unit, so all of it carries the format of its first character.
+        let plain: Vec<char> = chars.iter().map(|c| c.0).collect();
+        for (a, b) in crate::variables::placeholder_spans(&plain) {
+            let f = chars[a].1.clone();
+            for c in &mut chars[a + 1..b] { c.1 = f.clone(); }
+        }
         self.text = chars.iter().map(|c| c.0).collect();
         if chars.iter().all(|c| c.1 == Fmt::default()) {
             self.rich = None;
@@ -104,6 +111,12 @@ impl Object {
         let end = end.min(chars.len());
         if start >= end {
             return;
+        }
+        // A placeholder is one unit: a range that touches part of one covers all of it.
+        let plain: Vec<char> = chars.iter().map(|c| c.0).collect();
+        let (mut start, mut end) = (start, end);
+        for (a, b) in crate::variables::placeholder_spans(&plain) {
+            if a < end && b > start { start = start.min(a); end = end.max(b); }
         }
         let st = self.style.clone();
         let eff = |f: &Fmt, which: u8| match which {
@@ -166,7 +179,11 @@ impl Object {
         let one = |s: String, keep: char| { let mut it = s.chars(); match (it.next(), it.next()) { (Some(c), None) => c, _ => keep } };
         let mut new_word = true;
         let mut new_sentence = true;
-        for (c, _) in &mut chars[start..end] {
+        // A placeholder keeps its letters as they are: changing the case of a name would stop it matching.
+        let plain: Vec<char> = chars.iter().map(|c| c.0).collect();
+        let spans = crate::variables::placeholder_spans(&plain);
+        for (i, (c, _)) in chars[start..end].iter_mut().enumerate() {
+            if spans.iter().any(|&(a, b)| (a..b).contains(&(start + i))) { continue; }
             let old = *c;
             *c = match case {
                 Case::Lower => one(old.to_lowercase().collect(), old),
@@ -214,7 +231,7 @@ mod tests {
     fn obj(text: &str) -> Object {
         Object {
             id: "o".into(), name: "o".into(), kind: Kind::Text, x: 0.0, y: 0.0, w: 100.0, h: 50.0,
-            fill: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None, stroke: None, shadow: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None,
+            fill: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None, stroke: None, shadow: None, glow: None, soft_edge: 0.0, reflection: None, hidden: false, margins: [0.0; 4], radius: 0.0, alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None,
             captions: None, rich: None, entrance: None, exit: None, timing: None, text: text.into(),
             style: TextStyle { font_family: "Open Sans".into(), size: 20.0, bold: false, italic: false, underline: false, color: Rgba(0, 0, 0, 255), align: Align::Left, valign: VAlign::Middle },
             asset: None, states: vec![], initial_state: String::new(), placeholder: None,
@@ -243,6 +260,46 @@ mod tests {
         o.format_range(0, 5, &Attr::ToggleBold);
         assert!(o.rich.is_none(), "back to plain text");
         assert_eq!(o.text, "Hello world");
+    }
+
+    #[test]
+    fn formatting_that_touches_part_of_a_placeholder_covers_all_of_it() {
+        let mut o = obj("You scored %Score% points"); // the placeholder is characters 11..18
+        o.format_range(13, 15, &Attr::ToggleBold);
+        let runs = &o.rich.as_ref().unwrap()[0].runs;
+        let texts: Vec<_> = runs.iter().map(|r| (r.text.as_str(), r.bold)).collect();
+        assert_eq!(texts, [("You scored ", None), ("%Score%", Some(true)), (" points", None)], "{texts:?}");
+        // Reaching into it from outside takes in the whole thing too.
+        let mut o = obj("You scored %Score% points");
+        o.format_range(4, 14, &Attr::ToggleItalic);
+        let runs = &o.rich.as_ref().unwrap()[0].runs;
+        assert_eq!(runs.iter().map(|r| (r.text.as_str(), r.italic)).collect::<Vec<_>>(), [("You ", None), ("scored %Score%", Some(true)), (" points", None)]);
+    }
+
+    #[test]
+    fn a_placeholder_that_was_split_is_made_whole_by_the_next_change() {
+        let mut o = obj("Hi %Score% there");
+        // Build the split by hand, as an older file might hold it: "%Sco" bold, "re%" plain.
+        o.rich = Some(vec![Paragraph { indent: 0, runs: vec![
+            Run { text: "Hi ".into(), ..Default::default() },
+            Run { text: "%Sco".into(), bold: Some(true), ..Default::default() },
+            Run { text: "re% there".into(), ..Default::default() },
+        ] }]);
+        o.format_range(0, 2, &Attr::ToggleItalic);
+        let runs = &o.rich.as_ref().unwrap()[0].runs;
+        let token: Vec<_> = runs.iter().filter(|r| r.text.contains('%')).collect();
+        assert_eq!(token.len(), 1, "one run holds the placeholder: {runs:?}");
+        assert!(token[0].text.starts_with("%Score%") && token[0].bold == Some(true), "it takes the format of its first character: {:?}", token[0]);
+    }
+
+    #[test]
+    fn changing_case_leaves_placeholders_alone() {
+        let mut o = obj("hello %Score% there");
+        o.change_case(0, 19, Case::Upper);
+        assert_eq!(o.text, "HELLO %Score% THERE", "the name would stop matching if it changed case");
+        let mut o = obj("hello %Score% there");
+        o.change_case(0, 19, Case::Capitalize);
+        assert_eq!(o.text, "Hello %Score% There");
     }
 
     #[test]

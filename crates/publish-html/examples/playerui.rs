@@ -1,6 +1,6 @@
 // A project that uses the player settings, for the player tests and screenshots: playerui <out_dir> [left|right|off] [icons]
 //
-// Three slides with notes, a sidebar with Menu and Notes tabs, a title and a logo.
+// Three slides with notes, a sidebar with Menu and Notes tabs, a title, a logo and a banner photo.
 use brainbend_doc::*;
 
 fn main() {
@@ -25,7 +25,9 @@ fn main() {
         GlossaryTerm { term: "PPE".into(), definition: "Personal protective equipment.".into() },
         GlossaryTerm { term: "Hazard".into(), definition: "Anything that can cause harm.".into() },
     ];
+    p.assets.insert("banner".into(), Asset { name: "banner.svg".into(), mime: "image/svg+xml".into(), bytes: br##"<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="300" viewBox="0 0 1600 300"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#03539e"/><stop offset="1" stop-color="#e25b1c"/></linearGradient></defs><rect width="1600" height="300" fill="url(#g)"/></svg>"##.to_vec(), file: None });
     p.player.logo = Some("logo".into());
+    p.player.banner = Some("banner".into());
     p.player.show_title = true;
     p.player.tab_notes = true;
     p.player.tab_glossary = true;
@@ -34,7 +36,7 @@ fn main() {
     p.player.sidebar = match side.as_str() { "right" => SidebarSide::Right, "off" => SidebarSide::Off, _ => SidebarSide::Left };
     if std::env::args().nth(3).as_deref() == Some("icons") {
         p.player.buttons = ButtonStyle::IconText;
-        p.player.controls = PlayerControls { volume: true, captions: true, speed: true, fullscreen: true };
+        p.player.controls = PlayerControls { volume: true, captions: true, speed: true, fullscreen: true, ..Default::default() };
         p.player.theme = PlayerTheme::Light;
         p.player.accent = Rgba(232, 119, 34, 255);
     }

@@ -18,7 +18,7 @@ fn tab(id: &str, n: u32, x: f32) -> Object {
     o.text = format!("Label {n}\nShort description");
     o.rich = Some(rich.clone());
     o.fill = Some(Rgba(70, 90, 110, 255));
-    let state = |name: &str, fill: Rgba| ObjectState { shine: None, name: name.into(), rich: Some(rich.clone()), fill: Some(fill), stroke: None, shadow: None, text: o.text.clone(), style: o.style.clone(), asset: None, size: None };
+    let state = |name: &str, fill: Rgba| ObjectState { shine: None, gradient: None, name: name.into(), rich: Some(rich.clone()), fill: Some(fill), stroke: None, shadow: None, text: o.text.clone(), style: o.style.clone(), asset: None, size: None };
     o.states = vec![state("Normal", Rgba(70, 90, 110, 255)), state("Hover", Rgba(130, 150, 170, 255)), state("Selected", Rgba(30, 40, 50, 255))];
     o.initial_state = "Normal".into();
     o.button_set = Some("tabs".into());
@@ -62,7 +62,7 @@ fn main() {
     let mut v = Object::new("v", "V", Kind::Rect, 460.0, 400.0, 200.0, 60.0);
     v.text = "Visit me".into();
     v.fill = Some(Rgba(10, 20, 30, 255));
-    let look = |name: &str, fill: Rgba| ObjectState { shine: None, name: name.into(), rich: None, fill: Some(fill), stroke: None, shadow: None, text: "Visit me".into(), style: v.style.clone(), asset: None, size: None };
+    let look = |name: &str, fill: Rgba| ObjectState { shine: None, gradient: None, name: name.into(), rich: None, fill: Some(fill), stroke: None, shadow: None, text: "Visit me".into(), style: v.style.clone(), asset: None, size: None };
     v.states = vec![look("Normal", Rgba(10, 20, 30, 255)), look("Hover", Rgba(60, 70, 80, 255)), look("Visited", Rgba(100, 5, 5, 255))];
     v.initial_state = "Normal".into();
     b.layers[0].objects = vec![s1, s2, v, text("btitle", "Stacking layers", 20.0)];

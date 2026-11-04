@@ -492,7 +492,7 @@ mod tests {
         let mut car = Object::new("car", "Car", Kind::Image, 0.0, 0.0, 100.0, 50.0);
         car.asset = Some("a".into());
         car.alt = "A car".into();
-        let st = |n: &str| ObjectState { shine: None, name: n.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: car.style.clone(), asset: Some("a".into()), size: None };
+        let st = |n: &str| ObjectState { shine: None, gradient: None, name: n.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: car.style.clone(), asset: Some("a".into()), size: None };
         car.states = vec![st("Car-01"), st("Car-02")];
         p.slides[0].layers[0].objects = vec![car.clone()];
         let m = msgs(&p).join("\n");

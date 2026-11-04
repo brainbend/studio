@@ -7,22 +7,36 @@ mod panos;
 mod icons;
 mod markers;
 mod backstage;
+mod recent;
+mod publish_dialog;
 mod controls;
 mod doc_tabs;
+mod font_store;
 mod crop;
 mod outline;
 mod player_dialog;
+mod button_faces;
 mod button_styles;
 mod master_view;
 mod objects_panel;
+mod effects_paint;
 mod ribbon;
 use ribbon::combo;
 mod states_panel;
+mod update;
 mod lesson_view;
+
+/// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
+const MIN_WINDOW: [f32; 2] = [1000.0, 640.0];
 
 /// On macOS the content extends under a transparent title bar so our own bar can sit beside the native window buttons.
 fn window_builder() -> egui::ViewportBuilder {
-    let b = egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]).with_title("BrainBend Studio");
+    let mut b = egui::ViewportBuilder::default()
+        .with_inner_size([1400.0, 900.0])
+        .with_min_inner_size(MIN_WINDOW)
+        .with_title("BrainBend Studio");
+    // macOS takes its icon from the app bundle; the other systems need it handed over.
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/brainbend-icon-256.png")) { b = b.with_icon(icon); }
     if cfg!(target_os = "macos") {
         b.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false)
     } else {
@@ -41,9 +55,15 @@ fn main() -> eframe::Result {
         opts,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
+            font_store::start(&cc.egui_ctx);
             brainbend_spell::warm();
             install_theme(&cc.egui_ctx);
             let mut app = App::default();
+            update::clean_up_after_update();
+            app.recent_file = recent::list_path();
+            if let Some(f) = &app.recent_file { app.recent = recent::load_from(f); }
+            app.updater = update::Updater::load();
+            if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.open_to_story_view = true;
             if let Some(p) = arg {
                 app.open(&p);
@@ -119,18 +139,36 @@ struct App {
     state_dim: bool,
     /// "Try it" in the States tab: press buttons on the canvas to see their states, view only.
     try_mode: bool,
+    /// The file the last video or audio was added from, so its still frame can be read from the file itself.
+    last_media_path: Option<PathBuf>,
+    /// The corner choice in the Button Styles gallery.
+    button_corners: button_styles::Corners,
     /// The layers showing while trying (ids), and the slide they were worked out for.
     try_layers: Vec<String>,
     try_slide: Option<usize>,
     /// What presses left each tried object in (object id -> state name).
     try_states: HashMap<String, String>,
+    /// What the last press in Try It did that Try It does not run (a jump to another slide, say), for the banner.
+    try_note: Option<String>,
     /// The States tab's viewed state is on its object for the length of a frame.
     swap: Option<states_panel::Swap>,
     right_tab: usize,
+    /// The selection, layer and slide the side panel last saw: picking another shows its Properties.
+    inspector_seen: Option<(Option<(usize, usize)>, usize, usize)>,
+    /// The Triggers tab picked an owner itself (a group heading), so the side panel should stay on Triggers.
+    trigger_select: bool,
     /// The Triggers tab lists every trigger on the slide, grouped by owner, instead of only the selection's.
     trig_all: bool,
     /// The project's Variables window is open.
     variables_open: bool,
+    /// The Variables window's search text and filters (type: 0 any, 1 true/false, 2 number, 3 text; use: 0 any, 1 in a trigger, 2 in no trigger).
+    var_query: String,
+    var_kind: usize,
+    var_use: usize,
+    /// A variable being renamed in the window: its id, the name typed so far, and whether the box still needs focus.
+    var_rename: Option<(String, String, bool)>,
+    /// What the last rename or type change did, or why it was refused (true when it was refused).
+    var_note: Option<(String, bool)>,
     /// The Focus Order window (Home > Slide): the reading and tab order of the current layer.
     focus_open: bool,
     /// The Equation window (Insert > Equation, or Edit equation in Properties), while it is open.
@@ -143,6 +181,13 @@ struct App {
     scene_view: bool,
     /// The Player Properties window, and which pane of it is showing.
     player_open: bool,
+    /// The Publish dialog is open, which destination is showing, and the SCORM version chosen for Other LMS.
+    publish_open: bool,
+    publish_page: publish_dialog::PublishPage,
+    publish_lms: brainbend_publish_html::Lms,
+    /// How the PDF handout is laid out (Publish > PDF).
+    handout: brainbend_publish_html::HandoutOptions,
+    handout_range: publish_dialog::HandoutRange,
     player_pane: usize,
     /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Story View).
     tabs: Vec<doc_tabs::SlideTab>,
@@ -163,6 +208,10 @@ struct App {
     layer_edit: Option<usize>,
     layer_drag: Option<usize>,
     open_requested: bool,
+    /// Projects opened or saved lately (File > Open), and the file that remembers them. Tests leave the file unset so they
+    /// never touch the real list.
+    recent: Vec<recent::RecentProject>,
+    recent_file: Option<PathBuf>,
     /// The full-screen File view is open.
     file_view: bool,
     file_page: backstage::FilePage,
@@ -196,6 +245,11 @@ struct App {
     /// Object whose text is being edited in place on the canvas, and its text before editing.
     editing: Option<(usize, usize)>,
     editing_old: String,
+    /// The edited object's rotation and text direction when last drawn: the edit box cannot turn, so a change ends the edit.
+    edit_turn: Option<(u32, i16)>,
+    /// Where the slide sits on screen (its top-left corner and scale) as of the last frame; the tests find handles with it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    canvas_frame: Option<(egui::Pos2, f32)>,
     /// The id of a text box made by double-clicking blank space; it goes again if it is left empty.
     fresh_text: Option<String>,
     /// Typing starts here on the next frame (the canvas of this frame was drawn before the box existed).
@@ -203,6 +257,9 @@ struct App {
     /// Action waiting on the "unsaved changes" dialog.
     pending: Option<Pending>,
     allow_close: bool,
+    /// Checks GitHub for a newer release.
+    updater: update::Updater,
+    font_store: font_store::FontStore,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
     /// Slides to delete once the frame is drawn: the slide list and Story View are still walking the old list.
@@ -250,8 +307,12 @@ enum Pending {
     /// A new Web Lesson.
     NewLesson(ProjectKind),
     Open,
+    /// Pick a Storyline or PowerPoint file to bring in.
+    Import,
     /// Open the file waiting in `App::drop_path` (dragged onto the window).
     OpenDropped,
+    /// Close the app so the downloaded update can replace it.
+    Update,
 }
 
 /// Recovery copies live outside the project so they survive crashes: `~/.brainbend-studio/recovery.brainbend`.
@@ -370,7 +431,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), swap: None, right_tab: 0, trig_all: false, variables_open: false, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), fresh_text: None, start_edit: None, pending: None, allow_close: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -495,7 +556,7 @@ fn indent_px(o: &Object, scale: f32) -> Vec<f32> {
 
 fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui::text::LayoutJob {
     let fmt = egui::text::TextFormat {
-        font_id: egui::FontId::new((o.style.size * scale).max(1.0), font_family(&o.style.font_family)),
+        font_id: egui::FontId::new((o.style.size * scale).max(1.0), font_store::family_styled(&o.style.font_family, o.style.bold)),
         color: color(o.style.color),
         coords: egui::epaint::text::VariationCoords::new([(b"wght", if o.style.bold { 700.0 } else { 400.0 })]),
         italics: o.style.italic,
@@ -516,7 +577,9 @@ fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui
                     if let Some(i) = run.italic { f.italics = i; }
                     if let Some(u) = run.underline { f.underline = if u { egui::Stroke::new(1.0, f.color) } else { egui::Stroke::NONE }; }
                     if let Some(b) = run.bold { f.coords = egui::epaint::text::VariationCoords::new([(b"wght", if b { 700.0 } else { 400.0 })]); }
-                    if let Some(fam) = &run.font_family { f.font_id.family = font_family(fam); }
+                    if run.bold.is_some() || run.font_family.is_some() {
+                        f.font_id.family = font_store::family_styled(run.font_family.as_deref().unwrap_or(&o.style.font_family), run.bold.unwrap_or(o.style.bold));
+                    }
                     // A link is the theme's hyperlink colour, underlined, unless the author set its colour or underline.
                     if run.link.is_some() {
                         f.color = run.color.map(color).unwrap_or(link);
@@ -724,7 +787,10 @@ fn path_polygons(cmds: &[PathCmd], r: egui::Rect) -> Vec<Vec<egui::Pos2>> {
 fn figure_triangles(figs: &[Vec<egui::Pos2>]) -> Vec<(Vec<egui::Pos2>, Vec<usize>)> {
     use i_overlay::core::fill_rule::FillRule;
     use i_overlay::float::simplify::SimplifyShape;
-    let contours: Vec<Vec<[f32; 2]>> = figs.iter().filter(|f| f.len() > 2).map(|f| f.iter().map(|p| [p.x, p.y]).collect()).collect();
+    // An outline with a coordinate that is not a number, or is absurdly far away, would make the polygon library panic
+    // (or take forever), so it is not drawn.
+    let sane = |f: &&Vec<egui::Pos2>| f.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.x.abs() < 1.0e6 && p.y.abs() < 1.0e6);
+    let contours: Vec<Vec<[f32; 2]>> = figs.iter().filter(|f| f.len() > 2).filter(sane).map(|f| f.iter().map(|p| [p.x, p.y]).collect()).collect();
     let mut out = vec![];
     for shape in contours.simplify_shape(FillRule::NonZero) {
         let mut pts: Vec<egui::Pos2> = vec![];
@@ -793,6 +859,23 @@ fn blank_object(id: String, name: &str, kind: Kind, x: f32, y: f32, w: f32, h: f
     Object::new(&id, name, kind, x, y, w, h)
 }
 
+/// Write `p` as a package to `path`, streaming it so the media is not copied (see `Project::write_package`).
+fn write_package_file(p: &mut Project, path: &std::path::Path) -> Result<(), String> {
+    use std::io::Write;
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut w = std::io::BufWriter::new(file);
+    p.write_package(&mut w)?;
+    w.flush().map_err(|e| e.to_string())
+}
+
+/// The largest video, audio or caption file Studio will add. A project keeps its media in memory, and a lesson with a
+/// file much bigger than this would not publish or play well anyway.
+const MAX_MEDIA_BYTES: u64 = 1_000_000_000;
+
+fn megabytes(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 { format!("{:.1} GB", bytes as f64 / 1e9) } else { format!("{:.0} MB", bytes as f64 / 1e6) }
+}
+
 impl App {
     fn open(&mut self, path: &PathBuf) {
         self.leave_master_view();
@@ -811,7 +894,14 @@ impl App {
             Ok(mut p) => {
                 p.sanitize();
                 // Import notes are a one-time report; they are shown once and not kept in the project.
-                let report = std::mem::take(&mut p.notes);
+                let mut report = std::mem::take(&mut p.notes);
+                // A project from another computer may use fonts this one does not have (a .pptx import says so itself).
+                if ext != "pptx" && brainbend_fonts::system_scanned() {
+                    let missing: Vec<String> = p.fonts_used().into_iter().filter(|f| !brainbend_fonts::available(f)).collect();
+                    if !missing.is_empty() {
+                        report.push(format!("Fonts not available here ({}) are shown in Open Sans. Install them, or add them from Google Fonts, to see them as designed.", missing.join(", ")));
+                    }
+                }
                 self.status = format!("Opened {} ({} slides, {} import notes)", file_label(&path), p.slides.len(), report.len());
                 self.import_report = report;
                 self.scene_view = self.open_to_story_view;
@@ -832,6 +922,7 @@ impl App {
                 self.undo.clear();
                 self.redo.clear();
                 self.dirty = ext == "story" || ext == "pptx";
+                self.remember(path);
             }
             Err(e) => self.status = format!("Could not open {}: {e}", file_label(&path)),
         }
@@ -867,27 +958,40 @@ impl App {
         self.visible = vis;
     }
 
+    /// Adds a saved project to the Recent list. Imports (which have no file of their own yet) and the recovery copy are
+    /// not listed.
+    fn remember(&mut self, path: &std::path::Path) {
+        let is_project = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("brainbend"));
+        if !is_project || recovery_path().is_some_and(|r| r == path) { return; }
+        recent::touch(&mut self.recent, path, recent::now());
+        if let Some(f) = &self.recent_file { recent::save_to(f, &self.recent); }
+    }
+
+    /// Takes a project off the Recent list (it was moved or deleted, or the author just does not want it there).
+    fn forget_recent(&mut self, path: &std::path::Path) {
+        recent::forget(&mut self.recent, path);
+        if let Some(f) = &self.recent_file { recent::save_to(f, &self.recent); }
+    }
+
     fn save(&mut self, as_new: bool) {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
         let target = if as_new || self.path.is_none() {
-            rfd::FileDialog::new().add_filter("BrainBend Studio project", &["brainbend"]).set_file_name(format!("{}.brainbend", p.name)).save_file()
+            rfd::FileDialog::new().add_filter("BrainBend Studio project", &["brainbend"]).set_file_name(format!("{}.brainbend", file_safe_name(&p.name))).save_file()
         } else {
             self.path.clone()
         };
         let Some(target) = target else { return };
         let tmp = target.with_extension("brainbend.tmp");
-        let res = p.to_package().and_then(|b| {
-            std::fs::write(&tmp, b).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, &target).map_err(|e| e.to_string())
-        });
+        let res = self.project.as_mut().ok_or_else(|| "no project".to_string()).and_then(|p| write_package_file(p, &tmp)).and_then(|()| std::fs::rename(&tmp, &target).map_err(|e| e.to_string()));
         match res {
             Ok(()) => {
                 self.status = format!("Saved {}", file_label(&target));
-                self.path = Some(target);
+                self.path = Some(target.clone());
                 self.dirty = false;
                 Self::clear_recovery();
+                self.remember(&target);
             }
             Err(e) => self.status = format!("Save failed: {e}"),
         }
@@ -896,13 +1000,18 @@ impl App {
     /// Write a recovery copy when there are unsaved changes (called periodically).
     fn autosave(&mut self) {
         self.last_autosave = std::time::Instant::now();
-        let (Some(p), Some(path)) = (self.committed(), recovery_path()) else { return };
+        let Some(path) = recovery_path() else { return };
         if !self.dirty { return; }
         if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
-        if let Ok(bytes) = p.to_package() {
-            let tmp = path.with_extension("tmp");
-            if std::fs::write(&tmp, bytes).is_ok() { let _ = std::fs::rename(&tmp, &path); }
-        }
+        let tmp = path.with_extension("tmp");
+        // The common case streams the project to the file without copying its media; only the master view (whose
+        // stand-ins have to be folded back in first) makes a copy.
+        let written = if self.master_stash.is_none() {
+            self.project.as_mut().ok_or_else(|| "no project".to_string()).and_then(|p| write_package_file(p, &tmp))
+        } else {
+            self.committed().ok_or_else(|| "no project".to_string()).and_then(|mut p| write_package_file(&mut p, &tmp))
+        };
+        if written.is_ok() { let _ = std::fs::rename(&tmp, &path); } else { let _ = std::fs::remove_file(&tmp); }
     }
 
     fn clear_recovery() {
@@ -918,10 +1027,19 @@ impl App {
         self.leave_master_view();
         match action {
             Pending::Quit => self.allow_close = true,
+            Pending::Update => match self.updater.install_now() {
+                Ok(()) => self.allow_close = true,
+                Err(e) => { self.status = format!("Could not update: {e}"); self.updater.dialog_open = true; }
+            },
             Pending::New => self.new_project(),
             Pending::NewLesson(kind) => self.new_lesson_project(kind),
             Pending::OpenDropped => {
                 if let Some(p) = self.drop_path.take() { self.open(&p); }
+            }
+            Pending::Import => {
+                if let Some(p) = rfd::FileDialog::new().set_title("Import a Storyline or PowerPoint file").add_filter("Storyline or PowerPoint files", &["story", "storyapp", "pptx"]).pick_file() {
+                    self.open(&p);
+                }
             }
             Pending::Open => {
                 if let Some(p) = rfd::FileDialog::new().add_filter("BrainBend Studio, .story or PowerPoint files", &["brainbend", "storyapp", "story", "pptx"]).pick_file() {
@@ -964,7 +1082,9 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let Some(dir) = rfd::FileDialog::new().set_title("Choose an empty folder for the HTML5 export").pick_folder() else { return };
+        let Some(parent) = rfd::FileDialog::new().set_title("Choose where to put the web folder").pick_folder() else { return };
+        // The export lives in a folder named for the project, so index.html and its assets never land loose.
+        let dir = parent.join(file_safe_name(&p.name));
         self.status = match brainbend_publish_html::export(p, &dir) {
             Ok(()) => format!("Exported HTML5 to {}", dir.display()),
             Err(e) => format!("Export failed: {e}"),
@@ -976,7 +1096,7 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint presentation", &["pptx"]).set_file_name(format!("{}.pptx", p.name)).save_file() else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint presentation", &["pptx"]).set_file_name(format!("{}.pptx", file_safe_name(&p.name))).save_file() else { return };
         match brainbend_export_pptx::export(p) {
             Ok((bytes, notes)) => match std::fs::write(&path, bytes) {
                 Ok(()) => {
@@ -993,10 +1113,9 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let tag = if version == brainbend_publish_html::Lms::Scorm12 { "scorm12" } else { "scorm2004" };
         let Some(path) = rfd::FileDialog::new()
             .add_filter("SCORM package", &["zip"])
-            .set_file_name(format!("{}-{tag}.zip", p.name))
+            .set_file_name(format!("{}.zip", file_safe_name(&p.name)))
             .save_file()
         else {
             return;
@@ -1009,6 +1128,7 @@ impl App {
 
     /// The bar along the bottom: where you are, what is wrong, and the zoom.
     fn status_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
+        self.updater.poll();
         // Counting the issues walks the whole project, so it is done now and then, not every frame.
         let now = ctx.input(|i| i.time);
         let sig = (self.undo.len(), self.redo.len(), self.project.as_ref().map(|p| p.slides.len() + 1).unwrap_or(0));
@@ -1266,7 +1386,7 @@ impl App {
         let mut o = blank_object(self.new_id("obj"), "Button", Kind::Rect, 0.0, 0.0, 420.0, 120.0);
         o.text = "Button".into();
         o.style = plain_style(40.0, Rgba(255, 255, 255, 255), true, Align::Center);
-        button_styles::apply(&mut o, &button_styles::STYLES[0]);
+        button_styles::apply(&mut o, &button_styles::StyleDef::new(&button_styles::HUES[2], button_styles::Look::Gradient, button_styles::Corners::Rounded));
         self.insert(o);
     }
 
@@ -1460,7 +1580,7 @@ impl App {
         let (rect, resp) = ui.allocate_exact_size(egui::vec2(w + 8.0, h + 8.0), egui::Sense::click());
         let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(w, h));
         let painter = ui.painter_at(rect);
-        if selected { painter.rect_filled(rect, 4.0, egui::Color32::from_rgb(0, 90, 170)); }
+        if selected { painter.rect_filled(rect, 4.0, ribbon::ACCENT); }
         match &sl.kind {
             SlideKind::Normal => {
                 self.paint_backdrop(ctx, &painter.with_clip_rect(thumb), thumb.min, w / sl.width, &sl);
@@ -1633,7 +1753,7 @@ impl App {
                 let icon = if targets[0] < i { ribbon::ARROW_UP } else { ribbon::ARROW_DOWN };
                 let chip = egui::Rect::from_center_size(egui::pos2(r.left() + 4.0 + tw - 11.0, r.top() + 4.0 + th - 11.0), egui::vec2(16.0, 16.0));
                 let resp = ui.interact(chip, egui::Id::new(("jump-chip", i)), egui::Sense::click());
-                let fill = if resp.hovered() { egui::Color32::from_rgb(0, 140, 240) } else { egui::Color32::from_rgb(0, 100, 190) };
+                let fill = if resp.hovered() { ribbon::ACCENT_HOVER } else { ribbon::ACCENT };
                 ui.painter().circle_filled(chip.center(), 8.0, fill);
                 ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(11.0, ribbon::icons()), egui::Color32::WHITE);
                 let tip: Vec<String> = targets.iter().map(|&j| p.slides[j].name.clone()).collect();
@@ -1645,7 +1765,7 @@ impl App {
             }
         }
         if let Some((from, to)) = hover_line {
-            let c = egui::Color32::from_rgb(0, 140, 240);
+            let c = ribbon::ACCENT;
             ui.painter().line_segment([from, to.center()], egui::Stroke::new(2.0, c));
             ui.painter().rect_stroke(to, 3.0, egui::Stroke::new(2.0, c), egui::StrokeKind::Outside);
         }
@@ -2085,6 +2205,12 @@ impl App {
     /// Add a media asset (video/audio/captions) from a file; returns its asset key.
     fn load_media(&mut self, filters: &[&str], label: &str) -> Option<(String, String)> {
         let path = rfd::FileDialog::new().add_filter(label, filters).pick_file()?;
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if size > MAX_MEDIA_BYTES {
+            self.status = format!("{} is {}, which is too large to add (the limit is {}). Compress it first, for example with HandBrake, and add it again.", path.file_name().and_then(|n| n.to_str()).unwrap_or("That file"), megabytes(size), megabytes(MAX_MEDIA_BYTES));
+            return None;
+        }
+        self.last_media_path = Some(path.clone());
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
@@ -2110,7 +2236,8 @@ impl App {
         let Some((key, name)) = self.load_media(&["mp4", "m4v", "webm"], "Video") else { return };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Video, 0.0, 0.0, 1280.0, 720.0);
         // A frame of the video to show before it plays (needs ffmpeg; without it there is none).
-        if let Some(still) = self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset) {
+        let from_file = self.last_media_path.take().and_then(|p| brainbend_import_legacy::still_asset_from_file(&p));
+        if let Some(still) = from_file.or_else(|| self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset)) {
             let still_key = format!("{key}-still");
             if let Some(p) = self.project.as_mut() { p.assets.insert(still_key.clone(), still); }
             o.poster = Some(still_key);
@@ -2437,7 +2564,7 @@ impl App {
                         let (row, _) = ui.allocate_exact_size(egui::vec2(avail - 8.0, ROW_H), egui::Sense::hover());
                         row_rects.push((top, row));
                         let selected = members.iter().all(|&m| in_selection.contains(&(li, m)));
-                        if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40)); }
+                        if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40)); }
                         let name_rect = egui::Rect::from_min_size(row.min, egui::vec2(LABEL_W - 6.0, ROW_H));
                         let name_resp = ui.interact(name_rect, ui.id().with(("tl-group", gid.as_str())), egui::Sense::click_and_drag());
                         let fg = if selected { egui::Color32::WHITE } else { egui::Color32::LIGHT_GRAY };
@@ -2500,7 +2627,7 @@ impl App {
                         let spans: Vec<(f32, f32)> = timings.iter().filter_map(|(_, t)| t.as_ref()).map(|t| (t.start_ms as f32, t.dur_ms.map(|d| t.start_ms as f32 + d as f32).unwrap_or(total))).collect();
                         let (a, b) = if spans.is_empty() { (0.0, total) } else { (spans.iter().map(|s| s.0).fold(f32::MAX, f32::min), spans.iter().map(|s| s.1).fold(0.0, f32::max)) };
                         let bar = egui::Rect::from_min_max(egui::pos2(left + a * px, track.top()), egui::pos2((left + b * px).max(left + a * px + 4.0), track.bottom()));
-                        ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { egui::Color32::from_rgb(40, 120, 220) });
+                        ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { ribbon::ACCENT });
                         let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
                         let gid_id = ui.id().with(("tlg", gid.as_str()));
                         let edge_resp = ui.interact(edge, gid_id.with("edge"), egui::Sense::drag());
@@ -2541,7 +2668,7 @@ impl App {
                 let (row, _) = ui.allocate_exact_size(egui::vec2(avail - 8.0, ROW_H), egui::Sense::hover());
                 row_rects.push((oi, row));
                 let selected = in_selection.contains(&(li, oi));
-                if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40)); }
+                if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40)); }
                 // The name column is the object list: select (⌘/⇧ adds), rename by double-click, drag to reorder, eye to hide.
                 let name_rect = egui::Rect::from_min_size(row.min + egui::vec2(indent, 0.0), egui::vec2(LABEL_W - 6.0 - indent, ROW_H));
                 let name_resp = ui.interact(name_rect, ui.id().with(("tl-name", oi)), egui::Sense::click_and_drag());
@@ -2595,7 +2722,7 @@ impl App {
                 let (start, dur) = timing.map(|t| (t.start_ms as f32, t.dur_ms.map(|d| d as f32))).unwrap_or((0.0, None));
                 let end = dur.map(|d| start + d).unwrap_or(total).min(total.max(start + 1.0));
                 let bar = egui::Rect::from_min_max(egui::pos2(left + start * px, track.top()), egui::pos2((left + end * px).max(left + start * px + 4.0), track.bottom()));
-                let col = if timing.is_some() { egui::Color32::from_rgb(40, 120, 220) } else { egui::Color32::from_gray(80) };
+                let col = if timing.is_some() { ribbon::ACCENT } else { egui::Color32::from_gray(80) };
                 ui.painter().rect_filled(bar, 3.0, col);
                 // Interaction: right-edge handle (duration) first, then the body (move / select).
                 let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
@@ -2655,7 +2782,7 @@ impl App {
                 if let Some((_, r)) = row_rects.iter().find(|(i, _)| *i == dst) {
                     if dst != src {
                         let y = if dst > src { r.top() } else { r.bottom() };
-                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)));
+                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, ribbon::ACCENT));
                     }
                 }
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -3304,7 +3431,8 @@ impl App {
         });
         self.id_counter = ctr;
         if let Some((li, oi)) = pick {
-            // Clicking a group's heading selects its owner, so Properties shows it too.
+            // Clicking a group's heading selects its owner. That is a move made inside the Triggers tab, so it stays there.
+            self.trigger_select = true;
             if oi == usize::MAX { self.layer = li; self.selected = None; } else { self.layer = li; self.selected = Some((li, oi)); }
         }
         if changed {
@@ -3337,7 +3465,7 @@ impl App {
         let Some(p) = self.project.as_ref() else { self.focus_open = false; return };
         let (si, li) = (self.slide, self.layer);
         let Some(layer) = p.slides.get(si).and_then(|s| s.layers.get(li)) else { self.focus_open = false; return };
-        let rows: Vec<(usize, String, char, bool, bool)> = layer.focus_indices().into_iter().map(|i| { let o = &layer.objects[i]; (i, o.name.clone(), objects_panel::kind_icon(o), o.decorative, o.hidden) }).collect();
+        let rows: Vec<(usize, String, char, Option<u8>, bool, bool)> = layer.focus_indices().into_iter().map(|i| { let o = &layer.objects[i]; (i, o.name.clone(), objects_panel::kind_icon(o), o.role.level().filter(|_| matches!(o.kind, Kind::Text)), o.decorative, o.hidden) }).collect();
         let (title, custom) = (layer.name.clone(), !layer.focus_order.is_empty());
         let mut open = true;
         let mut mv: Option<(usize, i32)> = None;
@@ -3349,10 +3477,14 @@ impl App {
             ui.add_space(4.0);
             let last = rows.len().saturating_sub(1);
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                for (pos, (i, name, icon, decorative, hidden)) in rows.iter().enumerate() {
+                for (pos, (i, name, icon, heading, decorative, hidden)) in rows.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.add_sized([22.0, 20.0], egui::Label::new(egui::RichText::new(format!("{}", pos + 1)).weak()));
-                        ui.label(egui::RichText::new(icon.to_string()).family(ribbon::icons()).size(14.0));
+                        // A heading shows its level (H1, H2...) where other text shows the Text icon.
+                        match heading {
+                            Some(level) => { ui.add_sized([20.0, 20.0], egui::Label::new(egui::RichText::new(format!("H{level}")).strong().size(12.0))).on_hover_text(format!("Heading {level}")); }
+                            None => { ui.label(egui::RichText::new(icon.to_string()).family(ribbon::icons()).size(14.0)); }
+                        }
                         let dim = *decorative || *hidden;
                         let mut t = egui::RichText::new(name);
                         if dim { t = t.weak(); }
@@ -3392,11 +3524,85 @@ impl App {
             ui.add_space(4.0);
             self.variables_panel(ui, ctx);
         });
-        if !open { self.variables_open = false; }
+        if !open { self.variables_open = false; self.var_rename = None; self.var_note = None; }
     }
 
-    /// Project variables (used by triggers): add, set the initial value, delete.
+    /// Renames a variable, rewriting the `%Name%` text that shows it. One undo step.
+    fn rename_variable(&mut self, id: &str, name: &str) -> Result<(), String> {
+        let p = self.project.as_ref().ok_or("No project is open.")?;
+        let clean = brainbend_doc::variables::check_new_name(p, id, name)?;
+        let old = p.variables.iter().find(|v| v.id == id).map(|v| v.name.clone()).unwrap_or_default();
+        if old == clean { return Ok(()); }
+        self.snapshot();
+        let report = brainbend_doc::variables::rename(self.project.as_mut().unwrap(), id, &clean)?;
+        let mut note = format!("Renamed {old} to {}.", report.name);
+        if report.objects > 0 { note.push_str(&format!(" Updated {} that show{} it in their text.", if report.objects == 1 { "1 object".to_string() } else { format!("{} objects", report.objects) }, if report.objects == 1 { "s" } else { "" })); }
+        if report.javascript { note.push_str(" JavaScript you wrote that uses the old name was not changed."); }
+        self.var_note = Some((note, false));
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Changes a variable's type, converting the values triggers set or compare. Refused (nothing changes) when something
+    /// needs it to stay as it is. One undo step.
+    fn convert_variable(&mut self, id: &str, to: brainbend_doc::variables::VarType) -> Result<(), String> {
+        use brainbend_doc::variables as vars;
+        let p = self.project.as_ref().ok_or("No project is open.")?;
+        let v = p.variables.iter().find(|v| v.id == id).ok_or("That variable no longer exists.")?;
+        let name = v.name.clone();
+        if vars::type_of(&v.initial) == to { return Ok(()); }
+        let blockers = vars::conversion_blockers(p, id, to);
+        if !blockers.is_empty() {
+            return Err(format!("Cannot make \"{name}\" {}. It is used by {}. Change those first, or keep it as it is.", to.label(), blockers.join(" and ")));
+        }
+        self.snapshot();
+        let report = vars::convert(self.project.as_mut().unwrap(), id, to)?;
+        let mut note = format!("\"{name}\" is now {}.", to.label());
+        if report.triggers > 0 { note.push_str(&format!(" Updated the values in {} trigger{}.", report.triggers, if report.triggers == 1 { "" } else { "s" })); }
+        if report.lossy { note.push_str(" Some values could not be carried over exactly."); }
+        self.var_note = Some((note, false));
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Project variables (used by triggers): search and filter, add, set the initial value, delete.
     fn variables_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let in_triggers = variables_in_triggers(self.project.as_ref().unwrap());
+        let total = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in).count();
+        let filtering = !self.var_query.trim().is_empty() || self.var_kind != 0 || self.var_use != 0;
+        if total > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.var_query).hint_text("Search variables").desired_width(118.0));
+                combo("varkindfilter").width(78.0).selected_text(["All types", "true/false", "number", "text"][self.var_kind]).show_ui(ui, |ui| {
+                    for (i, l) in ["All types", "true/false", "number", "text"].iter().enumerate() { ui.selectable_value(&mut self.var_kind, i, *l); }
+                });
+                combo("varusefilter").width(112.0).selected_text(["Any use", "Used in a trigger", "In no trigger"][self.var_use]).show_ui(ui, |ui| {
+                    for (i, l) in ["Any use", "Used in a trigger", "In no trigger"].iter().enumerate() { ui.selectable_value(&mut self.var_use, i, *l); }
+                }).response.on_hover_text("Only triggers are checked. A slider, an input, a dial or text that shows %name% can still use a variable that is in no trigger.");
+                if filtering && ui.small_button("Clear").clicked() { self.var_query.clear(); self.var_kind = 0; self.var_use = 0; }
+            });
+            if filtering {
+                let shown = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && variable_shown(v, &in_triggers, &self.var_query, self.var_kind, self.var_use)).count();
+                ui.weak(format!("Showing {shown} of {total} variables"));
+                if shown == 0 { ui.label("No variables match."); }
+            }
+            ui.add_space(2.0);
+        }
+        let mut clear_note = false;
+        if let Some((note, refused)) = &self.var_note {
+            ui.horizontal_wrapped(|ui| {
+                if *refused { ui.colored_label(egui::Color32::from_rgb(230, 90, 80), note.as_str()); } else { ui.label(egui::RichText::new(note.as_str()).color(egui::Color32::from_rgb(90, 180, 120))); }
+                if ui.small_button("OK").clicked() { clear_note = true; }
+            });
+            ui.add_space(2.0);
+        }
+        if clear_note { self.var_note = None; }
+        let (query, kind, usage) = (self.var_query.clone(), self.var_kind, self.var_use);
+        let mut start_rename: Option<(String, String)> = None;
+        let mut new_var_problem: Option<String> = None;
+        let mut commit_rename: Option<(String, String)> = None;
+        let mut cancel_rename = false;
+        let mut convert_var: Option<(String, brainbend_doc::variables::VarType)> = None;
         let mut add_var: Option<(String, usize)> = None;
         let mut remove_var: Option<String> = None;
         let mut dup_var: Option<String> = None;
@@ -3404,9 +3610,20 @@ impl App {
         let var_meta_before = Meta::of(self.project.as_ref().unwrap());
         egui::ScrollArea::vertical().id_salt("vars").show(ui, |ui| {
             let proj = self.project.as_mut().unwrap();
-            for v in proj.variables.iter_mut().filter(|v| !v.built_in) {
+            for v in proj.variables.iter_mut().filter(|v| !v.built_in && variable_shown(v, &in_triggers, &query, kind, usage)) {
                 let row = ui.scope_builder(egui::UiBuilder::new().sense(egui::Sense::click()), |ui| { ui.style_mut().interaction.selectable_labels = false; ui.horizontal(|ui| {
-                    ui.label(format!("{} =", v.name));
+                    let renaming = self.var_rename.as_ref().is_some_and(|(id, ..)| *id == v.id);
+                    if renaming {
+                        if let Some((_, buf, fresh)) = self.var_rename.as_mut() {
+                            let r = ui.add(egui::TextEdit::singleline(buf).desired_width(120.0));
+                            if *fresh { r.request_focus(); *fresh = false; }
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel_rename = true; }
+                            else if r.lost_focus() { commit_rename = Some((v.id.clone(), buf.clone())); }
+                        }
+                        ui.label("=");
+                    } else if ui.add(egui::Label::new(format!("{} =", v.name)).sense(egui::Sense::click())).on_hover_text("Double-click to rename").double_clicked() {
+                        start_rename = Some((v.id.clone(), v.name.clone()));
+                    }
                     if value_editor(ui, &mut v.initial) { var_edited = true; }
                     if ui.small_button("x").on_hover_text("Delete variable and the triggers that use it").clicked() {
                         remove_var = Some(v.id.clone());
@@ -3415,6 +3632,22 @@ impl App {
                 row.response.context_menu(|ui| {
                     if ui.button("Copy name").clicked() { ui.ctx().copy_text(v.name.clone()); ui.close(); }
                     if ui.button("Duplicate").clicked() { dup_var = Some(v.id.clone()); ui.close(); }
+                    if ui.button("Rename…").clicked() { start_rename = Some((v.id.clone(), v.name.clone())); ui.close(); }
+                    ui.menu_button("Change type", |ui| {
+                        use brainbend_doc::variables::{type_of, VarType};
+                        let now = type_of(&v.initial);
+                        for t in VarType::ALL {
+                            let tip = match (now, t) {
+                                (VarType::Text, VarType::Num) => "Text that is not a number becomes 0",
+                                (VarType::Text, VarType::Bool) => "Only true, 1 or yes become true; anything else becomes false",
+                                (VarType::Num, VarType::Bool) => "0 becomes false and anything else becomes true",
+                                _ => "",
+                            };
+                            let b = ui.add_enabled(t != now, egui::Button::new(if t == now { format!("{} (current)", t.label()) } else { t.label().to_string() }));
+                            let b = if tip.is_empty() { b } else { b.on_hover_text(tip) };
+                            if b.clicked() { convert_var = Some((v.id.clone(), t)); ui.close(); }
+                        }
+                    });
                     ui.separator();
                     if ui.button("Delete").on_hover_text("Deletes the variable and the triggers that use it").clicked() { remove_var = Some(v.id.clone()); ui.close(); }
                 });
@@ -3427,11 +3660,13 @@ impl App {
                     }
                 });
                 let name = self.new_var_name.trim().to_string();
-                let clash = proj.variables.iter().any(|v| v.name == name);
-                if ui.add_enabled(!name.is_empty() && !clash, egui::Button::new("Add")).clicked() {
+                let problem = if name.is_empty() { None } else { brainbend_doc::variables::check_name(&name).err().or_else(|| proj.variables.iter().any(|v| v.name == name).then(|| format!("A variable called \"{name}\" already exists."))) };
+                if ui.add_enabled(!name.is_empty() && problem.is_none(), egui::Button::new("Add")).clicked() {
                     add_var = Some((name, self.new_var_kind));
                 }
+                new_var_problem = problem;
             });
+            if let Some(why) = &new_var_problem { ui.colored_label(egui::Color32::from_rgb(230, 90, 80), why); }
         });
         if var_edited {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
@@ -3447,13 +3682,25 @@ impl App {
             self.new_var_name.clear();
             self.dirty = true;
         }
+        if let Some((id, name)) = start_rename { self.var_rename = Some((id, name, true)); self.var_note = None; }
+        if cancel_rename { self.var_rename = None; }
+        if let Some((id, name)) = commit_rename {
+            match self.rename_variable(&id, &name) {
+                Ok(()) => self.var_rename = None,
+                // Stay in the box so the name can be fixed.
+                Err(e) => { self.var_note = Some((e, true)); if let Some(r) = self.var_rename.as_mut() { r.2 = true; } }
+            }
+        }
+        if let Some((id, to)) = convert_var {
+            if let Err(e) = self.convert_variable(&id, to) { self.var_note = Some((e, true)); }
+        }
         if let Some(id) = dup_var {
             self.snapshot();
             let new = self.new_id("var");
             let proj = self.project.as_mut().unwrap();
             if let Some(v) = proj.variables.iter().find(|v| v.id == id).cloned() {
-                let mut name = format!("{} copy", v.name);
-                while proj.variables.iter().any(|x| x.name == name) { name.push_str(" 2"); }
+                let mut name = format!("{}_copy", v.name);
+                while proj.variables.iter().any(|x| x.name == name) { name.push_str("_2"); }
                 proj.variables.push(Variable { id: new, name, initial: v.initial, built_in: false });
             }
             self.dirty = true;
@@ -3481,9 +3728,7 @@ impl App {
         let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
         let n = slide.layers.len();
         if self.visible.len() != n { self.visible = vec![true; n]; }
-        ui.add_space(2.0);
-        section_label(ui, "Slide Layers");
-        ui.add_space(2.0);
+        doc_tabs::panel_tabs(ui, &["Slide Layers".to_string()], &mut 0);
         let list_h = (ui.available_height() - 40.0).max(40.0);
         egui::ScrollArea::vertical().id_salt("layers").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -3579,7 +3824,7 @@ impl App {
                 if let Some((_, r)) = rows.iter().find(|(l, _)| *l == dst) {
                     let y = if dst > src { r.top() } else if dst < src { r.bottom() } else { f32::NAN };
                     if !y.is_nan() {
-                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)));
+                        ui.painter().hline(r.x_range(), y, egui::Stroke::new(2.0, ribbon::ACCENT));
                     }
                 }
                 ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -3797,7 +4042,7 @@ impl App {
                 if !show_hidden && selected != Some((li, oi)) { continue; }
                 painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(150)), egui::StrokeKind::Inside);
                 if selected == Some((li, oi)) {
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                 }
                 continue;
             }
@@ -3807,17 +4052,18 @@ impl App {
                     let c = r.center();
                     let a = o.rotation.to_radians();
                     let pts: Vec<egui::Pos2> = rounded_rect_poly(r, 0.0).into_iter().map(|p| { let d = p - c; c + egui::vec2(d.x * a.cos() - d.y * a.sin(), d.x * a.sin() + d.y * a.cos()) }).collect();
-                    painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255))));
+                    painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, ribbon::ACCENT)));
                 }
                 continue;
             }
             let ellipse = matches!(o.kind, Kind::Ellipse);
             let boxless = matches!(o.kind, Kind::Path(_) | Kind::Line | Kind::LineUp);
-            if let (Some(sh), true, false) = (o.shadow, o.fill.is_some() || matches!(o.kind, Kind::Image), boxless) {
-                let mut sr = r.translate(egui::vec2(sh.dx, sh.dy) * scale);
-                sr = sr.expand((sh.spread + if sh.dx == 0.0 && sh.dy == 0.0 { sh.blur * 0.5 } else { 0.0 }) * scale); // spread, plus a rough glow
-                if ellipse { painter.add(egui::epaint::EllipseShape::filled(sr.center(), sr.size() / 2.0, color(sh.color))); }
-                else { painter.rect_filled(sr, o.radius * scale, color(sh.color)); }
+            // Shadow, glow and reflection go behind the object and follow its outline. Soft edges fade the fill itself.
+            let soft = if o.soft_edge > 0.0 && !matches!(o.kind, Kind::Image) { Some(o.soft_edge * scale) } else { None };
+            if o.fill.is_some() || matches!(o.kind, Kind::Image) {
+                if o.shadow.is_some() || o.glow.is_some() || o.reflection.is_some() {
+                    effects_paint::behind(painter, o, r, scale, o.fill.map(color), &|p| p);
+                }
             }
             if let (Some(g), false, true) = (&o.gradient, boxless, !g_is_empty(&o.gradient)) {
                 if !ellipse && o.radius <= 0.5 { paint_gradient(painter, r, g.angle, &g.stops); }
@@ -3826,13 +4072,16 @@ impl App {
                     fill_polygon(painter, &poly, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
                 }
             } else if let (Some(f), false) = (o.fill, boxless) {
-                if ellipse { painter.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, color(f))); }
+                if let Some(edge) = soft { effects_paint::soft_fill(painter, &effects_paint::figures(o, r, scale), r, color(f), edge, &|p| p); }
+                else if ellipse { painter.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, color(f))); }
                 else { painter.rect_filled(r, o.radius * scale, color(f)); }
             }
             if let Kind::Path(cmds) = &o.kind {
                 let figs = path_polygons(cmds, r);
                 if let (Some(g), true) = (&o.gradient, !g_is_empty(&o.gradient)) {
                     fill_figures(painter, &figs, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
+                } else if let (Some(f), Some(edge)) = (o.fill, soft) {
+                    effects_paint::soft_fill(painter, &figs, r, color(f), edge, &|p| p);
                 } else if let Some(f) = o.fill {
                     fill_figures(painter, &figs, &|p| p, &|_| color(f));
                 }
@@ -3847,7 +4096,7 @@ impl App {
             }
             if matches!(o.kind, Kind::Hotspot) {
                 // Invisible in the published lesson; shown here so it can be found and selected.
-                let (tint, edge) = (egui::Color32::from_rgba_unmultiplied(0, 140, 255, 36), egui::Color32::from_rgba_unmultiplied(0, 140, 255, 150));
+                let (tint, edge) = (egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36), egui::Color32::from_rgba_unmultiplied(10, 110, 235, 150));
                 match o.hit_area.as_ref().filter(|a| a.len() > 2) {
                     // An outlined hotspot is clickable only inside its outline.
                     Some(area) => {
@@ -3983,7 +4232,7 @@ impl App {
                 else { painter.rect_stroke(r, o.radius * scale, stroke, egui::StrokeKind::Inside); }
             }
             if selected == Some((li, oi)) {
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
             }
         }
         // The selected marker's card, as the learner will see it when they click the marker.
@@ -4007,10 +4256,15 @@ impl App {
         };
         let has_fill = o.fill.is_some() || o.gradient.as_ref().is_some_and(|g| !g.stops.is_empty());
         let stroke = o.stroke.map(|st| egui::Stroke::new((st.width * scale).max(1.0), color(st.color)));
+        let soft = if o.soft_edge > 0.0 { Some(o.soft_edge * scale) } else { None };
+        if (o.fill.is_some() || matches!(o.kind, Kind::Image)) && (o.shadow.is_some() || o.glow.is_some() || o.reflection.is_some()) {
+            effects_paint::behind(painter, o, r, scale, o.fill.map(color), &rot);
+        }
         match &o.kind {
             Kind::Path(cmds) => {
                 let figs = path_polygons(cmds, r);
-                if has_fill { fill_figures(painter, &figs, &rot, &shade); }
+                if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &figs, r, color(f), edge, &rot); }
+                else if has_fill { fill_figures(painter, &figs, &rot, &shade); }
                 if let Some(st) = stroke { for poly in &figs { painter.extend(outline_shapes(poly.iter().map(|p| rot(*p)).collect(), st, o.dash)); } }
             }
             Kind::Slider(sl) => {
@@ -4063,7 +4317,8 @@ impl App {
             }
             _ => {
                 let poly = if matches!(o.kind, Kind::Ellipse) { ellipse_poly(r) } else { rounded_rect_poly(r, o.radius * scale) };
-                if has_fill { fill_polygon(painter, &poly, &rot, &shade); }
+                if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &vec![poly.clone()], r, color(f), edge, &rot); }
+                else if has_fill { fill_polygon(painter, &poly, &rot, &shade); }
                 if let Some(st) = stroke { painter.extend(outline_shapes(poly.iter().map(|p| rot(*p)).collect(), st, o.dash)); }
             }
         }
@@ -4112,6 +4367,10 @@ impl App {
         Some(tex)
     }
 }
+
+/// Where an author's chosen poster frame for a video comes from.
+#[derive(Clone, Copy)]
+enum PosterWant { Picture, Frame(f64) }
 
 /// Which kind of file a question editor is asking the app to pick.
 #[derive(Clone, Copy, PartialEq)]
@@ -4999,12 +5258,9 @@ fn kind_name(k: &Kind) -> &'static str {
     }
 }
 
+/// The egui family for a font name: the font if it is available, Open Sans if not.
 fn font_family(name: &str) -> egui::FontFamily {
-    if name.eq_ignore_ascii_case("montserrat") {
-        egui::FontFamily::Name("Montserrat".into())
-    } else {
-        egui::FontFamily::Name("Open Sans".into())
-    }
+    font_store::family(name)
 }
 
 /// Brand accent + softer geometry. Applied to both light and dark themes.
@@ -5035,7 +5291,7 @@ fn install_theme(ctx: &egui::Context) {
         style.visuals.widgets.open.corner_radius = r;
         style.visuals.window_corner_radius = egui::CornerRadius::same(4);
         style.visuals.menu_corner_radius = egui::CornerRadius::same(4);
-        style.visuals.selection.bg_fill = egui::Color32::from_rgb(3, 83, 158);
+        style.visuals.selection.bg_fill = ribbon::ACCENT;
         style.visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
         style.visuals.disabled_alpha = 0.62;
         style.visuals.hyperlink_color = egui::Color32::from_rgb(70, 150, 230);
@@ -5046,32 +5302,50 @@ fn install_theme(ctx: &egui::Context) {
 }
 
 fn install_fonts(ctx: &egui::Context) {
-    use std::sync::Arc;
-    let mut fonts = egui::FontDefinitions::default();
-    let sources: [(&str, &'static [u8]); 2] = [
-        ("Montserrat", include_bytes!("../../../assets/fonts/Montserrat[wght].ttf")),
-        ("Open Sans", include_bytes!("../../../assets/fonts/OpenSans[wdth,wght].ttf")),
-    ];
-    for (name, bytes) in sources {
-        fonts.font_data.insert(name.to_string(), Arc::new(egui::FontData::from_static(bytes)));
-        // Default fonts stay as fallbacks for symbols the bundled fonts lack.
-        let mut chain = vec![name.to_string()];
-        chain.extend(fonts.families.get(&egui::FontFamily::Proportional).cloned().unwrap_or_default());
-        // Hack covers the maths operators and arrows the other fonts lack (the Symbol picker offers them).
-        if fonts.font_data.contains_key("Hack") { chain.push("Hack".to_string()); }
-        fonts.families.insert(egui::FontFamily::Name(name.into()), chain);
-    }
-    fonts.font_data.insert("icons".into(), Arc::new(egui::FontData::from_static(include_bytes!("../../../assets/icons/Phosphor.ttf"))));
-    fonts.families.insert(ribbon::icons(), vec!["icons".into()]);
-    ctx.set_fonts(fonts);
+    font_store::install(ctx);
 }
 
 fn color(c: Rgba) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(c.0, c.1, c.2, c.3)
 }
 
+/// The ids of the variables any trigger reads or changes: a condition, a set or adjust action, or a change event.
+fn variables_in_triggers(p: &Project) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for t in p.slides.iter().flat_map(|s| s.triggers.iter()) {
+        for c in &t.conditions { ids.insert(c.variable.clone()); }
+        match (&t.event, &t.action) {
+            (Event::VariableChanged(v), _) => { ids.insert(v.clone()); }
+            _ => {}
+        }
+        if let Action::SetVariable { variable, .. } | Action::AdjustVariable { variable, .. } = &t.action { ids.insert(variable.clone()); }
+    }
+    ids
+}
+
+/// Does `v` pass the Variables window's search and filters? `kind`: 0 any, 1 true/false, 2 number, 3 text.
+/// `usage`: 0 any, 1 named by a trigger, 2 named by no trigger.
+fn variable_shown(v: &Variable, in_triggers: &std::collections::HashSet<String>, query: &str, kind: usize, usage: usize) -> bool {
+    let q = query.trim().to_lowercase();
+    (q.is_empty() || v.name.to_lowercase().contains(&q))
+        && match kind { 1 => matches!(v.initial, Value::Bool(_)), 2 => matches!(v.initial, Value::Num(_)), 3 => matches!(v.initial, Value::Text(_)), _ => true }
+        && match usage { 1 => in_triggers.contains(&v.id), 2 => !in_triggers.contains(&v.id), _ => true }
+}
+
+/// The app icon follows the theme: the light icon in the light theme, the dark-grey one in the dark theme. (A bundled
+/// macOS icon is a single image, so the running app swaps the Dock and window icon itself.)
+fn sync_app_icon(ctx: &egui::Context) {
+    let dark = ctx.global_style().visuals.dark_mode;
+    let id = egui::Id::new("app-icon-dark");
+    if ctx.data(|d| d.get_temp::<bool>(id)) == Some(dark) { return; }
+    ctx.data_mut(|d| d.insert_temp(id, dark));
+    let bytes: &[u8] = if dark { include_bytes!("../../../assets/brainbend-icon-dark-256.png") } else { include_bytes!("../../../assets/brainbend-icon-256.png") };
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(bytes) { ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(std::sync::Arc::new(icon)))); }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        sync_app_icon(root.ctx());
         self.show(root);
     }
 }
@@ -5107,11 +5381,14 @@ impl App {
     /// One frame of the whole UI (separate from `eframe::App::ui` so tests can drive it).
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
+        // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
+        font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
         if self.try_mode { self.selected = None; self.multi.clear(); }
         self.sync_tabs();
         self.begin_state_swap();
         self.show_frame(root);
+        if font_store::has_pending() { root.ctx().request_repaint(); }
         if let Some(sel) = self.pending_delete.take() { self.delete_slides(sel); }
         self.end_state_swap();
         self.save_active_tab();
@@ -5428,6 +5705,10 @@ impl App {
                 }
             }
         }
+        self.update_window(ctx);
+        self.publish_window(ctx);
+        self.fonts_window(ctx);
+        if self.updater.restarting { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if self.recovery_offer {
             let mut done = false;
             egui::Window::new("Recover unsaved work?").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
@@ -5571,18 +5852,24 @@ impl App {
         let mut want_equation: Option<(usize, usize)> = None;
         let mut want_pano: Option<(usize, usize)> = None;
         let mut want_thumb: Option<(usize, usize)> = None;
+        let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
-        egui::Panel::right("inspector").default_size(326.0).show(root, |ui| {
-            ui.add_space(6.0);
+        egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
+            // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
+            // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
+            // stays put.
+            let seen = (self.selected, self.layer, self.slide);
+            let from_triggers = std::mem::take(&mut self.trigger_select);
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers { self.right_tab = 0; }
+            self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
             if !self.in_master_view() {
-                egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).show(ui, |ui| {
+                egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
             }
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.right_tab, 0, "Properties");
+            {
                 let owner_id = self.selected_object().map(|o| o.id.clone());
                 let count = {
                     let sl = &self.project.as_ref().unwrap().slides[slide_idx];
@@ -5594,9 +5881,9 @@ impl App {
                         _ => false,
                     }).count()
                 };
-                ui.selectable_value(&mut self.right_tab, 1, if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() });
-            });
-            ui.separator();
+                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }];
+                doc_tabs::panel_tabs(ui, &labels, &mut self.right_tab);
+            }
             if self.right_tab == 1 {
                 self.triggers_panel(ui, ctx, slide_idx);
                 return;
@@ -5784,6 +6071,21 @@ impl App {
                 });
             }
             if pick_captions { want_captions = Some((li, oi)); }
+            if matches!(obj.kind, Kind::Video) {
+                // The picture shown before the video plays: its first frame unless the author picks another.
+                ui.label("Poster frame").on_hover_text("The picture shown before the video plays. It starts as the video's first frame.");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Choose picture…").on_hover_text("Use a picture from a file").clicked() { want_poster = Some((li, oi, PosterWant::Picture)); }
+                    if ui.button("First frame").on_hover_text("Go back to the video's first frame").clicked() { want_poster = Some((li, oi, PosterWant::Frame(0.0))); }
+                });
+                ui.horizontal(|ui| {
+                    let id = ui.id().with(("poster-secs", &obj.id));
+                    let mut secs: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+                    ui.add(egui::DragValue::new(&mut secs).speed(0.1).range(0.0..=36000.0).suffix(" s"));
+                    ui.data_mut(|d| d.insert_temp(id, secs));
+                    if ui.button("Use frame at this time").clicked() { want_poster = Some((li, oi, PosterWant::Frame(secs))); }
+                });
+            }
             if let Some(e) = &obj.equation {
                 ui.horizontal(|ui| {
                     ui.label("Equation");
@@ -5832,9 +6134,6 @@ impl App {
                 egui::CollapsingHeader::new("Playback").default_open(true).show(ui, |ui| {
                     let m = &mut obj.media;
                     changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                    if matches!(obj.kind, Kind::Video) {
-                        changed |= ui.checkbox(&mut m.controls, "Show player controls").changed();
-                    }
                     changed |= ui.checkbox(&mut m.looped, "Loop").changed();
                     changed |= ui.checkbox(&mut m.muted, "Muted").changed();
                     ui.horizontal(|ui| {
@@ -5934,6 +6233,24 @@ impl App {
         }
         if let Some(t) = want_equation { self.open_equation_dialog(Some(t)); }
         if let Some(t) = want_pano { self.open_pano_dialog(t); }
+        if let Some((li, oi, want)) = want_poster {
+            let key = match want {
+                PosterWant::Picture => self.load_image_asset_titled("Choose Poster Frame").map(|(k, _, _, _)| k),
+                PosterWant::Frame(secs) => {
+                    let video = self.project.as_ref().and_then(|p| p.slides[slide_idx].layers.get(li)).and_then(|l| l.objects.get(oi)).and_then(|o| o.asset.clone());
+                    let still = video.and_then(|k| self.project.as_ref().and_then(|p| p.assets.get(&k))).and_then(|v| brainbend_import_legacy::still_asset_at(v, secs));
+                    match still {
+                        Some(a) => { let k = self.new_id("asset"); self.project.as_mut().map(|p| p.assets.insert(k.clone(), a)); Some(k) }
+                        None => { self.status = "Could not make a frame at that time. Studio needs ffmpeg for this, and the time must be inside the video. You can also choose a picture.".into(); None }
+                    }
+                }
+            };
+            if let Some(key) = key {
+                self.snapshot();
+                if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.poster = Some(key); }
+                self.dirty = true;
+            }
+        }
         if let Some((li, oi)) = want_captions {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
@@ -5943,14 +6260,10 @@ impl App {
             }
         }
 
-        egui::Panel::bottom("timeline").resizable(true).default_size(200.0).show(root, |ui| {
+        egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             ui.add_enabled_ui(editable, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.bottom_tab, 0, "Timeline");
-                ui.selectable_value(&mut self.bottom_tab, 1, "Slide Notes");
-                ui.selectable_value(&mut self.bottom_tab, 2, "States");
-            });
+            doc_tabs::panel_tabs(ui, &["Timeline".to_string(), "Slide Notes".to_string(), "States".to_string()], &mut self.bottom_tab);
             if self.bottom_tab == 0 {
                 self.timeline_panel(ui, slide_idx);
             } else if self.bottom_tab == 2 {
@@ -5993,6 +6306,7 @@ impl App {
             let scale = fit * self.zoom;
             let size = egui::vec2(slide.width * scale, slide.height * scale);
             let origin = area.center() - size / 2.0 + self.pan;
+            self.canvas_frame = Some((origin, scale));
             self.paint_backdrop(ctx, &painter, origin, scale, &slide);
             let to_screen = |x: f32, y: f32, w: f32, h: f32| {
                 egui::Rect::from_min_size(origin + egui::vec2(x, y) * scale, egui::vec2(w, h) * scale)
@@ -6118,7 +6432,7 @@ impl App {
                             if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
                             if let Some((a, b)) = self.hot_drag {
                                 let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
-                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 40), egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                                 if resp.drag_stopped() || !resp.dragged() {
                                     self.hot_drag = None;
                                     let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
@@ -6151,7 +6465,7 @@ impl App {
                     "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
                 // The question's own area: a frame with a grip to move it and handles on its edges and corners to resize it.
                 if let (Some(sr), false) = (area_screen, self.try_mode) {
-                    let accent = egui::Color32::from_rgb(0, 140, 255);
+                    let accent = ribbon::ACCENT;
                     painter.rect_stroke(sr, 0.0, egui::Stroke::new(1.5, accent), egui::StrokeKind::Outside);
                     let grip = egui::Rect::from_min_size(sr.left_top() - egui::vec2(0.0, 20.0), egui::vec2(120.0, 20.0));
                     painter.rect_filled(grip, 3.0, accent);
@@ -6189,13 +6503,15 @@ impl App {
             // "Try it": the objects show the state a mouse would put them in, a press acts like the player's (it also
             // shows and hides layers and sets states), and nothing is saved.
             let try_on = self.try_mode;
-            if try_on && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.try_mode = false; }
+            // Esc closes the unsupported-action dialog first; a second Esc stops Try It.
+            if try_on && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { if self.try_note.is_some() { self.try_note = None; } else { self.try_mode = false; } }
             let try_on = self.try_mode;
-            if !try_on { self.try_slide = None; }
+            if !try_on { self.try_slide = None; self.try_note = None; }
             let (slide, shown) = if try_on {
                 if self.try_slide != Some(slide_idx) {
                     self.try_layers = states_panel::try_start(&slide);
                     self.try_states.clear();
+                    self.try_note = None;
                     self.try_slide = Some(slide_idx);
                 }
                 let hidden = states_panel::hidden_by_layers(&slide, &self.try_layers);
@@ -6204,14 +6520,22 @@ impl App {
                 let tshown: Vec<usize> = std::iter::once(0).chain(slide.layers.iter().enumerate().skip(1).filter(|(_, l)| self.try_layers.contains(&l.id)).map(|(i, _)| i)).collect();
                 let mut hit = resp.hover_pos().and_then(|p| hit_object(&tslide, &tshown, (p - origin) / scale, scale));
                 // A showing layer that blocks the layers beneath it keeps presses from reaching them.
+                let mut blocked_by: Option<usize> = None;
                 if let Some(top_modal) = tshown.iter().copied().filter(|&i| i > 0 && tslide.layers[i].modal).max() {
+                    if hit.is_some_and(|(l, _)| l < top_modal) { blocked_by = Some(top_modal); }
                     hit = hit.filter(|&(l, _)| l >= top_modal);
                 }
                 let hit_id = hit.and_then(|(l, o)| tslide.layers[l].objects.get(o).map(|ob| ob.id.clone()));
                 let pressed = ctx.input(|i| i.pointer.primary_down());
                 if resp.clicked() {
-                    if let Some(id) = &hit_id {
+                    if let (Some(b), None) = (blocked_by, &hit_id) {
+                        // The press landed on something a showing layer covers: say so, or it just seems dead.
+                        self.try_note = Some(format!("The layer \"{}\" is showing and blocks clicks on what is beneath it. To let them through, select that layer and turn off \"Block clicks on the layers beneath\".", tslide.layers[b].name));
+                        ctx.request_repaint();
+                    } else if let Some(id) = &hit_id {
                         states_panel::try_press(&slide, id, &mut self.try_layers, &mut self.try_states);
+                        let left_out = self.project.as_ref().map(|p| states_panel::not_run(&slide, &p.slides, id)).unwrap_or_default();
+                        self.try_note = states_panel::not_run_note(&left_out);
                         ctx.request_repaint();
                     }
                 }
@@ -6249,6 +6573,9 @@ impl App {
                     let o = &mut s.layers[li].objects[oi];
                     o.text.clear();
                     o.rich = None;
+                    // The edit box cannot turn, so a turned object is shown upright (frame and handles too) while its
+                    // text is edited. Only what is drawn changes: the saved rotation is untouched.
+                    o.rotation = 0.0;
                     s
                 }
                 _ => slide,
@@ -6280,8 +6607,20 @@ impl App {
                 let strip = egui::Rect::from_min_size(area.left_top(), egui::vec2(area.width(), 40.0));
                 painter.rect_filled(strip, 0.0, egui::Color32::from_rgb(11, 110, 105).gamma_multiply(0.92));
                 let font = egui::FontId::proportional(12.5);
-                painter.text(strip.center_top() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Try It shows button states and layers. Nothing is saved. Esc stops.", font.clone(), egui::Color32::WHITE);
-                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Not played here: GIF animation, video and audio, JavaScript, variables. Use Preview for those.", font, egui::Color32::from_white_alpha(215));
+                painter.text(strip.center_top() + egui::vec2(0.0, 12.0), egui::Align2::CENTER_CENTER, "Try It is Enabled. You may now test buttons, layers, and triggers on this slide only.", font.clone(), egui::Color32::WHITE);
+                painter.text(strip.center_top() + egui::vec2(0.0, 29.0), egui::Align2::CENTER_CENTER, "Does not work: video, audio, animations, variables, JavaScript, etc. Use Preview for all functionality.", font, egui::Color32::from_white_alpha(215));
+                // What the last press left out (or was blocked from) is a dialog that stays until the author presses OK.
+                if let Some(note) = self.try_note.clone() {
+                    let modal = egui::Modal::new(egui::Id::new("try_it_note")).show(ctx, |ui| {
+                        ui.set_width(360.0);
+                        ui.heading("Not run in Try It");
+                        ui.add_space(6.0);
+                        ui.label(note);
+                        ui.add_space(12.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| ui.button("OK").clicked()).inner
+                    });
+                    if modal.inner { self.try_note = None; }
+                }
                 return;
             }
             let to_slide = |p: egui::Pos2| (p - origin) / scale;
@@ -6304,7 +6643,7 @@ impl App {
             if sel_all.len() > 1 && !one_group {
                 for &(l, k) in &sel_all {
                     if let Some(o) = slide.layers.get(l).and_then(|ly| ly.objects.get(k)) {
-                        painter.rect_stroke(to_screen(o.x, o.y, o.w, o.h), 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                        painter.rect_stroke(to_screen(o.x, o.y, o.w, o.h), 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                     }
                 }
             }
@@ -6359,22 +6698,22 @@ impl App {
             let rotate_pos = |r: egui::Rect| turn(r, egui::pos2(r.center().x, r.top() - 26.0));
             if let (Some(r), true) = (sel_rect, outlining) {
                 // Outline mode: the frame is only a dashed guide; the corners of the outline are what move.
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Outside);
             }
             let outline_pts: Vec<egui::Pos2> = match (outlining, self.selected_object()) {
                 (true, Some(o)) => o.hit_area.as_ref().map(|a| a.iter().map(|&f| { let p = outline::to_slide(o, f); origin + egui::vec2(p.0, p.1) * scale }).collect()).unwrap_or_default(),
                 _ => vec![],
             };
-            let orange = egui::Color32::from_rgb(226, 91, 28);
+            let purple = ribbon::PURPLE;
             for (i, p) in outline_pts.iter().enumerate() {
                 let chosen = self.outline_sel == Some(i);
                 // Orange squares like the crop handles; the chosen corner is larger and white inside.
                 let hr = egui::Rect::from_center_size(*p, egui::Vec2::splat(HANDLE_PX + if chosen { 4.0 } else { 0.0 }));
-                painter.rect_filled(hr, 1.0, if chosen { egui::Color32::WHITE } else { orange });
-                painter.rect_stroke(hr, 1.0, egui::Stroke::new(if chosen { 3.0 } else { 1.5 }, if chosen { orange } else { egui::Color32::WHITE }), egui::StrokeKind::Inside);
+                painter.rect_filled(hr, 1.0, if chosen { egui::Color32::WHITE } else { purple });
+                painter.rect_stroke(hr, 1.0, egui::Stroke::new(if chosen { 3.0 } else { 1.5 }, if chosen { purple } else { egui::Color32::WHITE }), egui::StrokeKind::Inside);
             }
             if let (Some(r), false) = (sel_rect, outlining) {
-                let handle_color = if cropping { egui::Color32::from_rgb(226, 91, 28) } else { egui::Color32::from_rgb(0, 120, 255) };
+                let handle_color = if cropping { ribbon::PURPLE } else { ribbon::ACCENT };
                 for h in HANDLES {
                     let hr = egui::Rect::from_center_size(handle_pos(r, h), egui::Vec2::splat(HANDLE_PX));
                     painter.rect_filled(hr, 1.0, if cropping { handle_color } else { egui::Color32::WHITE });
@@ -6382,10 +6721,10 @@ impl App {
                 }
                 if sel_all.len() == 1 && !cropping {
                     let (top, knob) = (handle_pos(r, (0, -1)), rotate_pos(r));
-                    painter.line_segment([top, knob], egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)));
-                    painter.circle(knob, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 120, 255)));
+                    painter.line_segment([top, knob], egui::Stroke::new(1.0, ribbon::ACCENT));
+                    painter.circle(knob, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(1.5, ribbon::ACCENT));
                 } else {
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Outside);
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Outside);
                 }
             }
             // The selected object's motion path: a line through draggable points.
@@ -6400,16 +6739,16 @@ impl App {
                 if let Some(o) = self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)) {
                     let c = egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0);
                     let line: Vec<egui::Pos2> = o.motion.as_ref().map(|m| m.sampled(12).into_iter().map(|p| origin + (c + egui::vec2(p.0, p.1)) * scale).collect()).unwrap_or_default();
-                    let orange = egui::Color32::from_rgb(226, 91, 28);
-                    painter.add(egui::Shape::line(line.clone(), egui::Stroke::new(2.0, orange)));
+                    let purple = ribbon::PURPLE;
+                    painter.add(egui::Shape::line(line.clone(), egui::Stroke::new(2.0, purple)));
                     if let [.., a, b] = line.as_slice() {
                         let dir = (*b - *a).normalized();
                         let n = egui::vec2(-dir.y, dir.x);
-                        painter.add(egui::Shape::convex_polygon(vec![*b + dir * 6.0, *b - dir * 8.0 + n * 6.0, *b - dir * 8.0 - n * 6.0], orange, egui::Stroke::NONE));
+                        painter.add(egui::Shape::convex_polygon(vec![*b + dir * 6.0, *b - dir * 8.0 + n * 6.0, *b - dir * 8.0 - n * 6.0], purple, egui::Stroke::NONE));
                     }
                     for (i, p) in motion_pts.iter().enumerate().skip(1) {
-                        painter.circle(*p, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(2.0, orange));
-                        painter.text(*p, egui::Align2::CENTER_CENTER, i.to_string(), egui::FontId::proportional(9.0), orange);
+                        painter.circle(*p, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(2.0, purple));
+                        painter.text(*p, egui::Align2::CENTER_CENTER, i.to_string(), egui::FontId::proportional(9.0), purple);
                     }
                 }
             }
@@ -6434,8 +6773,8 @@ impl App {
             if let (Some(g), Some((_, blk))) = (&table_group, self.cell_block()) {
                 if let Some((x, y, w, h)) = brainbend_doc::tables::range_rect(&slide.layers[sel_all[0].0].objects, g, blk) {
                     let r = to_screen(x, y, w, h);
-                    painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 36));
-                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                    painter.rect_filled(r, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36));
+                    painter.rect_stroke(r, 0.0, egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                 }
             }
             let border_at = |pos: egui::Pos2| table_lines.iter().find(|(_, _, l)| l.expand(5.0).contains(pos) && handle_at(pos).is_none() && !rotate_at(pos)).map(|&(v, i, _)| (v, i));
@@ -6443,7 +6782,7 @@ impl App {
                 if let Some((vertical, i)) = border_at(hp) {
                     ui.ctx().set_cursor_icon(if vertical { egui::CursorIcon::ResizeColumn } else { egui::CursorIcon::ResizeRow });
                     if let Some((_, _, l)) = table_lines.iter().find(|(v, j, _)| *v == vertical && *j == i) {
-                        painter.line_segment([l.min, l.max], egui::Stroke::new(3.0, egui::Color32::from_rgb(0, 120, 255)));
+                        painter.line_segment([l.min, l.max], egui::Stroke::new(3.0, ribbon::ACCENT));
                     }
                 }
             }
@@ -6509,13 +6848,13 @@ impl App {
                 let mut line = screen.clone();
                 if let Some(t) = tail { line.push(t); }
                 if screen.len() >= outline::MIN_POINTS {
-                    painter.add(egui::Shape::convex_polygon(screen.clone(), egui::Color32::from_rgba_unmultiplied(0, 140, 255, 36), egui::Stroke::NONE));
+                    painter.add(egui::Shape::convex_polygon(screen.clone(), egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36), egui::Stroke::NONE));
                 }
-                painter.add(egui::Shape::line(line, egui::Stroke::new(2.0, orange)));
+                painter.add(egui::Shape::line(line, egui::Stroke::new(2.0, purple)));
                 for (i, p) in screen.iter().enumerate() {
-                    painter.circle(*p, if i == 0 { HANDLE_PX / 2.0 + 2.0 } else { HANDLE_PX / 2.0 - 1.0 }, egui::Color32::WHITE, egui::Stroke::new(2.0, orange));
+                    painter.circle(*p, if i == 0 { HANDLE_PX / 2.0 + 2.0 } else { HANDLE_PX / 2.0 - 1.0 }, egui::Color32::WHITE, egui::Stroke::new(2.0, purple));
                 }
-                painter.text(origin + egui::vec2(8.0, 8.0), egui::Align2::LEFT_TOP, "Click each corner. Enter, double-click or the first corner finishes; Backspace undoes a corner; Esc cancels.", egui::FontId::proportional(13.0), orange);
+                painter.text(origin + egui::vec2(8.0, 8.0), egui::Align2::LEFT_TOP, "Click each corner. Enter, double-click or the first corner finishes; Backspace undoes a corner; Esc cancels.", egui::FontId::proportional(13.0), purple);
             }
             if !drawing && (resp.drag_started() || resp.clicked()) {
                 // A drag is only reported after the pointer has moved a few pixels, so grab where it was pressed.
@@ -6816,7 +7155,7 @@ impl App {
                         let cur = to_slide(pos).to_pos2();
                         let band = egui::Rect::from_two_pos(start, cur);
                         painter.rect(egui::Rect::from_min_max(origin + band.min.to_vec2() * scale, origin + band.max.to_vec2() * scale),
-                            0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 255, 30), egui::Stroke::new(1.0, egui::Color32::from_rgb(0, 120, 255)), egui::StrokeKind::Inside);
+                            0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 30), egui::Stroke::new(1.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                         // Select every visible object on the topmost layer that has any inside the band.
                         let mut found: Vec<(usize, usize)> = vec![];
                         for &li in shown.iter().rev() {
@@ -6836,13 +7175,19 @@ impl App {
                 let valid = slide.layers.get(li).and_then(|l| l.objects.get(oi)).is_some();
                 if !valid {
                     self.editing = None;
+                    self.edit_turn = None;
                 } else {
-                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.editing = None; return };
+                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.editing = None; self.edit_turn = None; return };
                     let o = &o_real;
+                    // The edit box cannot turn with the object, so turning it (the handle, the Properties field or the
+                    // text direction buttons) ends the edit. The text is already in the object, so nothing is lost.
+                    let turn_now = (o.rotation.to_bits(), o.text_rotation);
+                    let turned = self.edit_turn.is_some_and(|before| before != turn_now);
+                    self.edit_turn = Some(turn_now);
                     let r = egui::Rect::from_min_size(origin + egui::vec2(o.x, o.y) * scale, egui::vec2(o.w, o.h) * scale);
                     let font = egui::FontId::new((o.style.size * scale).max(8.0), font_family(&o.style.font_family));
                     let mut text = o.text.clone();
-                    let mut done = false;
+                    let mut done = turned;
                     let edit_id = egui::Id::new("inplace-edit");
                     // Show mixed formatting while editing.
                     let fmts = o.char_fmts();
@@ -6863,7 +7208,7 @@ impl App {
                             let col = if linked { f.color.map(color).unwrap_or(link_col) } else { color(f.color.unwrap_or(obj_style.color)) };
                             let bold = f.bold.unwrap_or(obj_style.bold);
                             let ul = f.underline.unwrap_or(linked || obj_style.underline);
-                            let mut fid = egui::FontId::new(((f.size.unwrap_or(obj_style.size)) * scale).max(8.0), font_family(f.font_family.as_deref().unwrap_or(&obj_style.font_family)));
+                            let mut fid = egui::FontId::new(((f.size.unwrap_or(obj_style.size)) * scale).max(8.0), font_store::family_styled(f.font_family.as_deref().unwrap_or(&obj_style.font_family), bold));
                             fid.size = fid.size.max(8.0);
                             let mut tf = egui::text::TextFormat {
                                 font_id: fid,
@@ -6892,6 +7237,18 @@ impl App {
                     let grown: f32 = ctx.data(|d| d.get_temp(grown_id)).unwrap_or(0.0);
                     let over = (grown - r.height()).max(0.0);
                     let lift = match o.style.valign { VAlign::Top => 0.0, VAlign::Middle => over / 2.0, VAlign::Bottom => over };
+                    // A %Name% placeholder counts as one character: Backspace or Delete beside it removes all of it.
+                    let (bs, del) = ctx.input(|i| (i.key_pressed(egui::Key::Backspace), i.key_pressed(egui::Key::Delete)));
+                    if bs || del {
+                        if let Some(mut st) = egui::TextEdit::load_state(ctx, edit_id) {
+                            if let Some(range) = st.cursor.char_range().filter(|r| r.primary.index == r.secondary.index) {
+                                if let Some((a, b)) = brainbend_doc::variables::placeholder_to_delete(&text, range.primary.index.0, del && !bs) {
+                                    st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(a), egui::text::CCursor::new(b))));
+                                    st.store(ctx, edit_id);
+                                }
+                            }
+                        }
+                    }
                     egui::Area::new(egui::Id::new("inplace-text")).fixed_pos(r.min - egui::vec2(0.0, lift)).constrain(false).order(egui::Order::Foreground).show(ctx, |ui| {
                         // The box is the object's own frame: no background of its own, the object's margins and text
                         // alignment, and an outline so it is clear where typing goes.
@@ -6969,6 +7326,20 @@ impl App {
                         else if i.key_pressed(egui::Key::U) { Some(Attr::ToggleUnderline) }
                         else { None }
                     });
+                    // The cursor and selection never end inside a placeholder: it is one character.
+                    let prev_id = egui::Id::new("inplace-prev-caret");
+                    let prev: Option<usize> = ctx.data(|d| d.get_temp(prev_id));
+                    if let Some(mut st) = egui::TextEdit::load_state(ctx, edit_id) {
+                        if let Some(r) = st.cursor.char_range() {
+                            let (p, s) = brainbend_doc::variables::snap_to_placeholders(&text, r.primary.index.0, r.secondary.index.0, prev);
+                            if (p, s) != (r.primary.index.0, r.secondary.index.0) {
+                                st.cursor.set_char_range(Some(egui::text::CCursorRange { primary: egui::text::CCursor::new(p), secondary: egui::text::CCursor::new(s), h_pos: None }));
+                                st.store(ctx, edit_id);
+                                ctx.request_repaint();
+                            }
+                            ctx.data_mut(|d| d.insert_temp(prev_id, p));
+                        }
+                    }
                     let cur = egui::TextEdit::load_state(ctx, edit_id).and_then(|st| st.cursor.char_range());
                     if let Some(range) = cur {
                         let (p, q) = (range.primary.index.0, range.secondary.index.0);
@@ -7000,6 +7371,7 @@ impl App {
                     }
                     if done {
                         self.editing = None;
+                        self.edit_turn = None;
                         // A text box made by double-clicking that was left empty is not wanted.
                         if let Some(id) = self.fresh_text.take() {
                             let empty = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| o.id == id && o.text.is_empty());
@@ -7025,8 +7397,22 @@ impl App {
     }
 }
 
+/// A project name made safe to use as a file or folder name on any system.
+pub(crate) fn file_safe_name(name: &str) -> String {
+    let cleaned: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
+    let cleaned = cleaned.trim().trim_matches('.').trim();
+    if cleaned.is_empty() { "Untitled".into() } else { cleaned.into() }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_names_become_safe_file_names() {
+        assert_eq!(super::file_safe_name("My Course"), "My Course");
+        assert_eq!(super::file_safe_name("Q1/Q2: Safety?"), "Q1-Q2- Safety-");
+        assert_eq!(super::file_safe_name("  ..  "), "Untitled");
+    }
+
     use super::*;
 
     fn harness(app: App) -> egui_kittest::Harness<'static, App> {
@@ -7076,6 +7462,220 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("open-story.png")).unwrap();
+    }
+
+    #[test]
+    fn try_it_preview_and_publish_are_pinned_in_the_ribbon_on_every_tab() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let shot = |h: &mut egui_kittest::Harness<'static, App>, file: &str| {
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join(file)).unwrap(); }
+        };
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(4);
+        for tab in [ribbon::HOME_TAB, 2, 3, 4, 5, ribbon::HELP_TAB] {
+            h.state_mut().ribbon_tab = tab;
+            h.run_steps(3);
+            for label in ["Try It", "Preview", "Publish"] {
+                assert!(h.query_by_label(label).is_some(), "{label} is in the ribbon on tab {tab}");
+            }
+        }
+        h.state_mut().ribbon_tab = ribbon::HOME_TAB;
+        h.run_steps(3);
+        shot(&mut h, "pinned-1-home-dark.png");
+        h.ctx.set_theme(egui::ThemePreference::Light);
+        h.run_steps(3);
+        shot(&mut h, "pinned-2-home-light.png");
+        h.ctx.set_theme(egui::ThemePreference::Dark);
+        // Trying a slide greys the ribbon out, but not the pinned group: Try It must stay clickable to stop.
+        h.state_mut().try_mode = true;
+        h.run_steps(3);
+        assert!(!h.get_by_label("Try It").accesskit_node().is_disabled(), "Try It stays enabled while trying");
+        assert!(!h.get_by_label("Publish").accesskit_node().is_disabled());
+        shot(&mut h, "pinned-3-try-mode.png");
+        h.state_mut().try_mode = false;
+        h.set_size(egui::vec2(820.0, 600.0));
+        h.run_steps(4);
+        assert!(h.query_by_label("Publish").is_some(), "still there in a narrow window");
+        shot(&mut h, "pinned-4-narrow.png");
+    }
+
+    #[test]
+    fn a_web_lesson_keeps_preview_and_publish_in_its_toolbar_and_has_no_try_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Publish").is_some());
+        assert!(h.query_by_label("Preview").is_some());
+        assert!(h.query_by_label("Try It").is_none(), "slides only");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("pinned-5-web-lesson.png")).unwrap(); }
+    }
+
+    #[test]
+    fn the_community_button_uses_the_projects_own_redirect_not_a_discord_invite() {
+        assert!(ribbon::COMMUNITY_URL.starts_with("https://brainbend.org/"), "{}", ribbon::COMMUNITY_URL);
+        assert!(!ribbon::COMMUNITY_URL.contains("discord.gg"), "an invite link built into the app expires with the invite");
+    }
+
+    #[test]
+    fn the_player_dialog_offers_play_pause_a_seekbar_and_replay() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for label in ["Play / Pause", "Seekbar", "Replay"] { assert!(h.query_by_label(label).is_some(), "{label} is listed with the player controls"); }
+        assert!(!h.state().project.as_ref().unwrap().player.controls.play_pause);
+        for label in ["Play / Pause", "Seekbar", "Replay"] { h.get_by_label(label).focus(); h.run_steps(2); h.key_press(egui::Key::Space); h.run_steps(3); }   // below the fold, so by keyboard
+        let c = h.state().project.as_ref().unwrap().player.controls;
+        assert!(c.play_pause && c.seekbar && c.replay, "ticking them turns them on");
+    }
+
+    #[test]
+    fn the_player_dialog_offers_a_banner_photo_and_shows_it_in_its_preview() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Banner photo").is_some(), "the setting is listed beside the logo");
+        assert!(h.query_by_label("+ Banner photo").is_some(), "with nothing chosen it offers to add one");
+        assert!(h.query_by_label("Remove").is_none());
+        // With one chosen it names the file and can change or remove it, and the preview shows a banner strip.
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(16, 3, image::Rgba([3, 83, 158, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let p = h.state_mut().project.as_mut().unwrap();
+        p.assets.insert("ban".into(), Asset { name: "header.png".into(), mime: "image/png".into(), bytes: png.into_inner(), file: None });
+        p.player.banner = Some("ban".into());
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("Choose a sidebar above").is_some(), "a banner with no sidebar says it will not show");
+        h.state_mut().project.as_mut().unwrap().player.sidebar = SidebarSide::Left;
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Choose a sidebar above").is_none(), "with a sidebar the warning goes");
+        assert!(h.query_by_label("header.png").is_some(), "the file's name is shown");
+        assert!(h.query_by_label("+ Banner photo").is_none());
+        assert!(h.query_by_label("Remove").is_some(), "and it can be removed");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("player-banner.png")).unwrap(); }
+        h.get_by_label("Remove").click();
+        h.run_steps(4);
+        assert!(h.state().project.as_ref().unwrap().player.banner.is_none(), "Remove clears it");
+        assert!(h.query_by_label("+ Banner photo").is_some());
+    }
+
+    #[test]
+    fn the_player_preview_shows_the_banner_in_the_sidebar_and_the_logo_by_the_title() {
+        let mut a = App::default();
+        a.new_project();
+        a.player_open = true;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 4, image::Rgba([3, 83, 158, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let asset = |name: &str, bytes: Vec<u8>| Asset { name: name.into(), mime: "image/png".into(), bytes, file: None };
+        let p = a.project.as_mut().unwrap();
+        p.assets.insert("ban".into(), asset("header.png", png.get_ref().clone()));
+        p.assets.insert("lg".into(), asset("logo.png", png.into_inner()));
+        p.player.banner = Some("ban".into());
+        p.player.logo = Some("lg".into());
+        p.player.show_title = true;
+        p.player.tab_notes = true;
+        p.show_menu = true;
+        p.player.sidebar = SidebarSide::Left;
+        let mut h = harness(a);
+        h.run_steps(5);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("player-preview-layout.png")).unwrap(); }
+    }
+
+    #[test]
+    fn help_tab_offers_docs_issues_community_and_update_check() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.ribbon_tab = ribbon::HELP_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for label in ["Docs", "Submit Issue", "BrainBend Community", "Check for Updates"] {
+            assert!(h.query_by_label(label).is_some(), "{label} is on the Help tab");
+        }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("help-tab.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_update_window_walks_from_available_to_restart() {
+        use egui_kittest::kittest::Queryable;
+        let suffix = update::platform_suffix().unwrap();
+        let name = format!("BrainBend-Studio-v9.9.9{suffix}");
+        let json = format!(r###"{{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"## What's new\n- Faster saving\n- Fixes","assets":[{{"name":"{name}","browser_download_url":"https://github.com/brainbend/studio/releases/download/v9.9.9/{name}","size":31457280}},{{"name":"{name}.minisig","browser_download_url":"https://github.com/brainbend/studio/releases/download/v9.9.9/{name}.minisig","size":300}}]}}"###);
+        let release = update::parse_release(&json).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        let shot = |h: &mut egui_kittest::Harness<'static, App>, file: &str| {
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join(file)).unwrap(); }
+        };
+        h.run_steps(3);
+        h.state_mut().updater.state = update::State::Available(release.clone());
+        h.state_mut().updater.dialog_open = true;
+        h.run_steps(4);
+        assert!(h.query_by_label("Update now").is_some(), "a signed release offers Update now");
+        assert!(h.query_by_label("Release page").is_some());
+        shot(&mut h, "update-1-available.png");
+
+        let progress = std::sync::Arc::new(update::Progress::default());
+        progress.total.store(31_457_280, std::sync::atomic::Ordering::Relaxed);
+        progress.done.store(12_000_000, std::sync::atomic::Ordering::Relaxed);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Downloading { release: release.clone(), progress, rx };
+        h.run_steps(3);
+        assert!(h.query_by_label("Update now").is_none(), "no second download while one runs");
+        shot(&mut h, "update-2-downloading.png");
+
+        h.state_mut().updater.state = update::State::Ready { release: release.clone(), staged: std::path::PathBuf::from("/nonexistent") };
+        h.run_steps(3);
+        assert!(h.query_by_label("Restart now").is_some());
+        shot(&mut h, "update-3-ready.png");
+
+        h.state_mut().updater.state = update::State::UpdateFailed { release, error: "no permission to replace the app".into() };
+        h.run_steps(3);
+        assert!(h.query_by_label("Try again").is_some());
+        shot(&mut h, "update-4-failed.png");
+    }
+
+    #[test]
+    fn a_release_without_a_signed_download_only_offers_the_release_page() {
+        use egui_kittest::kittest::Queryable;
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r"}"#).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(2);
+        h.state_mut().updater.state = update::State::Available(release);
+        h.state_mut().updater.dialog_open = true;
+        h.run_steps(4);
+        assert!(h.query_by_label("Update now").is_none());
+        assert!(h.query_by_label("Release page").is_some());
+    }
+
+    #[test]
+    fn update_button_appears_in_the_title_bar_only_when_a_release_is_newer() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Update available").is_none(), "nothing to show before a newer release is found");
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r"}"#).unwrap();
+        h.state_mut().updater.state = update::State::Available(release);
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("update-button.png")).unwrap();
+        }
+        assert!(h.query_by_label_contains("Update available").is_some(), "the red button shows once a newer release is known");
     }
 
     /// Renders several editor states to PNGs when BRAINBEND_SHOT_DIR is set (visual review only).
@@ -7338,10 +7938,10 @@ mod tests {
         h.state_mut().file_view = true;
         h.state_mut().file_page = backstage::FilePage::New;
         shot(&mut h, "6c-file-new.png");
+        h.state_mut().file_page = backstage::FilePage::Open;
+        shot(&mut h, "6d-file-open.png");
         h.state_mut().file_page = backstage::FilePage::Info;
         shot(&mut h, "6a-file-info.png");
-        h.state_mut().file_page = backstage::FilePage::Print;
-        shot(&mut h, "6b-file-print.png");
         h.state_mut().file_view = false;
         h.state_mut().file_page = backstage::FilePage::Info;
         h.state_mut().ribbon_tab = 1;
@@ -7662,6 +8262,19 @@ mod tests {
         h.state_mut().undo();
         h.run_steps(2);
         assert_eq!(order(&h).len(), 3, "reset is one undo step");
+    }
+
+    #[test]
+    fn gui_focus_order_shows_the_heading_level_of_headings() {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        a.insert_text();
+        a.project.as_mut().unwrap().slides[0].layers[0].objects[0].role = TextRole::H2;
+        a.focus_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        { use egui_kittest::kittest::Queryable; assert_eq!(h.get_all_by_label("H2").count(), 1, "the heading shows its level; the ordinary text keeps its icon"); assert!(h.query_by_label("H1").is_none()); }
     }
 
     #[test]
@@ -8280,7 +8893,7 @@ mod tests {
         // Dragging the area's grip moves it; one undo step puts it back.
         let area = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[1].kind { SlideKind::Question(q) => q.area.unwrap(), _ => unreachable!() };
         let before = area(&h);
-        let (from, to) = (egui::pos2(362.0, 306.0), egui::pos2(462.0, 356.0));
+        let (from, to) = (egui::pos2(362.0, 294.0), egui::pos2(462.0, 344.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -8296,7 +8909,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(786.0, 669.0), egui::pos2(736.0, 619.0));
+        let (from, to) = (egui::pos2(786.0, 657.0), egui::pos2(736.0, 607.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -8399,6 +9012,368 @@ mod tests {
         assert!(h.query_by_label("double-clicked").is_some(), "the event drop-down still opens");
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
+    }
+
+    /// Two shapes and a layer on a slide, the side panel left on the Triggers tab on purpose.
+    fn on_the_triggers_tab() -> egui_kittest::Harness<'static, App> {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_rect();
+        a.insert_ellipse();
+        a.add_layer();
+        a.layer = 0;
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.state_mut().right_tab = 1;
+        h.run_steps(4);
+        assert_eq!(h.state().right_tab, 1, "Triggers stays open while nothing is picked");
+        h
+    }
+
+    #[test]
+    fn picking_another_object_shows_its_properties_instead_of_staying_on_triggers() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().selected = Some((0, 1));
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "Properties, so the object's settings are not missed");
+        // Going back to Triggers is a choice, and it sticks until something else is picked.
+        h.state_mut().right_tab = 1;
+        h.run_steps(4);
+        assert_eq!(h.state().right_tab, 1);
+    }
+
+    fn var(id: &str, name: &str, initial: Value) -> Variable { Variable { id: id.into(), name: name.into(), initial, built_in: false } }
+
+    fn sample_variables() -> Vec<Variable> {
+        vec![var("v1", "Score", Value::Num(0.0)), var("v2", "Passed", Value::Bool(false)), var("v3", "Learner Name", Value::Text(String::new())), var("v4", "Attempts", Value::Num(0.0))]
+    }
+
+    #[test]
+    fn variables_are_found_by_name_type_and_whether_a_trigger_uses_them() {
+        let vars = sample_variables();
+        let used: std::collections::HashSet<String> = ["v1".to_string(), "v2".to_string()].into_iter().collect();
+        let names = |q: &str, kind: usize, usage: usize| vars.iter().filter(|v| variable_shown(v, &used, q, kind, usage)).map(|v| v.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names("", 0, 0), ["Score", "Passed", "Learner Name", "Attempts"], "no filter shows everything");
+        assert_eq!(names("sc", 0, 0), ["Score"]);
+        assert_eq!(names("  NAME ", 0, 0), ["Learner Name"], "case and surrounding spaces do not matter");
+        assert_eq!(names("", 2, 0), ["Score", "Attempts"], "numbers");
+        assert_eq!(names("", 1, 0), ["Passed"], "true/false");
+        assert_eq!(names("", 3, 0), ["Learner Name"], "text");
+        assert_eq!(names("", 0, 1), ["Score", "Passed"], "named by a trigger");
+        assert_eq!(names("", 0, 2), ["Learner Name", "Attempts"], "named by no trigger");
+        assert_eq!(names("s", 2, 1), ["Score"], "filters combine");
+        assert!(names("zzz", 0, 0).is_empty());
+    }
+
+    #[test]
+    fn a_trigger_names_a_variable_in_its_conditions_actions_and_events() {
+        let mut p = Project::new("p");
+        p.slides.push(Slide::new("s", "S", 1280.0, 720.0));
+        p.variables = sample_variables();
+        p.slides[0].triggers = vec![
+            Trigger { id: "a".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::SetVariable { variable: "v1".into(), value: Value::Num(1.0) }, conditions: vec![] },
+            Trigger { id: "b".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::NextSlide, conditions: vec![brainbend_doc::Condition { variable: "v2".into(), cmp: brainbend_doc::Cmp::Eq, value: Value::Bool(true), or_with_previous: false }] },
+            Trigger { id: "c".into(), owner: Owner::Slide, event: Event::VariableChanged("v3".into()), action: Action::NextSlide, conditions: vec![] },
+            Trigger { id: "d".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::AdjustVariable { variable: "v4".into(), op: brainbend_doc::AdjustOp::Add, value: Value::Num(1.0) }, conditions: vec![] },
+        ];
+        let mut used: Vec<String> = variables_in_triggers(&p).into_iter().collect();
+        used.sort();
+        assert_eq!(used, ["v1", "v2", "v3", "v4"]);
+        assert!(variables_in_triggers(&Project::new("empty")).is_empty());
+    }
+
+    /// A project with variables Score (number), Passed (true/false) and a text box that shows %Score%.
+    fn app_with_variables() -> App {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "You scored %Score% points".into();
+        a.project.as_mut().unwrap().variables.extend(sample_variables());
+        a
+    }
+
+    #[test]
+    fn renaming_a_variable_updates_the_text_that_shows_it_and_is_one_undo_step() {
+        let mut a = app_with_variables();
+        a.rename_variable("v1", "Points").unwrap();
+        let p = a.project.as_ref().unwrap();
+        assert_eq!(p.variables.iter().find(|v| v.id == "v1").unwrap().name, "Points");
+        assert_eq!(p.slides[0].layers[0].objects[0].text, "You scored %Points% points");
+        assert!(a.var_note.as_ref().is_some_and(|(n, refused)| !refused && n.contains("Renamed Score to Points") && n.contains("1 object")), "{:?}", a.var_note);
+        a.undo();
+        let p = a.project.as_ref().unwrap();
+        assert_eq!(p.variables.iter().find(|v| v.id == "v1").unwrap().name, "Score", "undo brings the name back");
+        assert_eq!(p.slides[0].layers[0].objects[0].text, "You scored %Score% points", "and the text, in the same step");
+    }
+
+    #[test]
+    fn a_name_that_is_taken_or_empty_is_refused_and_leaves_everything_alone() {
+        let mut a = app_with_variables();
+        let undo_before = a.undo.len();
+        assert!(a.rename_variable("v1", "Passed").unwrap_err().contains("already exists"));
+        assert!(a.rename_variable("v1", "  ").is_err());
+        assert_eq!(a.undo.len(), undo_before, "a refused rename leaves no undo step");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].text, "You scored %Score% points");
+    }
+
+    #[test]
+    fn changing_a_variables_type_is_one_undo_step_and_refused_when_a_slider_needs_a_number() {
+        use brainbend_doc::variables::VarType;
+        let mut a = app_with_variables();
+        a.convert_variable("v1", VarType::Text).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Text("0".into()));
+        assert!(a.var_note.as_ref().is_some_and(|(n, _)| n.contains("\"Score\" is now text")), "{:?}", a.var_note);
+        a.undo();
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Num(0.0), "undo brings the number back");
+
+        a.insert(Object::new("sl", "Slider", Kind::Slider(Slider { variable: "v1".into(), ..Slider::new() }), 0.0, 0.0, 200.0, 24.0));
+        let undo_before = a.undo.len();
+        let err = a.convert_variable("v1", VarType::Bool).unwrap_err();
+        assert!(err.contains("Cannot make \"Score\" true/false") && err.contains("1 slider"), "{err}");
+        assert_eq!(a.undo.len(), undo_before, "a refused change leaves no undo step");
+        assert_eq!(a.project.as_ref().unwrap().variables.iter().find(|v| v.id == "v1").unwrap().initial, Value::Num(0.0));
+    }
+
+    const PLACEHOLDER_TEXT: &str = "Score: %Score% now"; // the placeholder is characters 7..14
+
+    /// Editing a text box that shows %Score%, with the cursor placed by the test.
+    fn editing_placeholder_text() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = PLACEHOLDER_TEXT.into();
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = PLACEHOLDER_TEXT.into();
+        h.run_steps(4);
+        h
+    }
+
+    fn put_cursor(h: &mut egui_kittest::Harness<'static, App>, primary: usize, secondary: usize) {
+        let id = egui::Id::new("inplace-edit");
+        let mut st = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+        st.cursor.set_char_range(Some(egui::text::CCursorRange { primary: egui::text::CCursor::new(primary), secondary: egui::text::CCursor::new(secondary), h_pos: None }));
+        st.store(&h.ctx, id);
+        h.run_steps(3);
+    }
+
+    fn cursor(h: &egui_kittest::Harness<'static, App>) -> (usize, usize) {
+        let r = egui::TextEdit::load_state(&h.ctx, egui::Id::new("inplace-edit")).and_then(|s| s.cursor.char_range()).expect("a cursor");
+        (r.primary.index.0, r.secondary.index.0)
+    }
+
+    fn box_text(h: &egui_kittest::Harness<'static, App>) -> String {
+        let (li, oi) = h.state().selected.unwrap();
+        h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text.clone()
+    }
+
+    #[test]
+    fn the_cursor_will_not_stay_inside_a_variable_in_text() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        assert_eq!(cursor(&h), (14, 14), "after it is fine");
+        put_cursor(&mut h, 10, 10);
+        assert_eq!(cursor(&h), (7, 7), "moved left into it, so it goes to the start");
+        put_cursor(&mut h, 8, 8);
+        assert_eq!(cursor(&h), (14, 14), "moved right into it, so it goes to the end");
+    }
+
+    #[test]
+    fn a_selection_takes_in_all_of_a_variable_it_touches() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 9, 12);
+        assert_eq!(cursor(&h), (7, 14), "a selection inside grows to the whole variable");
+        put_cursor(&mut h, 3, 10);
+        assert_eq!(cursor(&h), (3, 14));
+    }
+
+    #[test]
+    fn backspace_and_delete_remove_a_whole_variable() {
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score:  now", "one Backspace after it removes all of it");
+
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 7, 7);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score:  now", "one Delete before it removes all of it");
+
+        // Away from a variable the keys work as usual.
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 14, 14);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score: %Score%now", "Delete after it removes just the space");
+        let mut h = editing_placeholder_text();
+        put_cursor(&mut h, 6, 6);
+        h.key_press(egui::Key::Backspace);
+        h.run_steps(3);
+        assert_eq!(box_text(&h), "Score %Score% now", "Backspace two characters before it removes just the colon");
+    }
+
+    #[test]
+    fn a_new_variable_gets_a_name_without_spaces_and_the_add_box_says_why_not() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.variables_open = true;
+        a.new_var_name = "My Score".into();
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("No spaces").is_some(), "the reason shows under the box");
+        a_add_is_disabled(&h, true);
+        h.state_mut().new_var_name = "MyScore".into();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("No spaces").is_none());
+        a_add_is_disabled(&h, false);
+    }
+
+    fn a_add_is_disabled(h: &egui_kittest::Harness<'static, App>, disabled: bool) {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        assert_eq!(h.get_by_label("Add").accesskit_node().is_disabled(), disabled);
+    }
+
+    #[test]
+    fn a_duplicated_variable_gets_a_name_without_a_space() {
+        let mut a = app_with_variables();
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        // The window's context menu calls the same code; run it the way the menu does.
+        let id = "v1".to_string();
+        let new = h.state_mut().new_id("var");
+        let p = h.state_mut().project.as_mut().unwrap();
+        let v = p.variables.iter().find(|v| v.id == id).cloned().unwrap();
+        let mut name = format!("{}_copy", v.name);
+        while p.variables.iter().any(|x| x.name == name) { name.push_str("_2"); }
+        p.variables.push(Variable { id: new, name: name.clone(), initial: v.initial, built_in: false });
+        assert_eq!(name, "Score_copy");
+        assert!(brainbend_doc::variables::check_name(&name).is_ok());
+    }
+
+    #[test]
+    fn the_rename_box_commits_on_enter_and_cancels_on_escape() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app_with_variables();
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        // Escape puts the old name back.
+        h.state_mut().var_rename = Some(("v1".into(), "Scored".into(), true));
+        h.run_steps(3);
+        assert!(h.query_by_label("Score =").is_none(), "the name is a box while it is renamed");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(h.state().var_rename.is_none());
+        assert!(h.query_by_label("Score =").is_some(), "Escape keeps the old name");
+        // Enter keeps the new one.
+        h.state_mut().var_rename = Some(("v1".into(), "Points".into(), true));
+        h.run_steps(3);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(4);
+        assert!(h.state().var_rename.is_none(), "{:?}", h.state().var_rename);
+        assert!(h.query_by_label("Points =").is_some(), "the new name is listed");
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].text, "You scored %Points% points");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-3-renamed.png")).unwrap(); }
+    }
+
+    #[test]
+    fn a_refused_type_change_reads_clearly_in_the_window() {
+        use brainbend_doc::variables::VarType;
+        let mut a = app_with_variables();
+        a.insert(Object::new("sl", "Slider", Kind::Slider(Slider { variable: "v1".into(), ..Slider::new() }), 0.0, 0.0, 200.0, 24.0));
+        a.variables_open = true;
+        let err = a.convert_variable("v1", VarType::Text).unwrap_err();
+        a.var_note = Some((err, true));
+        let mut h = harness(a);
+        h.run_steps(4);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-4-refused.png")).unwrap(); }
+    }
+
+    #[test]
+    fn the_variables_window_narrows_its_list_as_you_search_and_filter() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().variables.extend(sample_variables());
+        a.variables_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for name in ["Score", "Passed", "Learner Name", "Attempts"] { assert!(h.query_by_label(&format!("{name} =")).is_some(), "{name} is listed"); }
+        assert!(h.query_by_label_contains("Showing").is_none(), "no count while nothing is filtered");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-1-all.png")).unwrap(); }
+
+        h.state_mut().var_query = "a".into();
+        h.run_steps(3);
+        assert!(h.query_by_label("Score =").is_none(), "Score has no 'a'");
+        assert!(h.query_by_label("Attempts =").is_some() && h.query_by_label("Learner Name =").is_some() && h.query_by_label("Passed =").is_some());
+        assert!(h.query_by_label("Showing 3 of 4 variables").is_some());
+
+        h.state_mut().var_kind = 2;
+        h.run_steps(3);
+        assert!(h.query_by_label("Attempts =").is_some() && h.query_by_label("Passed =").is_none(), "number variables with an 'a': Attempts");
+        assert!(h.query_by_label("Showing 1 of 4 variables").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("variables-2-filtered.png")).unwrap(); }
+
+        h.state_mut().var_query = "zzz".into();
+        h.run_steps(3);
+        assert!(h.query_by_label("No variables match.").is_some());
+        h.get_by_label("Clear").click();
+        h.run_steps(3);
+        assert!((h.state().var_query.is_empty(), h.state().var_kind, h.state().var_use) == (true, 0, 0), "Clear resets the search and both filters");
+        assert!(h.query_by_label("Score =").is_some(), "everything is back");
+    }
+
+    #[test]
+    fn switching_slides_shows_the_new_slides_properties() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().add_slide(SlideKind::Normal);
+        h.run_steps(3);
+        assert_eq!(h.state().slide, 1, "the new slide is showing");
+        assert_eq!(h.state().right_tab, 0, "a new slide shows its own Properties");
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 1, "Triggers stays when it is chosen");
+        h.state_mut().slide = 0;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "going back to the first slide too, even with nothing selected on either");
+    }
+
+    #[test]
+    fn picking_a_layer_or_clearing_the_selection_also_shows_properties() {
+        let mut h = on_the_triggers_tab();
+        h.state_mut().selected = None;
+        h.state_mut().layer = 1;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "a layer was picked");
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        h.state_mut().layer = 0;
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0, "back to the base layer");
+    }
+
+    #[test]
+    fn a_group_heading_in_the_triggers_tab_picks_its_owner_without_leaving_the_tab() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = on_the_triggers_tab();
+        let ids: Vec<String> = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect();
+        for id in &ids {
+            h.state_mut().project.as_mut().unwrap().slides[0].triggers.push(Trigger { id: format!("t-{id}"), owner: Owner::Object(id.clone()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        }
+        h.state_mut().trig_all = true;
+        h.run_steps(4);
+        let name1 = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[1].name.clone();
+        h.get_by_label(&format!("{name1}  (1)")).click();
+        h.run_steps(4);
+        assert_eq!(h.state().selected, Some((0, 1)), "the heading picked its object");
+        assert_eq!(h.state().right_tab, 1, "and the panel stayed on Triggers, where the click was made");
     }
 
     #[test]
@@ -8834,34 +9809,134 @@ mod tests {
         assert_eq!(ids, vec!["keep"]);
     }
 
+    fn style_of(hue: &str, look: button_styles::Look, corners: button_styles::Corners) -> button_styles::StyleDef {
+        button_styles::StyleDef::new(button_styles::HUES.iter().find(|h| h.name == hue).unwrap(), look, corners)
+    }
+
     #[test]
     fn a_button_style_sets_every_state_and_keeps_the_text() {
+        use button_styles::{Corners, Look};
         let mut a = app();
         a.insert_button();
         let (li, oi) = a.selected.unwrap();
         { let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi]; o.text = "Start".into(); for s in o.states.iter_mut() { s.text = "Start".into(); } }
-        let orange = button_styles::STYLES.iter().position(|d| d.name == "Orange").unwrap();
-        a.apply_button_style(orange);
+        let def = style_of("Orange", Look::Gradient, Corners::Rounded);
+        a.apply_button_style(&def);
         let o = a.selected_object().unwrap().clone();
-        let def = &button_styles::STYLES[orange];
         assert_eq!(o.fill, Some(def.fill), "the object wears the Normal fill");
-        assert_eq!(o.radius, def.radius);
+        assert_eq!(o.radius, 5.0, "rounded corners are 5 px, as in Storyline");
+        assert!(o.gradient.is_some() && o.shadow.is_some() && o.stroke.is_some(), "a gradient style has a gradient, a drop shadow and an outline");
         assert!(o.states.iter().all(|s| s.text == "Start"), "each state keeps its text");
         let hover = o.states.iter().find(|s| s.name == "Hover").unwrap();
         assert_ne!(hover.fill, o.states[0].fill, "hover differs from rest");
-        assert!(hover.shine.is_some() && o.states[0].shine.is_some(), "a glossy style has shine");
-        let outline = button_styles::STYLES.iter().position(|d| d.name == "Outline").unwrap();
-        a.apply_button_style(outline);
+        assert!(hover.gradient.is_some(), "and keeps the look");
+        assert!(o.states.iter().find(|s| s.name == "Disabled").unwrap().gradient.is_none(), "disabled is a flat grey");
+        // A flat style has an outline but no gradient or shadow, and light colours get dark text.
+        a.apply_button_style(&style_of("Grey", Look::Flat, Corners::Square));
         let o = a.selected_object().unwrap().clone();
-        assert!(o.stroke.is_some() && o.states.iter().all(|s| s.shine.is_none()), "a flat outline style has no shine");
-        assert_eq!(o.style.color, button_styles::STYLES[outline].text);
+        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a colour and an outline");
+        assert_eq!(o.radius, 0.0);
+        assert_eq!(o.style.color, button_styles::HUES[1].text, "dark text on light grey");
+        a.apply_button_style(&style_of("Teal", Look::Gloss, Corners::Pill));
+        assert!(a.selected_object().unwrap().radius >= 100.0, "a pill is as round as it can be");
+        a.undo();
         a.undo();
         a.selected = Some((li, oi));
-        assert_eq!(a.selected_object().unwrap().fill, Some(def.fill), "one undo step goes back to the previous style");
+        assert_eq!(a.selected_object().unwrap().fill, Some(def.fill), "undo steps go back through the styles");
+    }
+
+    #[test]
+    fn the_gallery_has_nine_colours_in_four_looks_and_three_corner_shapes() {
+        use button_styles::{Corners, Look, HUES};
+        assert_eq!(HUES.len(), 9);
+        assert_eq!(Look::GALLERY.len(), 4);
+        assert_eq!(Corners::ALL.len(), 3);
+        // Every look gives the colour it is built on to the resting state, so a swatch's colour is its hue's.
+        for hue in &HUES { for look in Look::GALLERY {
+            let mut o = Object::new("b", "b", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
+            button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, look, Corners::Rounded));
+            assert_eq!(o.states[0].fill, Some(hue.fill), "{} {:?}", hue.name, look);
+        } }
+    }
+
+    #[test]
+    fn autosave_streams_a_project_with_media_and_leaves_it_whole() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!("bb-home-media-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let mut a = app();
+        let media: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+        a.project.as_mut().unwrap().assets.insert("clip".into(), Asset { name: "clip.mp4".into(), mime: "video/mp4".into(), bytes: media.clone(), file: None });
+        a.dirty = true;
+        a.autosave();
+        assert_eq!(a.project.as_ref().unwrap().assets["clip"].bytes, media, "the open project keeps its media");
+        let back = Project::from_bytes(&std::fs::read(recovery_path().unwrap()).unwrap()).unwrap();
+        assert_eq!(back.assets["clip"].bytes, media, "and the recovery copy has it too");
+        assert_eq!(back.assets["clip"].name, "clip.mp4");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn media_sizes_are_said_in_megabytes_and_gigabytes() {
+        assert_eq!(megabytes(79_199_914), "79 MB");
+        assert_eq!(megabytes(7_900_000_000), "7.9 GB");
+        assert_eq!(megabytes(MAX_MEDIA_BYTES), "1.0 GB");
+    }
+
+    #[test]
+    fn the_gallery_uses_storylines_published_values() {
+        use button_styles::{Corners, Look, HUES};
+        let faces = |hue: usize, look: usize| &crate::button_faces::FACES[hue][look];
+        // Blue, flat: #4F81BD with a #385D8A outline, lighter on hover, darker pressed.
+        assert_eq!(faces(2, 0).normal.fill, Rgba(79, 129, 189, 255));
+        assert_eq!(faces(2, 0).normal.stroke, Some(Rgba(56, 93, 138, 255)));
+        assert_eq!(faces(2, 0).hover.fill, Rgba(128, 157, 201, 255));
+        assert_eq!(faces(2, 0).down.fill, Rgba(68, 113, 166, 255));
+        // Blue, gradient: #6EB3D7 at the top to #2F4EA2 at the bottom, with a 40% black outline; pressed it turns upside down.
+        let g = faces(2, 1);
+        assert_eq!(g.normal.angle, 180.0);
+        assert_eq!(g.normal.stops, &[(0.0, Rgba(110, 179, 215, 255)), (1.0, Rgba(47, 78, 162, 255))]);
+        assert_eq!(g.normal.stroke, Some(Rgba(0, 0, 0, 102)));
+        assert_eq!(g.down.stops, &[(0.0, Rgba(59, 96, 171, 255)), (1.0, Rgba(98, 159, 204, 255))]);
+        // Blue, side shine: dark edges and a light middle, with no outline.
+        assert_eq!(faces(2, 2).normal.angle, 90.0);
+        assert_eq!(faces(2, 2).normal.stops.len(), 3);
+        assert!(faces(2, 2).normal.stroke.is_none());
+        // Blue, split gloss: the top half is one flat colour, with a hard edge in the middle.
+        let gloss = faces(2, 3).normal.stops;
+        assert!(gloss.windows(2).any(|w| w[0].0 == w[1].0 && w[0].1 != w[1].1), "a hard edge: two stops at one position");
+        assert_eq!(gloss[0].1, gloss[1].1, "the top half is flat");
+        // Every look of every colour has its three faces, and the shaded looks all have a gradient.
+        for hue in 0..HUES.len() { for look in 0..4 {
+            let f = faces(hue, look);
+            for face in [&f.normal, &f.hover, &f.down] { assert_eq!(face.stops.is_empty(), look == 0, "{} look {}", HUES[hue].name, look); }
+        } }
+        let _ = (Corners::Square, Look::Flat);
+    }
+
+    #[test]
+    fn gui_button_styles_render_like_storylines_gallery() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        use button_styles::{Corners, Look, HUES};
+        let mut a = app();
+        for (r, look) in Look::GALLERY.iter().enumerate() {
+            for (cidx, hue) in HUES.iter().enumerate() {
+                let mut o = Object::new(&format!("b{r}{cidx}"), "Test", Kind::Rect, 60.0 + cidx as f32 * 205.0, 40.0 + r as f32 * 100.0, 156.0, 68.0);
+                o.text = "Test".into();
+                o.style.size = 28.0;
+                button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, *look, Corners::Rounded));
+                a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+            }
+        }
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-gallery-real.png")).unwrap();
     }
 
     #[test]
     fn gui_button_styles_gallery_shows_for_a_button_and_applies() {
+        use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.insert_button();
         let mut h = harness(a);
@@ -8869,15 +9944,18 @@ mod tests {
         assert_eq!(h.state().format_title(), Some("BUTTON"), "a selected button has its own tab");
         h.state_mut().ribbon_tab = ribbon::HOME_TAB;
         h.run_steps(3);
+        h.get_by_label("Styles").click();
+        h.run_steps(4);
+        for label in ["Square", "Rounded", "Pill"] { assert!(h.query_by_label(label).is_some(), "{label} is in the gallery"); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-styles.png")).unwrap();
         }
-        // Click the Teal swatch (second in the first row) on Home: found by its colour, so the ribbon can be rearranged.
-        let teal = button_styles::STYLES.iter().find(|d| d.name == "Teal").unwrap().fill;
+        // Click the first Teal swatch (its flat look): found by its colour, so the popup can be rearranged.
+        let teal = button_styles::HUES.iter().find(|d| d.name == "Teal").unwrap().fill;
         let img = h.render().expect("renderer");
         let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0.0f32);
-        for y in 60..160u32 {
-            for x in 0..1200u32 {
+        for y in 60..400u32 {
+            for x in 0..1400u32 {
                 let p = img.get_pixel(x, y);
                 if (p[0] as i32 - teal.0 as i32).abs() < 3 && (p[1] as i32 - teal.1 as i32).abs() < 3 && (p[2] as i32 - teal.2 as i32).abs() < 3 { sx += x as f32; sy += y as f32; n += 1.0; }
             }
@@ -8890,8 +9968,9 @@ mod tests {
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
         h.run_steps(3);
-        let teal = button_styles::STYLES.iter().find(|d| d.name == "Teal").unwrap().fill;
-        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].fill, Some(teal), "the swatch restyled the button");
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        assert_eq!(o.fill, Some(teal), "the swatch restyled the button");
+        assert!(o.gradient.is_none() && o.stroke.is_some(), "the flat look");
     }
 
     #[test]
@@ -9045,6 +10124,98 @@ mod tests {
     }
 
     #[test]
+    fn effects_follow_the_outline_of_rounded_boxes_ellipses_stars_and_turned_shapes() {
+        let mut a = app();
+        let star: Vec<PathCmd> = {
+            let mut v = vec![];
+            for i in 0..10 {
+                let ang = (i as f32 * 36.0 - 90.0).to_radians();
+                let rad = if i % 2 == 0 { 0.5 } else { 0.2 };
+                let (x, y) = (0.5 + rad * ang.cos(), 0.5 + rad * ang.sin());
+                v.push(if i == 0 { PathCmd::Move(x, y) } else { PathCmd::Line(x, y) });
+            }
+            v.push(PathCmd::Close);
+            v
+        };
+        let mut add = |name: &str, kind: Kind, x: f32, y: f32, f: &dyn Fn(&mut Object)| {
+            let mut o = Object::new(name, name, kind, x, y, 300.0, 140.0);
+            o.fill = Some(Rgba(3, 83, 158, 255));
+            f(&mut o);
+            a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        };
+        add("shadow", Kind::Rect, 60.0, 60.0, &|o| { o.radius = 40.0; o.shadow = Some(Shadow { dx: 0.0, dy: 12.0, blur: 30.0, spread: 0.0, color: Rgba(0, 0, 0, 200) }); });
+        add("glow", Kind::Rect, 470.0, 60.0, &|o| { o.radius = 40.0; o.glow = Some(Glow { radius: 30.0, color: Rgba(255, 190, 40, 255) }); });
+        add("soft", Kind::Rect, 880.0, 60.0, &|o| { o.radius = 40.0; o.soft_edge = 30.0; });
+        add("reflect", Kind::Rect, 60.0, 360.0, &|o| { o.radius = 40.0; o.reflection = Some(Reflection { size: 0.6, opacity: 0.5, gap: 6.0 }); });
+        add("star", Kind::Path(star.clone()), 470.0, 330.0, &|o| { o.h = 220.0; o.w = 220.0; o.reflection = Some(Reflection { size: 0.6, opacity: 0.5, gap: 6.0 }); o.glow = Some(Glow { radius: 24.0, color: Rgba(255, 190, 40, 255) }); });
+        add("star-soft", Kind::Path(star), 780.0, 330.0, &|o| { o.h = 220.0; o.w = 220.0; o.soft_edge = 24.0; });
+        add("oval", Kind::Ellipse, 60.0, 700.0, &|o| { o.soft_edge = 30.0; });
+        add("turned", Kind::Rect, 470.0, 700.0, &|o| { o.radius = 30.0; o.rotation = 12.0; o.shadow = Some(Shadow { dx: 14.0, dy: 14.0, blur: 24.0, spread: 0.0, color: Rgba(0, 0, 0, 200) }); });
+        let mut h = harness(a);
+        h.run_steps(4);
+        let img = h.render().expect("renderer");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { img.save(std::path::PathBuf::from(dir).join("button-effects.png")).unwrap(); }
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects;
+        assert!(o[0].shadow.is_some() && o[1].glow.is_some() && o[2].soft_edge == 30.0 && o[3].reflection.is_some(), "the effects are kept on the objects");
+    }
+
+    #[test]
+    fn the_effects_group_has_a_button_and_a_short_popup_for_each_effect() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let mut o = Object::new("b", "Button", Kind::Rect, 100.0, 100.0, 400.0, 120.0);
+        o.fill = Some(Rgba(3, 83, 158, 255));
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.state_mut().ribbon_tab = ribbon::HOME_TAB;
+        h.run_steps(4);
+        let obj = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        for label in ["Presets", "Shadow", "Glow", "Reflection", "Soft edges", "Corners"] {
+            assert!(h.query_by_label(label).is_some(), "{label} has its own button in the Effects group");
+        }
+        assert!(h.query_by_label("Distance").is_none() && h.query_by_label("Fade").is_none(), "nothing is open yet");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("effects-group.png")).unwrap(); }
+        // Presets.
+        h.get_by_label("Presets").click();
+        h.run_steps(4);
+        h.get_by_label("Soft shadow").click();
+        h.run_steps(4);
+        assert!(obj(&h).shadow.is_some() && obj(&h).glow.is_none(), "the preset turns on a shadow");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        // Shadow: the switch, then its controls.
+        h.get_by_label("Shadow").click();
+        h.run_steps(4);
+        for label in ["Use shadow", "Distance", "Direction", "Blur", "Spread"] { assert!(h.query_by_label(label).is_some(), "{label} is in the shadow popup"); }
+        assert!(h.query_by_label("Fade").is_none() && h.query_by_label("Radius").is_none(), "only this effect's controls");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("effects-shadow-popup.png")).unwrap(); }
+        h.get_by_label("Use shadow").click();
+        h.run_steps(4);
+        assert!(obj(&h).shadow.is_none(), "the switch turns the shadow off again");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        // Glow, reflection and soft edges each switch on from their own popup.
+        for (button, switch) in [("Glow", "Use glow"), ("Reflection", "Use reflection"), ("Soft edges", "Use soft edges")] {
+            h.get_by_label(button).click();
+            h.run_steps(4);
+            h.get_by_label(switch).click();
+            h.run_steps(4);
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        let o = obj(&h);
+        assert!(o.glow.is_some() && o.reflection.is_some() && o.soft_edge > 0.0, "{:?}", (o.glow, o.reflection, o.soft_edge));
+        h.get_by_label("Presets").click();
+        h.run_steps(4);
+        h.get_by_label("None").click();
+        h.run_steps(4);
+        let o = obj(&h);
+        assert!(o.shadow.is_none() && o.glow.is_none() && o.reflection.is_none() && o.soft_edge == 0.0, "None clears every effect");
+        assert_eq!(o.fill, Some(Rgba(3, 83, 158, 255)), "and leaves the look alone");
+    }
+
+    #[test]
     fn gui_picture_format_tab_crops_and_outlines() {
         let mut a = app();
         let mut png = std::io::Cursor::new(Vec::new());
@@ -9151,6 +10322,199 @@ mod tests {
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text.contains('!'), "typing reaches the object while it is edited in place");
     }
 
+    /// Starts editing a text box in place, with some text typed into it.
+    fn editing_text_box() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = "Hello there".into();
+        h.run_steps(4);
+        assert!(h.state().editing.is_some(), "the box is being edited");
+        h
+    }
+
+    #[test]
+    fn pressing_a_button_in_try_it_says_when_it_would_jump_to_another_slide() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.selected.unwrap();
+        let (id, name) = ("Quiz time".to_string(), "Quiz time");
+        let target = {
+            let p = a.project.as_mut().unwrap();
+            let mut s2 = Slide::new("slide-2", name, 1280.0, 720.0);
+            s2.name = id;
+            let sid = s2.id.clone();
+            p.slides.push(s2);
+            sid
+        };
+        let oid = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.project.as_mut().unwrap().slides[0].triggers.push(Trigger { id: "t1".into(), owner: Owner::Object(oid), event: Event::Click, action: Action::JumpToSlide(target), conditions: vec![] });
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        a.try_mode = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().try_note.is_none(), "nothing pressed yet");
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        let note = h.state().try_note.clone().expect("the press says what Try It did not do");
+        assert!(note.contains("jumps to Quiz time") && note.contains("Preview"), "{note}");
+        assert_eq!(h.state().slide, 0, "Try It stays on the slide: the jump is explained, not followed");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-jump-note.png")).unwrap(); }
+        use egui_kittest::kittest::Queryable;
+        // It is a dialog with an OK button; OK dismisses it and leaves Try It on.
+        h.run_steps(3);
+        h.get_by_label("Not run in Try It");
+        h.get_by_label("OK").click();
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none() && h.state().try_mode, "OK closes the dialog and Try It stays on");
+        assert!(h.query_by_label("Not run in Try It").is_none());
+        // Pressing again brings it back, and Esc closes it before it stops Try It.
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        assert!(h.state().try_note.is_some());
+        h.key_press(egui::Key::Escape);
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none() && h.state().try_mode, "the first Esc closes the dialog");
+        // Stopping Try It also clears a note.
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        h.state_mut().try_mode = false;
+        h.run_steps(3);
+        assert!(h.state().try_note.is_none(), "the note goes when Try It stops");
+    }
+
+    /// A button on the base layer, a layer over it that is showing, and Try It on with that layer already shown.
+    fn try_it_over_a_layer(modal: bool) -> (egui_kittest::Harness<'static, App>, Object) {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.selected.unwrap();
+        a.add_layer();
+        let layer_id = {
+            let p = a.project.as_mut().unwrap();
+            let l = p.slides[0].layers.last_mut().unwrap();
+            l.name = "Pop-up".into();
+            l.modal = modal;
+            l.id.clone()
+        };
+        a.layer = 0;
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        a.try_mode = true;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().try_slide = Some(0);
+        h.state_mut().try_layers = vec![layer_id];
+        h.run_steps(3);
+        (h, o)
+    }
+
+    #[test]
+    fn pressing_something_a_blocking_layer_covers_says_so() {
+        let (mut h, o) = try_it_over_a_layer(true);
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        let note = h.state().try_note.clone().expect("a dead-looking press explains itself");
+        assert!(note.contains("Pop-up") && note.contains("Block clicks on the layers beneath"), "{note}");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-blocked-note.png")).unwrap(); }
+    }
+
+    #[test]
+    fn a_layer_that_lets_clicks_through_gives_no_blocked_note() {
+        let (mut h, o) = try_it_over_a_layer(false);
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
+        assert!(h.state().try_note.is_none(), "{:?}", h.state().try_note);
+    }
+
+    #[test]
+    fn dragging_the_rotate_handle_while_editing_text_ends_the_edit_and_turns_the_box() {
+        let mut h = editing_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
+        let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
+        drag(&mut h, knob, centre + egui::vec2(150.0, 0.0));
+        let after = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!(after.rotation.abs() > 1.0, "the handle still turns the box: {}", after.rotation);
+        assert!(h.state().editing.is_none(), "an edit box that cannot turn is not left behind a turned frame");
+        assert_eq!(after.text, "Hello there", "the typed text is kept");
+    }
+
+    #[test]
+    fn turning_a_text_box_from_properties_or_the_ribbon_also_ends_the_edit() {
+        for change in [|o: &mut Object| o.rotation = 40.0, |o: &mut Object| o.text_rotation = 270] {
+            let mut h = editing_text_box();
+            let (li, oi) = h.state().selected.unwrap();
+            change(&mut h.state_mut().project.as_mut().unwrap().slides[0].layers[li].objects[oi]);
+            h.run_steps(3);
+            assert!(h.state().editing.is_none(), "turning the object ends the edit");
+            assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text, "Hello there");
+        }
+    }
+
+    fn editing_a_turned_text_box() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        {
+            let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
+            o.text = "Hello there".into();
+            o.rotation = 30.0;
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.state_mut().editing_old = "Hello there".into();
+        h.run_steps(5);
+        h
+    }
+
+    #[test]
+    fn a_turned_box_is_edited_upright_and_keeps_its_rotation() {
+        let mut h = editing_a_turned_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        assert!(h.state().editing.is_some(), "a rotation that was already there does not end the edit");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("turned-box-editing.png")).unwrap(); }
+        h.event(egui::Event::Text("!".into()));
+        h.run_steps(3);
+        // Finish with Escape, as a person would.
+        h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: Some(egui::Key::Escape), pressed: true, repeat: false, modifiers: Default::default() });
+        h.run_steps(3);
+        assert!(h.state().editing.is_none());
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!(o.text.contains('!'), "the typing reached the box");
+        assert_eq!(o.rotation, 30.0, "only what is drawn was straightened, not the box itself");
+    }
+
+    #[test]
+    fn while_a_turned_box_is_edited_its_handles_are_drawn_upright_with_the_edit_box() {
+        let mut h = editing_a_turned_text_box();
+        let (li, oi) = h.state().selected.unwrap();
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        // Where the rotate handle is when the frame is upright: straight above the middle of the top edge.
+        let upright_knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
+        let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
+        drag(&mut h, upright_knob, centre + egui::vec2(150.0, 0.0));
+        let after = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert!((after.rotation - 30.0).abs() > 5.0, "the handle was found where an upright frame has it: {}", after.rotation);
+    }
+
+    #[test]
+    fn editing_a_text_box_that_is_already_turned_is_not_cut_short() {
+        let mut a = app();
+        a.insert_text();
+        let (li, oi) = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].rotation = 30.0;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().editing = Some((li, oi));
+        h.run_steps(5);
+        assert!(h.state().editing.is_some(), "only a change of rotation ends the edit, not a rotation that was already there");
+    }
+
     #[test]
     fn inserted_button_has_states_and_undo_restores() {
         let mut a = app();
@@ -9197,6 +10561,7 @@ mod tests {
 
     #[test]
     fn autosave_writes_a_recoverable_copy_and_saving_clears_it() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let home = std::env::temp_dir().join(format!("brainbend-home-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var("HOME", &home);
@@ -9353,8 +10718,15 @@ mod tests {
         // Fonts: another pair makes it a custom theme.
         h.get_by_label_contains("Fonts").click();
         h.run_steps(3);
-        h.get_by_label("Montserrat / Montserrat").click();
-        h.run_steps(3);
+        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the menu has a font picker for each");
+        // (Choosing from the drop-downs sets these same two fields; see the font picker tests.)
+        {
+            let p = h.state_mut().project.as_mut().unwrap();
+            let mut next = p.theme.clone();
+            (next.heading_font, next.body_font) = ("Montserrat".to_string(), "Montserrat".to_string());
+            p.set_theme(next.named());
+        }
+        h.run_steps(2);
         let t = theme(&h);
         assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), ("Montserrat", "Montserrat"));
         assert_ne!((t.heading_font.clone(), t.body_font.clone()), start_fonts);
@@ -9378,11 +10750,8 @@ mod tests {
         assert!(h.state().theme_colors_open);
         h.state_mut().theme_colors_open = false;
         h.run_steps(2);
-        // One undo each.
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
-        h.state_mut().undo();
-        assert_eq!(theme(&h), start);
     }
 
     #[test]
@@ -9456,6 +10825,264 @@ mod tests {
         }
     }
 
+    /// Tests that point HOME at a folder of their own take this first: HOME is shared by the whole test process, so two of
+    /// them at once would write each other's files.
+    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A saved .brainbend file in a temp folder of its own, for the Recent list to point at.
+    fn saved_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bb-recent-gui-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut p = app().project.unwrap();
+        p.name = name.into();
+        let mut cur = std::io::Cursor::new(Vec::new());
+        p.write_package(&mut cur).unwrap();
+        let path = dir.join(format!("{name}.brainbend"));
+        std::fs::write(&path, cur.into_inner()).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_publish_button_opens_a_dialog_listing_every_destination() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = harness(app());
+        h.run_steps(3);
+        h.state_mut().file_view = false;
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+        // The ribbon's Publish button is the only thing labelled Publish until the dialog is up.
+        h.get_by_label("Publish").click();
+        h.run_steps(4);
+        assert!(h.state().publish_open, "Publish opens the dialog instead of a menu");
+        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video (coming soon)", "Web", "PDF", "Word (coming soon)", "PowerPoint"] {
+            assert!(h.get_all_by_label(name).count() >= 1, "{name} is listed");
+        }
+        assert!(h.state().publish_page == publish_dialog::PublishPage::Web, "it opens on Web, the first one that works");
+        assert!(h.query_by_label("Cancel").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("publish-dialog.png")).unwrap(); }
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+    }
+
+    #[test]
+    fn a_destination_that_is_not_ready_cannot_be_published_to_and_other_lms_picks_the_scorm_version() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let disabled_publish = |h: &egui_kittest::Harness<'_, App>| h.get_all_by_label("Publish").any(|n| n.accesskit_node().is_disabled());
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(!disabled_publish(&h), "Web can be published");
+        h.get_by_label("Video (coming soon)").click();
+        h.run_steps(3);
+        assert!(h.state().publish_page == publish_dialog::PublishPage::Video, "clicking a destination shows it");
+        assert!(h.query_by_label("Coming soon").is_some(), "the page says so");
+        assert!(disabled_publish(&h), "Publish is off for a destination that does not exist yet");
+        h.get_by_label("Other LMS").click();
+        h.run_steps(3);
+        assert!(!disabled_publish(&h));
+        assert!(h.state().publish_lms == brainbend_publish_html::Lms::Scorm12);
+        h.get_by_label("SCORM 2004 4th Edition").click();
+        h.run_steps(3);
+        assert!(h.state().publish_lms == brainbend_publish_html::Lms::Scorm2004, "the choice is kept");
+    }
+
+    #[test]
+    fn the_pdf_page_offers_orientation_slides_per_page_a_range_and_what_to_include() {
+        use egui_kittest::kittest::Queryable;
+        use brainbend_publish_html::HandoutOrientation;
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        a.publish_page = publish_dialog::PublishPage::Pdf;
+        let mut h = harness(a);
+        h.run_steps(8);
+        assert!(h.query_by_label("Pass mark").is_some(), "the properties list shows under the options");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("publish-pdf.png")).unwrap(); }
+        for label in ["Landscape", "Portrait", "1 slide", "2 slides", "3 slides", "All slides (1)", "The current scene (1)", "The selected slides (1)", "Correct answers", "Space for notes", "Slide notes", "Alt text"] {
+            assert!(h.query_by_label(label).is_some(), "{label} is offered");
+        }
+        let o = h.state().handout;
+        assert!(o.orientation == HandoutOrientation::Landscape && o.per_page == 1 && o.correct_answers && !o.note_lines && !o.slide_notes && !o.alt_text, "it starts as the plain handout the File menu always made");
+        // One click at a time: clicks queued together land on whichever widget the pointer ended on.
+        for label in ["Portrait", "3 slides", "Space for notes", "Alt text", "Correct answers", "The selected slides (1)"] {
+            h.get_by_label(label).click();
+            h.run_steps(3);
+        }
+        let o = h.state().handout;
+        assert!(o.orientation == HandoutOrientation::Portrait && o.per_page == 3 && o.note_lines && o.alt_text && !o.correct_answers, "{o:?}");
+        assert!(h.state().handout_range == publish_dialog::HandoutRange::Selected);
+        assert_eq!(h.state().handout_slides(), vec![0], "only the slide that is selected");
+    }
+
+    #[test]
+    fn a_web_lesson_does_not_offer_powerpoint_and_the_unfinished_destinations_wait_for_later() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.file_view = false;
+        a.publish_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("PowerPoint").is_none());
+        assert!(h.query_by_label("PDF").is_some());
+        let waiting: Vec<_> = publish_dialog::PublishPage::ALL.iter().filter(|p| !p.available()).map(|p| p.label()).collect();
+        assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS", "Video", "Word"]);
+    }
+
+    /// Renders the New page at the smallest allowed window, where the logo must not touch the text.
+    #[test]
+    fn the_file_page_fits_the_smallest_window() {
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(MIN_WINDOW[0], MIN_WINDOW[1]))
+            .build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+        install_fonts(&h.ctx);
+        install_theme(&h.ctx);
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("file-new-min-window.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn fonts_a_project_uses_reach_egui_and_a_static_font_gets_its_own_bold_face() {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        {
+            let p = a.project.as_mut().unwrap();
+            let o = p.slides[0].layers[0].objects.last_mut().unwrap();
+            o.style.font_family = "Lato".into();
+        }
+        let mut h = harness(a);
+        h.run_steps(6);
+        assert_eq!(font_store::family("Lato"), egui::FontFamily::Name("Lato".into()), "a bundled font the project uses is given to egui");
+        assert_eq!(font_store::family_styled("Lato", true), egui::FontFamily::Name("Lato|b".into()), "a font without a variable weight uses its bold file");
+        font_store::want("Inter");
+        h.run_steps(3);
+        assert_eq!(font_store::family_styled("Inter", true), egui::FontFamily::Name("Inter".into()), "a variable font takes its weight from the font itself");
+        assert_eq!(font_store::family("No Such Font"), egui::FontFamily::Name("Open Sans".into()), "an unknown font falls back to Open Sans");
+    }
+
+    #[test]
+    fn the_font_menu_lists_the_bundled_fonts_in_sections_and_offers_google_fonts() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        let mut h = harness(a);
+        h.run_steps(4);
+        use egui_kittest::kittest::NodeT;
+        let combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).collect();
+        assert_eq!(combos[0].accesskit_node().value().as_deref(), Some("Open Sans"), "the first drop-down on the Home tab is the font");
+        combos.into_iter().next().unwrap().click();
+        h.run_steps(4);
+        for expected in ["BrainBend fonts", "Inter", "Lora", "More fonts from Google Fonts…"] {
+            assert!(h.query_by_label(expected).is_some(), "{expected} is in the menu");
+        }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("font-menu.png")).unwrap();
+        }
+        h.get_by_label("Lora").click();
+        h.run_steps(4);
+        let o = h.state().selected_object().unwrap();
+        assert_eq!(o.style.font_family, "Lora");
+    }
+
+    #[test]
+    fn the_google_fonts_window_lists_fonts_searches_and_filters_by_style() {
+        use egui_kittest::kittest::Queryable;
+        use brainbend_fonts::Category::*;
+        let mut a = App::default();
+        a.new_project();
+        a.font_store = font_store::FontStore::open_with(vec![("Pacifico", Handwriting), ("Anton", Display), ("Lora", Serif), ("Zilla Slab", Serif), ("Inconsolata", Mono)]);
+        let mut h = harness(a);
+        h.run_steps(4);
+        for f in ["Pacifico", "Anton", "Zilla Slab", "Inconsolata"] { assert!(h.query_by_label(f).is_some(), "{f} is listed"); }
+        assert!(h.query_by_label("Added").is_some(), "Lora comes with the app, so it shows as added");
+        assert!(h.query_all_by_label("Add").count() >= 4, "the others can be added");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("google-fonts-window.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn about_is_its_own_page_at_the_bottom_of_the_file_menu() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.state_mut().file_view = true;
+        h.state_mut().file_page = backstage::FilePage::Info;
+        h.run_steps(3);
+        assert!(h.query_by_label("Check for updates").is_none(), "Project Info no longer carries the About section");
+        assert!(h.query_by_label("Project name").is_some());
+        h.get_by_label("About").click();
+        h.run_steps(3);
+        assert!(h.state().file_page == backstage::FilePage::About);
+        assert!(h.query_by_label("Check for updates").is_some());
+        assert!(h.query_by_label_contains("Version ").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("file-about.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_open_page_lists_recent_projects_and_clicking_one_opens_it() {
+        use egui_kittest::kittest::Queryable;
+        let path = saved_project("Safety Course");
+        let mut a = App::default();
+        a.recent = vec![recent::RecentProject { path: path.clone(), opened: recent::now() }];
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label("Open").click();
+        h.run_steps(3);
+        assert!(h.state().file_page == backstage::FilePage::Open);
+        assert!(h.query_by_label("Recent").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("open-page.png")).unwrap();
+        }
+        assert!(h.query_by_label_contains("Safety Course, ").is_some(), "the project is listed by name");
+        assert!(h.query_by_label("Browse").is_some() && h.query_by_label("Import").is_some(), "Browse and Import are tiles");
+        h.get_by_label_contains("Safety Course, ").click();
+        h.run_steps(4);
+        assert_eq!(h.state().project.as_ref().map(|p| p.name.as_str()), Some("Safety Course"), "clicking the entry opens the project");
+        assert_eq!(h.state().path.as_ref(), Some(&path));
+        assert!(!h.state().file_view, "the File view closes once it is open");
+        assert_eq!(h.state().recent[0].path, path, "and it stays at the top of the list");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_recent_project_that_has_gone_is_marked_and_can_be_removed() {
+        use egui_kittest::kittest::Queryable;
+        let gone = std::env::temp_dir().join("bb-recent-gui-missing").join("Gone.brainbend");
+        let mut a = App::default();
+        a.recent = vec![recent::RecentProject { path: gone.clone(), opened: recent::now() }];
+        a.file_page = backstage::FilePage::Open;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Not found").is_some());
+        h.get_by_label_contains("Remove Gone from the list").click();
+        h.run_steps(3);
+        assert!(h.state().recent.is_empty(), "removed from the list");
+        assert!(h.query_by_label("Projects you open or save will be listed here.").is_some());
+    }
+
+    #[test]
+    fn saving_and_opening_projects_feeds_the_recent_list_but_imports_and_recovery_do_not() {
+        let mut a = App::default();
+        a.remember(std::path::Path::new("/tmp/a.brainbend"));
+        a.remember(std::path::Path::new("/tmp/b.pptx"));
+        a.remember(std::path::Path::new("/tmp/c.story"));
+        assert_eq!(a.recent.len(), 1, "only a saved .brainbend is listed");
+        if let Some(r) = recovery_path() { a.remember(&r); }
+        assert_eq!(a.recent.len(), 1, "the recovery copy is not a project of the author's");
+        assert!(a.recent_file.is_none(), "tests never write the real list");
+    }
+
     #[test]
     fn app_starts_on_the_new_page_and_creating_a_media_lesson_opens_the_editor() {
         use egui_kittest::kittest::Queryable;
@@ -9463,7 +11090,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().file_view && h.state().project.is_none());
         assert!(h.state().file_page == backstage::FilePage::New);
-        assert!(h.query_by_label("Project Info").is_none(), "no sidebar on the start page");
+        assert!(h.query_by_label("Open").is_some() && h.query_by_label("Project Info").is_some(), "the start page has the sidebar, with Open on it");
         h.get_by_label("Media Lesson").click();
         h.run_steps(4);
         let st = h.state();
@@ -9478,13 +11105,31 @@ mod tests {
         a.file_view = true;
         let mut h = harness(a);
         h.run_steps(3);
-        // Save As / Save need a dialog or path, so just exercise navigation: Print page, then Home closes.
-        h.get_by_label("Print").click();
+        // Save As / Save need a dialog or path, so just exercise navigation: Open page, then Back to Project closes.
+        h.get_by_label("Open").click();
         h.run_steps(3);
-        assert!(h.state().file_page == backstage::FilePage::Print);
+        assert!(h.state().file_page == backstage::FilePage::Open);
+        assert!(h.query_by_label("Print").is_none(), "Print is now a Publish option");
         h.get_by_label("Back to Project").click();
         h.run_steps(3);
         assert!(!h.state().file_view);
+    }
+
+    #[test]
+    fn file_publish_returns_to_the_project_with_the_publish_dialog_open() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = true;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(!h.state().publish_open);
+        h.get_by_label("Publish").click();
+        h.run_steps(4);
+        assert!(!h.state().file_view, "the File view closes");
+        assert!(h.state().publish_open, "and the Publish dialog is open over the project");
+        h.get_by_label("Cancel").click();
+        h.run_steps(3);
+        assert!(!h.state().publish_open && !h.state().file_view);
     }
 
     #[test]
@@ -9729,7 +11374,7 @@ mod tests {
             h.run_steps(2);
         };
         // Rows run front to back: the first listed is the last object.
-        let (x, y0, step) = (300.0, 853.0, 28.0);
+        let (x, y0, step) = (300.0, 847.0, 28.0);
         click(&mut h, egui::pos2(x, y0));
         assert_eq!(h.state().selected, Some((0, 2)), "clicking a name in the timeline selects that object");
         click(&mut h, egui::pos2(x, y0 + step));
@@ -9802,7 +11447,7 @@ mod tests {
         }
         assert!(h.state().tl_open.is_empty());
         // Click the fold arrow at the left of the first row.
-        let at = egui::pos2(264.0, 909.0);
+        let at = egui::pos2(264.0, 903.0);
         h.event(egui::Event::PointerMoved(at));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -9815,7 +11460,7 @@ mod tests {
         // Dragging the group's bar moves every member's start together.
         let timings = |h: &egui_kittest::Harness<'static, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.timing).collect::<Vec<_>>();
         assert!(timings(&h).iter().all(|t| t.is_none()));
-        let (from, to) = (egui::pos2(700.0, 909.0), egui::pos2(800.0, 909.0));
+        let (from, to) = (egui::pos2(700.0, 903.0), egui::pos2(800.0, 903.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -10006,7 +11651,7 @@ mod tests {
         }
         let point = |h: &egui_kittest::Harness<'_, App>| h.state().selected_object().unwrap().motion.as_ref().unwrap().points[1];
         let before = point(&h);
-        let (from, to) = (egui::pos2(720.0, 364.0), egui::pos2(760.0, 404.0)); // path point 1 in the 9n screenshot
+        let (from, to) = (egui::pos2(720.0, 352.0), egui::pos2(760.0, 392.0)); // path point 1 in the 9n screenshot
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -10027,9 +11672,9 @@ mod tests {
         }
     }
 
-    /// The centres of the orange crop handles in a rendered frame, as screen points.
-    fn orange_handles(img: &image::RgbaImage) -> Vec<egui::Pos2> {
-        let near = |p: &image::Rgba<u8>| (p[0] as i32 - 226).abs() < 12 && (p[1] as i32 - 91).abs() < 12 && (p[2] as i32 - 28).abs() < 12;
+    /// The centres of the purple crop handles in a rendered frame, as screen points.
+    fn purple_handles(img: &image::RgbaImage) -> Vec<egui::Pos2> {
+        let near = |p: &image::Rgba<u8>| (p[0] as i32 - 110).abs() < 12 && (p[1] as i32 - 70).abs() < 12 && (p[2] as i32 - 200).abs() < 12;
         let mut seen = vec![false; (img.width() * img.height()) as usize];
         let mut out = vec![];
         for y in 0..img.height() {
@@ -10049,7 +11694,7 @@ mod tests {
                     }
                 }
                 let c = egui::pos2(sum.0 / n, sum.1 / n);
-                // Only the canvas (not the orange Publish button or the ribbon icons), one point per handle.
+                // Only the canvas (not the purple Publish button or the ribbon icons), one point per handle.
                 if n >= 6.0 && (240.0..1170.0).contains(&c.x) && (180.0..720.0).contains(&c.y) && !out.iter().any(|o: &egui::Pos2| o.distance(c) < 14.0) { out.push(c); }
             }
         }
@@ -10089,7 +11734,7 @@ mod tests {
 
         // The handle on the left edge, found by its colour in the rendered frame.
         let img = h.render().expect("renderer");
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "eight crop handles: {handles:?}");
         let mut by_x = handles.clone();
         by_x.sort_by(|a, b| a.x.total_cmp(&b.x));
@@ -10216,7 +11861,7 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         let img = h.render().expect("renderer");
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "{handles:?}");
         // Drag the bottom-right corner: the frame stays square.
         let br = *handles.iter().max_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y))).unwrap();
@@ -10283,7 +11928,7 @@ mod tests {
         h.run_steps(3);
         let img = h.render().expect("renderer");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { img.save(std::path::PathBuf::from(dir).join("9t-outline-mode.png")).unwrap(); }
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 4, "a handle on each corner: {handles:?}");
         // Drag the bottom-right corner up and in.
         let br = *handles.iter().max_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y))).unwrap();

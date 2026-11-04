@@ -177,7 +177,10 @@ fn object_html(o: &Object, p: &Project) -> String {
                 }
                 style.push_str("box-sizing:border-box;");
             } else if let Some(s) = o.stroke { let _ = write!(style, "border:{}px {} {};box-sizing:border-box;", s.width, o.dash.css(), css(s.color)); }
-            if let Some(sh) = o.shadow { let _ = write!(style, "box-shadow:{}px {}px {}px {}px {};", sh.dx, sh.dy, sh.blur, sh.spread, css(sh.color)); }
+            let mut shadows: Vec<String> = Vec::new();
+            if let Some(sh) = o.shadow { shadows.push(format!("{}px {}px {}px {}px {}", sh.dx, sh.dy, sh.blur, sh.spread, css(sh.color))); }
+            if let Some(g) = o.glow { shadows.push(format!("0 0 {}px {}px {}", g.radius, (g.radius / 4.0).round(), css(g.color))); }
+            if !shadows.is_empty() { let _ = write!(style, "box-shadow:{};", shadows.join(",")); }
         }
     }
     if matches!(o.kind, Kind::Image) {
@@ -230,36 +233,47 @@ fn object_html(o: &Object, p: &Project) -> String {
     format!("<div class=\"obj\" style=\"{style}\">{inner}</div>")
 }
 
-fn question_html(q: &Question, project: &Project) -> String {
+/// The question as a handout shows it. With `answers` the correct answers are shown (ticked, outlined, listed); without,
+/// it is a blank worksheet, and anything that would give an answer away by its order is put in alphabetical order.
+fn question_html(q: &Question, project: &Project, answers: bool) -> String {
+    let sorted = |items: Vec<String>| { let mut v = items; v.sort_by_key(|x| x.to_lowercase()); v };
     let mut s = format!("<div class=\"qa\"><h2>{}</h2>", esc(&q.prompt));
     match &q.style {
         QuestionStyle::Choice => {
             s.push_str("<ul>");
             for c in &q.choices {
-                let _ = write!(s, "<li>{} {}</li>", if c.correct { "&#9745;" } else { "&#9744;" }, esc(&c.text));
+                let _ = write!(s, "<li>{} {}</li>", if answers && c.correct { "&#9745;" } else { "&#9744;" }, esc(&c.text));
             }
-            s.push_str("</ul><p class=\"note\">&#9745; marks a correct answer.</p>");
+            s.push_str("</ul>");
+            if answers { s.push_str("<p class=\"note\">&#9745; marks a correct answer.</p>"); }
         }
         QuestionStyle::TextEntry { accepted, .. } => {
-            let _ = write!(s, "<p>Accepted answers: {}</p>", accepted.iter().map(|a| esc(a)).collect::<Vec<_>>().join(", "));
+            if answers { let _ = write!(s, "<p>Accepted answers: {}</p>", accepted.iter().map(|a| esc(a)).collect::<Vec<_>>().join(", ")); }
+            else { s.push_str("<p>Answer: ______________________</p>"); }
         }
         QuestionStyle::Matching { pairs } => {
             s.push_str("<table>");
-            for (a, b) in pairs { let _ = write!(s, "<tr><td>{}</td><td>&rarr;</td><td>{}</td></tr>", esc(a), esc(b)); }
+            for (a, b) in pairs { let _ = write!(s, "<tr><td>{}</td><td>&rarr;</td><td>{}</td></tr>", esc(a), if answers { esc(b) } else { "______________".to_string() }); }
             s.push_str("</table>");
+            if !answers { let _ = write!(s, "<p class=\"note\">Match each one with: {}</p>", sorted(pairs.iter().map(|(_, b)| esc(b)).collect()).join(", ")); }
         }
         QuestionStyle::Sequence { items } => {
-            s.push_str("<ol>");
-            for i in items { let _ = write!(s, "<li>{}</li>", esc(i)); }
-            s.push_str("</ol>");
+            if answers {
+                s.push_str("<ol>");
+                for i in items { let _ = write!(s, "<li>{}</li>", esc(i)); }
+                s.push_str("</ol>");
+            } else {
+                let _ = write!(s, "<p>Put in order: {}</p>", sorted(items.iter().map(|i| esc(i)).collect()).join(", "));
+            }
         }
         QuestionStyle::FillBlanks { text, .. } => {
-            let _ = write!(s, "<p>{}</p><p class=\"note\">Answers: {}</p>", esc(&brainbend_doc::passage::with_gaps(text)),
-                brainbend_doc::passage::blanks(text).iter().map(|a| esc(&a.join(" / "))).collect::<Vec<_>>().join(", "));
+            let _ = write!(s, "<p>{}</p>", esc(&brainbend_doc::passage::with_gaps(text)));
+            if answers { let _ = write!(s, "<p class=\"note\">Answers: {}</p>", brainbend_doc::passage::blanks(text).iter().map(|a| esc(&a.join(" / "))).collect::<Vec<_>>().join(", ")); }
         }
         QuestionStyle::DragWords { text, distractors } => {
             let mut bank: Vec<String> = brainbend_doc::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
             bank.extend(distractors.iter().cloned());
+            if !answers { bank = sorted(bank); }
             let _ = write!(s, "<p>{}</p><p class=\"note\">Word bank: {}</p>", esc(&brainbend_doc::passage::with_gaps(text)), bank.iter().map(|w| esc(w)).collect::<Vec<_>>().join(", "));
         }
         QuestionStyle::MarkWords { text } => {
@@ -267,21 +281,24 @@ fn question_html(q: &Question, project: &Project) -> String {
             for part in brainbend_doc::passage::parse(text) {
                 match part {
                     brainbend_doc::passage::Part::Text(t) => s.push_str(&esc(&t)),
-                    brainbend_doc::passage::Part::Blank(a) => { let _ = write!(s, "<strong>{}</strong>", esc(&a[0])); }
+                    brainbend_doc::passage::Part::Blank(a) => { if answers { let _ = write!(s, "<strong>{}</strong>", esc(&a[0])); } else { s.push_str(&esc(&a[0])); } }
                 }
             }
-            s.push_str("</p><p class=\"note\">Bold words are the ones to mark.</p>");
+            s.push_str(if answers { "</p><p class=\"note\">Bold words are the ones to mark.</p>" } else { "</p><p class=\"note\">Mark the correct words.</p>" });
         }
         QuestionStyle::Numeric { answer, tolerance } => {
-            let _ = write!(s, "<p>Answer: {answer}{}</p>", if *tolerance > 0.0 { format!(" (within {tolerance})") } else { String::new() });
+            if answers { let _ = write!(s, "<p>Answer: {answer}{}</p>", if *tolerance > 0.0 { format!(" (within {tolerance})") } else { String::new() }); }
+            else { s.push_str("<p>Answer: ______________</p>"); }
         }
         QuestionStyle::Hotspot { asset, alt, regions } => {
             if let Some(a) = asset.as_ref().and_then(|k| project.assets.get(k)) {
                 let _ = write!(s, "<div style=\"position:relative;display:inline-block\"><img src=\"data:{};base64,{}\" style=\"max-width:100%;max-height:420px;display:block\" alt=\"{}\">", esc(&a.mime), base64(&a.bytes), esc(alt));
-                for r in regions {
-                    let _ = write!(s, "<div style=\"position:absolute;left:{:.2}%;top:{:.2}%;width:{:.2}%;height:{:.2}%;border:3px solid #1e8e3e;box-sizing:border-box;{}\"></div>", r.x * 100.0, r.y * 100.0, r.w * 100.0, r.h * 100.0, if r.ellipse { "border-radius:50%" } else { "" });
+                if answers {
+                    for r in regions {
+                        let _ = write!(s, "<div style=\"position:absolute;left:{:.2}%;top:{:.2}%;width:{:.2}%;height:{:.2}%;border:3px solid #1e8e3e;box-sizing:border-box;{}\"></div>", r.x * 100.0, r.y * 100.0, r.w * 100.0, r.h * 100.0, if r.ellipse { "border-radius:50%" } else { "" });
+                    }
                 }
-                s.push_str("</div><p class=\"note\">The green outline marks the correct area.</p>");
+                s.push_str(if answers { "</div><p class=\"note\">The green outline marks the correct area.</p>" } else { "</div><p class=\"note\">Mark the correct area.</p>" });
             }
         }
         QuestionStyle::Likert { statements, scale, .. } => {
@@ -293,17 +310,21 @@ fn question_html(q: &Question, project: &Project) -> String {
             let _ = write!(s, "<p style=\"border:1px solid #999;min-height:120px\"></p><p class=\"note\">Free-text answer, not graded.{}</p>", if *min_words > 0 { format!(" At least {min_words} words.") } else { String::new() });
         }
         QuestionStyle::Dictation { text, .. } => {
-            let _ = write!(s, "<p>Audio question. Transcript: {}</p>", esc(text));
+            if answers { let _ = write!(s, "<p>Audio question. Transcript: {}</p>", esc(text)); } else { s.push_str("<p>Audio question. Write what you hear: ______________________</p>"); }
         }
         QuestionStyle::Dropdowns { text } => {
             let mut t = String::new();
             for part in brainbend_doc::passage::parse(text) {
                 match part {
                     brainbend_doc::passage::Part::Text(x) => t.push_str(&esc(&x)),
-                    brainbend_doc::passage::Part::Blank(a) => { let _ = write!(t, "[<strong>{}</strong>{}]", esc(&a[0]), a[1..].iter().map(|w| format!(" / {}", esc(w))).collect::<String>()); }
+                    brainbend_doc::passage::Part::Blank(a) => {
+                        if answers { let _ = write!(t, "[<strong>{}</strong>{}]", esc(&a[0]), a[1..].iter().map(|w| format!(" / {}", esc(w))).collect::<String>()); }
+                        else { let _ = write!(t, "[{}]", sorted(a.iter().map(|w| esc(w)).collect()).join(" / ")); }
+                    }
                 }
             }
-            let _ = write!(s, "<p>{t}</p><p class=\"note\">The bold option is correct.</p>");
+            let _ = write!(s, "<p>{t}</p>");
+            if answers { s.push_str("<p class=\"note\">The bold option is correct.</p>"); }
         }
         QuestionStyle::LabelPicture { asset, alt, zones, distractors } => {
             if let Some(a) = asset.as_ref().and_then(|k| project.assets.get(k)) {
@@ -314,54 +335,186 @@ fn question_html(q: &Question, project: &Project) -> String {
                 }
                 s.push_str("</div>");
             }
-            let _ = write!(s, "<ol>{}</ol>", zones.iter().map(|z| format!("<li>{}</li>", esc(&z.label))).collect::<String>());
-            if !distractors.is_empty() { let _ = write!(s, "<p class=\"note\">Spare labels: {}</p>", distractors.iter().map(|d| esc(d)).collect::<Vec<_>>().join(", ")); }
+            if answers {
+                let _ = write!(s, "<ol>{}</ol>", zones.iter().map(|z| format!("<li>{}</li>", esc(&z.label))).collect::<String>());
+                if !distractors.is_empty() { let _ = write!(s, "<p class=\"note\">Spare labels: {}</p>", distractors.iter().map(|d| esc(d)).collect::<Vec<_>>().join(", ")); }
+            } else {
+                let labels: Vec<String> = zones.iter().map(|z| z.label.clone()).chain(distractors.iter().cloned()).collect();
+                let _ = write!(s, "<p class=\"note\">Label the numbered areas with: {}</p>", sorted(labels.iter().map(|l| esc(l)).collect()).join(", "));
+            }
         }
         QuestionStyle::Categorize { categories } => {
             s.push_str("<table>");
-            for (name, items) in categories { let _ = write!(s, "<tr><td><strong>{}</strong></td><td>{}</td></tr>", esc(name), items.iter().map(|i| esc(i)).collect::<Vec<_>>().join(", ")); }
+            for (name, items) in categories { let _ = write!(s, "<tr><td><strong>{}</strong></td><td>{}</td></tr>", esc(name), if answers { items.iter().map(|i| esc(i)).collect::<Vec<_>>().join(", ") } else { "&nbsp;".to_string() }); }
             s.push_str("</table>");
+            if !answers { let _ = write!(s, "<p class=\"note\">Sort these: {}</p>", sorted(categories.iter().flat_map(|(_, items)| items.iter().map(|i| esc(i))).collect()).join(", ")); }
         }
     }
     let _ = write!(s, "<p class=\"note\">Worth {} point(s). Correct: {} Incorrect: {}</p></div>", q.points, esc(&q.feedback_correct), esc(&q.feedback_incorrect));
     s
 }
 
+/// Which way up the handout's pages are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HandoutOrientation {
+    #[default]
+    Landscape,
+    Portrait,
+}
+
+impl HandoutOrientation {
+    pub const ALL: [HandoutOrientation; 2] = [Self::Landscape, Self::Portrait];
+
+    pub fn label(self) -> &'static str {
+        match self { Self::Landscape => "Landscape", Self::Portrait => "Portrait" }
+    }
+}
+
+/// What the handout holds and how it is laid out. The author chooses these; the rest (slide sizes, borders, spacing, where
+/// the note lines go) follows from them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandoutOptions {
+    pub orientation: HandoutOrientation,
+    /// Slides on each page: 1, 2 or 3.
+    pub per_page: u8,
+    /// Show the correct answers on question slides. Off gives a blank worksheet.
+    pub correct_answers: bool,
+    /// Lined space to write on, beside or below each slide.
+    pub note_lines: bool,
+    /// Print each slide's notes with it.
+    pub slide_notes: bool,
+    /// Print the alt text of a slide's pictures and shapes with it.
+    pub alt_text: bool,
+}
+
+impl HandoutOptions {
+    /// The numbers of slides a page can hold.
+    pub const PER_PAGE: [u8; 3] = [1, 2, 3];
+}
+
+impl Default for HandoutOptions {
+    fn default() -> Self {
+        HandoutOptions { orientation: HandoutOrientation::Landscape, per_page: 1, correct_answers: true, note_lines: false, slide_notes: false, alt_text: false }
+    }
+}
+
+/// CSS pixels in a millimetre.
+const PX_PER_MM: f32 = 96.0 / 25.4;
+/// Space between slides on a page, and the height of a slide's caption line, in millimetres.
+const GAP_MM: f32 = 6.0;
+const CAPTION_MM: f32 = 7.0;
+/// What a slide's notes area needs under it when slides are stacked: room for some lines or a few notes.
+const NOTES_BELOW_MM: f32 = 28.0;
+
 /// Build the printable document; opening it in a browser shows the print dialog.
-pub fn print_html(project: &Project) -> String {
+/// `@font-face` rules for the fonts the handout uses, with the files inside the page, so the handout looks right
+/// in any browser (it is a single file opened from a temporary folder).
+fn handout_fonts(p: &Project) -> String {
+    let mut used = p.fonts_used();
+    used.insert("Open Sans".into());
+    let e = brainbend_fonts::embed(&used, "");
+    let mut css = e.css;
+    for (path, bytes) in &e.files {
+        let Some(file) = path.strip_prefix("fonts/") else { continue };
+        if file.ends_with(".txt") { continue; }
+        let mime = if file.ends_with(".otf") { "font/otf" } else { "font/ttf" };
+        css = css.replace(&format!("url({file})"), &format!("url(data:{mime};base64,{})", base64(bytes)));
+    }
+    css.replace('\n', "")
+}
+
+pub fn print_html(project: &Project) -> String { print_html_with(project, &HandoutOptions::default()) }
+
+/// The handout laid out as `options` say. Sizes are in millimetres and leave room for the browser's margins, so the pages
+/// fit A4 and Letter alike.
+pub fn print_html_with(project: &Project, options: &HandoutOptions) -> String {
     let flat = project.flattened();
     let p = &flat;
-    let mut pages = String::new();
+    let per_page = options.per_page.clamp(1, 3) as usize;
+    let portrait = options.orientation == HandoutOrientation::Portrait;
+    let has_notes_area = options.note_lines || options.slide_notes || options.alt_text;
+    // The page, as a grid of cells: portrait stacks the slides, landscape puts them side by side. A slide that has notes
+    // area to itself either sits above it (stacked) or beside it (when the cell is wide and short, or a column of three).
+    let (page_w, page_h): (f32, f32) = if portrait { (180.0, 248.0) } else { (265.0, 178.0) };
+    let (cols, rows) = if portrait { (1, per_page) } else { (per_page, 1) };
+    let beside = if portrait { per_page == 3 } else { per_page == 1 && has_notes_area };
+    let cell_w = (page_w - GAP_MM * (cols as f32 - 1.0)) / cols as f32;
+    let cell_h = (page_h - GAP_MM * (rows as f32 - 1.0)) / rows as f32;
+    let alone = !beside && !has_notes_area && !portrait; // a landscape slide with nothing else: centred
+    let mut cells: Vec<String> = vec![];
     for (i, slide) in p.slides.iter().enumerate() {
-        // Page content is shrunk to a 960px wide sheet (about a landscape letter/A4 page).
-        let k = 960.0 / slide.width;
         let bg = bg_css(slide.background.as_ref(), p);
+        let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
         let body = match &slide.kind {
-            SlideKind::Normal => slide.layers.first().map(|l| l.objects.iter().map(|o| object_html(o, p)).collect::<String>()).unwrap_or_default(),
-            SlideKind::Question(q) => question_html(q, p),
+            SlideKind::Normal => objects.iter().map(|o| object_html(o, p)).collect::<String>(),
+            SlideKind::Question(q) => question_html(q, p, options.correct_answers),
             SlideKind::Results => "<div class=\"qa\"><h2>Results</h2><p>The player shows the learner's score, pass or fail, and a Retry button here.</p></div>".to_string(),
         };
-        let _ = write!(
-            pages,
-            "<section class=\"page\"><div class=\"cap\">{}. {}</div><div class=\"frame\" style=\"width:960px;height:{}px\"><div class=\"slide\" style=\"width:{}px;height:{}px;background:{};transform:scale({k})\">{}</div></div></section>",
-            i + 1, esc(&slide.name), slide.height * k, slide.width, slide.height, bg, body
+        let aspect = slide.height / slide.width;
+        let frame_w = if beside {
+            (cell_w * 0.58).min((cell_h - CAPTION_MM) / aspect)
+        } else {
+            let below = if has_notes_area { NOTES_BELOW_MM } else { 0.0 };
+            cell_w.min((cell_h - CAPTION_MM - below) / aspect)
+        };
+        let frame_h = frame_w * aspect;
+        let k = frame_w * PX_PER_MM / slide.width;
+        // What goes with the slide: its notes, its alt text, and lines to write on.
+        let mut extras = String::new();
+        if options.slide_notes && !slide.notes.trim().is_empty() {
+            let _ = write!(extras, "<div class=\"x\"><strong>Notes</strong> {}</div>", esc(slide.notes.trim()));
+        }
+        if options.alt_text {
+            let items: String = objects.iter().filter(|o| !o.decorative && !o.alt.trim().is_empty()).map(|o| format!("<li>{}: {}</li>", esc(&o.name), esc(o.alt.trim()))).collect();
+            if !items.is_empty() { let _ = write!(extras, "<div class=\"x\"><strong>Alt text</strong><ul>{items}</ul></div>"); }
+        }
+        let lines = if options.note_lines { "<div class=\"lines\"></div>" } else { "" };
+        let slide_html = format!(
+            "<div class=\"cap\">{}. {}</div><div class=\"frame\" style=\"width:{frame_w:.2}mm;height:{frame_h:.2}mm\"><div class=\"slide\" style=\"width:{}px;height:{}px;background:{};transform:scale({k})\">{}</div></div>",
+            i + 1, esc(&slide.name), slide.width, slide.height, bg, body
         );
+        let cell = if beside {
+            format!("<div class=\"cell beside\"><div class=\"left\">{slide_html}</div><div class=\"na\" style=\"height:{frame_h:.2}mm\">{extras}{lines}</div></div>")
+        } else if has_notes_area {
+            format!("<div class=\"cell stack\">{slide_html}<div class=\"na\" style=\"width:{frame_w:.2}mm\">{extras}{lines}</div></div>")
+        } else {
+            format!("<div class=\"cell stack{}\">{slide_html}</div>", if alone { " center" } else { "" })
+        };
+        cells.push(cell);
     }
+    let pages: String = cells.chunks(per_page).map(|group| format!(
+        "<section class=\"page\" style=\"width:{page_w}mm;height:{page_h}mm;grid-template-columns:repeat({cols},1fr);grid-template-rows:repeat({rows},1fr);gap:{GAP_MM}mm\">{}</section>", group.concat()
+    )).collect();
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>\
-@page{{size:landscape;margin:12mm}}\
+{fonts}\
+@page{{size:{orientation};margin:12mm}}\
+*{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\
 body{{font-family:'Open Sans',Arial,sans-serif;margin:0;color:#222}}\
-.page{{page-break-after:always;padding:10px 0;break-inside:avoid}}\
-.cap{{font-size:12px;color:#666;margin:0 0 6px 2px}}\
-.frame{{position:relative;overflow:hidden;border:1px solid #bbb;margin:0 auto}}\
+.page{{display:grid;page-break-after:always;break-inside:avoid;box-sizing:border-box}}\
+@media screen{{.page{{margin:0 auto 10mm}}}}\
+.cap{{font-size:12px;color:#666;height:{cap}mm;box-sizing:border-box;padding-left:2px}}\
+.frame{{position:relative;overflow:hidden;border:1px solid #888;box-sizing:content-box}}\
+.cell{{break-inside:avoid;min-width:0;min-height:0}}\
+.cell.stack{{display:flex;flex-direction:column;align-items:flex-start}}\
+.cell.stack.center{{align-items:center}}\
+.cell.beside{{display:flex;gap:8mm;align-items:flex-start}}\
+.cell.beside .na{{flex:1;margin-top:{cap}mm}}\
+.na{{display:flex;flex-direction:column;min-height:0;min-width:0;flex:1}}\
+.cell.stack .na{{width:100%}}\
+.x{{font-size:11px;line-height:1.35;margin:1mm 0 2mm;white-space:pre-wrap;overflow:hidden}}\
+.x ul{{margin:2px 0 0;padding-left:16px}}\
+.lines{{flex:1;min-height:10mm;background:repeating-linear-gradient(to bottom,transparent 0,transparent 7.2mm,#aaa 7.2mm,#aaa 7.5mm)}}\
 .slide{{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden}}\
 .obj{{position:absolute}}\
 .label{{position:absolute;inset:0;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden}}\
 .media{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#333;color:#ddd;font-size:22px}}\
 .qa{{padding:40px 60px;font-size:18px}}.qa h2{{margin-top:0}}.qa li{{margin:6px 0;list-style:none}}.qa ol li{{list-style:decimal}}.note{{color:#666;font-size:14px}}\
-@media print{{.page{{padding:0}}}}\
 </style></head><body>{pages}<script>window.addEventListener('load',function(){{setTimeout(function(){{window.print();}},500);}});</script></body></html>",
         title = esc(&p.name),
+        fonts = handout_fonts(p),
+        orientation = if portrait { "portrait" } else { "landscape" },
+        cap = CAPTION_MM,
     )
 }
 
@@ -394,9 +547,91 @@ mod tests {
         let mut p = Project::new("A <b> & C");
         p.slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
         let html = print_html(&p);
-        assert_eq!(html.matches("class=\"page\"").count(), p.slides.len());
+        assert_eq!(html.matches("<section class=\"page\"").count(), p.slides.len());
         assert!(html.contains("A &lt;b&gt; &amp; C"));
         assert!(html.contains("window.print()"));
+    }
+
+    fn five_slides() -> Project {
+        let mut p = Project::new("Handout");
+        for i in 1..=5 { p.slides.push(Slide::new(&format!("s{i}"), &format!("Slide {i}"), 1920.0, 1080.0)); }
+        p
+    }
+
+    fn opts(orientation: HandoutOrientation, per_page: u8) -> HandoutOptions {
+        HandoutOptions { orientation, per_page, ..Default::default() }
+    }
+
+    #[test]
+    fn slides_are_grouped_onto_pages_by_how_many_go_on_a_page() {
+        let p = five_slides();
+        let pages = |o: &HandoutOptions| print_html_with(&p, o).matches("<section class=\"page\"").count();
+        for orientation in HandoutOrientation::ALL {
+            assert_eq!(pages(&opts(orientation, 1)), 5);
+            assert_eq!(pages(&opts(orientation, 2)), 3, "5 slides, 2 to a page");
+            assert_eq!(pages(&opts(orientation, 3)), 2, "5 slides, 3 to a page");
+        }
+    }
+
+    #[test]
+    fn portrait_stacks_the_slides_and_landscape_puts_them_side_by_side() {
+        let p = five_slides();
+        let html = |o, n| print_html_with(&p, &opts(o, n));
+        assert!(html(HandoutOrientation::Portrait, 2).contains("@page{size:portrait"));
+        assert!(html(HandoutOrientation::Portrait, 2).contains("grid-template-columns:repeat(1,1fr);grid-template-rows:repeat(2,1fr)"));
+        assert!(html(HandoutOrientation::Landscape, 2).contains("@page{size:landscape"));
+        assert!(html(HandoutOrientation::Landscape, 3).contains("grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(1,1fr)"));
+    }
+
+    #[test]
+    fn note_lines_go_beside_a_column_of_three_and_below_slides_that_are_stacked_or_in_columns() {
+        let p = five_slides();
+        let with_lines = |orientation, per_page| print_html_with(&p, &HandoutOptions { orientation, per_page, note_lines: true, ..Default::default() });
+        assert_eq!(with_lines(HandoutOrientation::Portrait, 3).matches("class=\"cell beside\"").count(), 5, "three down the left, lines on the right");
+        assert_eq!(with_lines(HandoutOrientation::Portrait, 2).matches("class=\"cell stack\"").count(), 5, "two stacked, lines under each");
+        assert_eq!(with_lines(HandoutOrientation::Landscape, 1).matches("class=\"cell beside\"").count(), 5, "one slide with lines: lines beside it");
+        assert_eq!(with_lines(HandoutOrientation::Landscape, 2).matches("class=\"cell stack\"").count(), 5, "side by side, lines under each");
+        assert_eq!(with_lines(HandoutOrientation::Landscape, 3).matches("class=\"lines\"").count(), 5);
+        assert!(!print_html_with(&p, &opts(HandoutOrientation::Portrait, 2)).contains("class=\"lines\""), "no lines unless asked for");
+        assert!(print_html_with(&p, &opts(HandoutOrientation::Landscape, 1)).contains("cell stack center"), "a slide with nothing else is centred");
+    }
+
+    #[test]
+    fn slide_notes_and_alt_text_print_only_when_asked_for() {
+        let mut p = Project::new("Notes");
+        let mut s = Slide::new("s1", "Intro", 1920.0, 1080.0);
+        s.notes = "Say <hello> first".into();
+        let mut pic = Object::new("o1", "Logo", Kind::Text, 0.0, 0.0, 100.0, 100.0);
+        pic.alt = "A blue circle".into();
+        let mut deco = Object::new("o2", "Swirl", Kind::Text, 0.0, 0.0, 100.0, 100.0);
+        deco.alt = "A decorative swirl".into();
+        deco.decorative = true;
+        s.layers[0].objects = vec![pic, deco];
+        p.slides.push(s);
+        let html = |slide_notes, alt_text| print_html_with(&p, &HandoutOptions { slide_notes, alt_text, ..Default::default() });
+        let off = html(false, false);
+        assert!(!off.contains("Say &lt;hello&gt; first") && !off.contains("A blue circle"));
+        let notes = html(true, false);
+        assert!(notes.contains("<strong>Notes</strong> Say &lt;hello&gt; first"), "notes are escaped");
+        assert!(!notes.contains("A blue circle"));
+        let alt = html(false, true);
+        assert!(alt.contains("<li>Logo: A blue circle</li>"), "{alt}");
+        assert!(!alt.contains("A decorative swirl"), "decorative objects have no alt text to print");
+    }
+
+    #[test]
+    fn a_worksheet_hides_the_correct_answers() {
+        let question = |style, choices: Vec<Choice>| Question { prompt: "Pick one".into(), multiple: false, choices, points: 1.0, feedback_correct: String::new(), feedback_incorrect: String::new(), style, area: None };
+        let q = question(QuestionStyle::Choice, vec![Choice { id: "a".into(), text: "Right".into(), correct: true }, Choice { id: "b".into(), text: "Wrong".into(), correct: false }]);
+        let p = Project::new("Quiz");
+        let with = question_html(&q, &p, true);
+        assert!(with.contains("&#9745; Right") && with.contains("marks a correct answer"));
+        let without = question_html(&q, &p, false);
+        assert!(!without.contains("&#9745;"), "nothing is ticked: {without}");
+        assert!(without.contains("&#9744; Right") && without.contains("&#9744; Wrong"));
+        let t = question(QuestionStyle::TextEntry { accepted: vec!["Paris".into()], case_sensitive: false }, vec![]);
+        assert!(question_html(&t, &p, true).contains("Paris"));
+        assert!(!question_html(&t, &p, false).contains("Paris"));
     }
 
     #[test]

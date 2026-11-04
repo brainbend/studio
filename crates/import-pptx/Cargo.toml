@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 brainbend-doc = { path = "../doc" }
+brainbend-fonts = { path = "../fonts" }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }

@@ -8,6 +8,7 @@ pub mod passage;
 pub mod player;
 pub mod shapes;
 pub mod tables;
+pub mod variables;
 pub mod richtext;
 pub use master::{Background, Master, PlaceholderKind, SlideLayout, Theme};
 pub use player::{ButtonStyle, GlossaryTerm, PlayerControls, PlayerPalette, PlayerSettings, PlayerTheme, Resource, SidebarSide};
@@ -166,6 +167,25 @@ pub struct Shadow {
     #[serde(default)]
     pub spread: f32,
     pub color: Rgba,
+}
+
+/// A soft halo of colour around an object.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Glow {
+    /// How far the halo reaches, in pixels.
+    pub radius: f32,
+    pub color: Rgba,
+}
+
+/// A faded, upside-down copy of an object just below it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reflection {
+    /// How much of the object's height the reflection shows, from 0 to 1.
+    pub size: f32,
+    /// How visible the reflection is where it meets the object, from 0 to 1.
+    pub opacity: f32,
+    /// The space between the object and its reflection, in pixels.
+    pub gap: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -693,6 +713,15 @@ pub struct Object {
     pub stroke: Option<Stroke>,
     #[serde(default)]
     pub shadow: Option<Shadow>,
+    /// A halo of colour around the object.
+    #[serde(default)]
+    pub glow: Option<Glow>,
+    /// Fades the object's edges inward over this many pixels (0 is off). A softened object shows no shadow or glow.
+    #[serde(default)]
+    pub soft_edge: f32,
+    /// A faded mirror image below the object.
+    #[serde(default)]
+    pub reflection: Option<Reflection>,
     /// Initially hidden (inferred from the source's state flag 0x20; also inherited from groups).
     #[serde(default)]
     pub hidden: bool,
@@ -799,6 +828,9 @@ impl Object {
             y,
             w,
             h,
+            glow: None,
+            soft_edge: 0.0,
+            reflection: None,
             fill: None,
             gradient: None,
             rotation: 0.0,
@@ -869,6 +901,9 @@ pub struct ObjectState {
     pub size: Option<(f32, f32)>,
     #[serde(default)]
     pub shine: Option<Shine>,
+    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat colour).
+    #[serde(default)]
+    pub gradient: Option<Gradient>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1767,6 +1802,28 @@ impl Project {
         self.recent_colors.retain(|r| *r != c);
     }
 
+    /// The names of every font the project uses: text styles and runs, the theme's heading and body fonts, and the
+    /// player's font. Found by walking the saved form, so a new place that holds a font is covered without a change here.
+    pub fn fonts_used(&self) -> std::collections::BTreeSet<String> {
+        fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    for (k, x) in m {
+                        if matches!(k.as_str(), "font_family" | "font" | "heading_font" | "body_font") {
+                            if let Some(name) = x.as_str().filter(|n| !n.trim().is_empty()) { out.insert(name.to_string()); }
+                        }
+                        walk(x, out);
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+                _ => {}
+            }
+        }
+        let mut out = std::collections::BTreeSet::new();
+        if let Ok(v) = serde_json::to_value(self) { walk(&v, &mut out); }
+        out
+    }
+
     /// Asset keys that objects (media, captions) still reference.
     pub fn referenced_assets(&self) -> std::collections::BTreeSet<&str> {
         let mut out = std::collections::BTreeSet::new();
@@ -1781,6 +1838,7 @@ impl Project {
             if let Kind::Slider(Slider { thumb: Some(a), .. }) = &o.kind { out.insert(a.as_str()); }
         }
         if let Some(a) = &self.player.logo { out.insert(a.as_str()); }
+        if let Some(a) = &self.player.banner { out.insert(a.as_str()); }
         out.extend(self.resources.iter().filter_map(|r| r.asset.as_deref()));
         if let Some(l) = &self.lesson {
             for (_, _, b) in l.blocks() { out.extend(b.kind.assets()); }
@@ -1889,6 +1947,37 @@ impl Project {
         Ok(buf.into_inner())
     }
 
+    /// Write the project as a package straight to `w`, one asset at a time, without making a second copy of the media
+    /// (`to_package` copies every asset, and builds the whole package in memory, so it needs several times the size of
+    /// the project). `&mut self` is only so the assets can be set aside while the rest is copied; they are put back
+    /// before anything that can fail.
+    pub fn write_package<W: std::io::Write + std::io::Seek>(&mut self, w: W) -> Result<(), String> {
+        use std::io::Write;
+        let assets = std::mem::take(&mut self.assets);
+        let mut meta = self.clone();
+        self.assets = assets;
+        meta.format = FORMAT_ID.into();
+        let mut members: Vec<(String, &Asset)> = Vec::new();
+        for (i, (key, a)) in self.assets.iter().enumerate() {
+            let file = format!("assets/{i}");
+            meta.assets.insert(key.clone(), Asset { name: a.name.clone(), mime: a.mime.clone(), bytes: Vec::new(), file: Some(file.clone()) });
+            members.push((file, a));
+        }
+        let json = serde_json::to_vec_pretty(&meta).map_err(|e| e.to_string())?;
+        let mut z = zip::ZipWriter::new(w);
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        z.start_file("project.json", opts).map_err(|e| e.to_string())?;
+        z.write_all(&json).map_err(|e| e.to_string())?;
+        for (name, asset) in members {
+            // Media is already compressed; store it as it is.
+            let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(asset.bytes.len() as u64 > u32::MAX as u64);
+            z.start_file(name, stored).map_err(|e| e.to_string())?;
+            z.write_all(&asset.bytes).map_err(|e| e.to_string())?;
+        }
+        z.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Read either a package (ZIP) or the legacy plain-JSON form.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         use std::io::Read;
@@ -1928,13 +2017,43 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fonts_used_cover_text_runs_the_theme_and_the_player() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        let mut o = Object::new("a", "A", Kind::Rect, 0.0, 0.0, 10.0, 10.0);
+        o.style.font_family = "Lora".into();
+        p.slides[0].layers[0].objects.push(o);
+        p.player.font = "Poppins".into();
+        p.theme.heading_font = "Oswald".into();
+        let used = p.fonts_used();
+        for f in ["Lora", "Poppins", "Oswald"] { assert!(used.contains(f), "{f}"); }
+        assert!(!used.contains("Nothing"));
+    }
+
+    #[test]
+    fn the_players_logo_and_banner_count_as_used_assets_and_are_not_pruned() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        for k in ["logo", "banner", "spare"] {
+            p.assets.insert(k.into(), Asset { name: k.into(), mime: "image/png".into(), bytes: vec![1], file: None });
+        }
+        p.player.logo = Some("logo".into());
+        p.player.banner = Some("banner".into());
+        assert_eq!(p.referenced_assets().into_iter().collect::<Vec<_>>(), ["banner", "logo"]);
+        assert_eq!(p.prune_unused_assets(), 1, "only the picture nothing uses goes");
+        assert!(p.assets.contains_key("banner") && p.assets.contains_key("logo") && !p.assets.contains_key("spare"));
+    }
+
     #[test]
     fn state_pictures_and_slider_thumbs_count_as_used_assets() {
         let mut p = Project::new("t");
         p.slides.push(Slide::new("s", "S", 100.0, 100.0));
         let mut pic = Object::new("p", "Pic", Kind::Image, 0.0, 0.0, 10.0, 10.0);
         pic.asset = Some("front".into());
-        let st = |asset: &str| ObjectState { shine: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
+        let st = |asset: &str| ObjectState { shine: None, gradient: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
         pic.states = vec![st("front"), st("side")];
         let slider = Object::new("sl", "Slider", Kind::Slider(Slider { thumb: Some("knob".into()), ..Slider::new() }), 0.0, 20.0, 100.0, 20.0);
         p.slides[0].layers[0].objects.extend([pic, slider]);
@@ -2280,4 +2399,47 @@ mod marker_tests {
         assert!(Project::from_json(&p.to_json().unwrap()).unwrap().palette.len() == Project::PALETTE_MAX);
     }
 }
+}
+
+#[cfg(test)]
+mod object_effects_tests {
+    use super::*;
+
+    #[test]
+    fn glow_soft_edges_and_reflection_round_trip_and_older_objects_have_none() {
+        let mut o = Object::new("b", "Button", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
+        assert!(o.glow.is_none() && o.reflection.is_none() && o.soft_edge == 0.0);
+        o.glow = Some(Glow { radius: 12.0, color: Rgba(255, 200, 0, 200) });
+        o.soft_edge = 6.0;
+        o.reflection = Some(Reflection { size: 0.5, opacity: 0.4, gap: 3.0 });
+        let back: Object = serde_json::from_value(serde_json::to_value(&o).unwrap()).unwrap();
+        assert_eq!((back.glow, back.soft_edge, back.reflection), (o.glow, o.soft_edge, o.reflection));
+        let mut v = serde_json::to_value(&o).unwrap();
+        for k in ["glow", "soft_edge", "reflection"] { v.as_object_mut().unwrap().remove(k); }
+        let old: Object = serde_json::from_value(v).unwrap();
+        assert!(old.glow.is_none() && old.reflection.is_none() && old.soft_edge == 0.0, "a project saved before these effects opens without them");
+    }
+}
+
+#[cfg(test)]
+mod streamed_package_tests {
+    use super::*;
+
+    #[test]
+    fn a_streamed_package_reads_back_like_the_buffered_one_and_leaves_the_project_whole() {
+        let mut p = Project::new("Streamed");
+        p.assets.insert("a".into(), Asset { name: "a.bin".into(), mime: "video/mp4".into(), bytes: (0..5000u32).map(|i| (i % 251) as u8).collect(), file: None });
+        p.assets.insert("b".into(), Asset { name: "b.png".into(), mime: "image/png".into(), bytes: vec![1, 2, 3], file: None });
+        let buffered = Project::from_bytes(&p.to_package().unwrap()).unwrap();
+        let mut out = std::io::Cursor::new(Vec::new());
+        p.write_package(&mut out).unwrap();
+        assert_eq!(p.assets["a"].bytes.len(), 5000, "the project keeps its media");
+        let back = Project::from_bytes(&out.into_inner()).unwrap();
+        assert_eq!(back.name, "Streamed");
+        for k in ["a", "b"] {
+            assert_eq!(back.assets[k].bytes, p.assets[k].bytes, "{k}");
+            assert_eq!(back.assets[k].bytes, buffered.assets[k].bytes, "{k}");
+            assert_eq!((&back.assets[k].name, &back.assets[k].mime), (&p.assets[k].name, &p.assets[k].mime));
+        }
+    }
 }

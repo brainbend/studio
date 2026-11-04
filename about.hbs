@@ -1,0 +1,28 @@
+# Third-party licenses
+
+BrainBend Studio is built with the open-source software below. Each is used under the license shown, and its
+license text and copyright notices follow. BrainBend Studio's own license is in LICENSE-MIT and LICENSE-APACHE.
+The fonts bundled with the app and the spelling word list have their own notices in the app's About page and
+`assets/fonts/`.
+
+## Licenses in use
+
+{{#each overview}}
+- {{{name}}} ({{count}} crate{{#if (gt count 1)}}s{{/if}})
+{{/each}}
+
+{{#each licenses}}
+---
+
+## {{{name}}}
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+```
+{{{text}}}
+```
+
+{{/each}}

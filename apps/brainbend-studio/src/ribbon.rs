@@ -82,6 +82,11 @@ pub const CUT: char = '\u{eae0}';
 pub const MAGNIFY: char = '\u{e30c}';
 pub const ACCESS: char = '\u{e4e8}';
 pub const MOON: char = '\u{e330}';
+pub const BOOK_OPEN: char = '\u{e0e6}';
+pub const BUG: char = '\u{e5f4}';
+pub const DISCORD: char = '\u{e61a}';
+pub const REFRESH: char = '\u{e094}';
+pub const WARNING_CIRCLE: char = '\u{e4e2}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const ARROW_DOWN: char = '\u{e03e}';
 pub const SLIDERS: char = '\u{e434}';
@@ -138,13 +143,27 @@ fn text_col(ui: &egui::Ui) -> egui::Color32 {
     if ui.is_enabled() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() }
 }
 
-pub const ORANGE: egui::Color32 = egui::Color32::from_rgb(226, 91, 28);
+/// The logo's yellow and purple. Blue marks what is selected; these mark the main actions and what is hot.
+pub const YELLOW: egui::Color32 = egui::Color32::from_rgb(255, 205, 0);
+pub const PURPLE: egui::Color32 = egui::Color32::from_rgb(110, 70, 200);
+
+/// The main-action colour: yellow on the dark theme, purple on the light one, where yellow would not stand out.
+pub fn primary(ui: &egui::Ui) -> egui::Color32 { if ui.visuals().dark_mode { YELLOW } else { PURPLE } }
+
+/// Text on `primary`: near-black on the yellow, white on the purple.
+pub fn on_primary(ui: &egui::Ui) -> egui::Color32 { if ui.visuals().dark_mode { egui::Color32::from_rgb(28, 28, 30) } else { egui::Color32::WHITE } }
+
+/// The one blue of the app: selected tabs and ribbon items, buttons, the selected slide and layer, selection handles,
+/// and the File menu's list. White text on it reads clearly.
+pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(10, 110, 235);
+/// The accent under the pointer.
+pub const ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(52, 140, 250);
 
 /// Icon colours give the ribbon its pop; each icon keeps one hue across the app.
 pub fn tint(icon: char) -> egui::Color32 {
     let c = |r, g, b| egui::Color32::from_rgb(r, g, b);
     match icon {
-        PASTE | FILE_PLUS | FRAME | MAGNIFY | ACCESS | FOLDER | SAVE | CLICK => c(52, 112, 220),
+        PASTE | FILE_PLUS | FRAME | MAGNIFY | ACCESS | FOLDER | SAVE | CLICK => ACCENT,
         TEXTBOX | TEXT_T => c(40, 60, 120),
         IMAGE | PLAY | CHECK => c(48, 160, 100),
         VIDEO | TRASH => c(214, 74, 84),
@@ -152,7 +171,7 @@ pub fn tint(icon: char) -> egui::Color32 {
         RECT | CIRCLE | EXPORT | TIMER | QUESTION | SLIDERS => c(236, 112, 40),
         LINE | RADIO | LIST_NUM | COPY => c(0, 150, 160),
         MOON | SUN => c(240, 170, 20),
-        _ => c(52, 112, 220),
+        _ => ACCENT,
     }
 }
 
@@ -197,7 +216,7 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
             ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
         }
         let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
-        let icon_col = if enabled { tint(icon) } else { col };
+        let icon_col = if enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
         ui.painter().text(egui::pos2(rect.center().x, rect.top() + 4.0), egui::Align2::CENTER_TOP, icon, egui::FontId::new(22.0, icons()), icon_col);
         let n = lines.len();
         for (i, line) in lines.iter().enumerate() {
@@ -217,6 +236,32 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
     resp
 }
 
+/// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
+fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
+    let lines = label_lines(ui, label);
+    let font = egui::FontId::proportional(11.5);
+    let widest = lines.iter().enumerate().map(|(i, l)| {
+        let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
+        if caret && i + 1 == lines.len() { w + 14.0 } else { w }
+    }).fold(0.0f32, f32::max);
+    (widest + 6.0).max(36.0)
+}
+
+/// A caption under a row of controls, like `group` but without the divider after it.
+fn pinned_group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
+        let body = ui.vertical(|ui| {
+            ui.set_min_height(BIG_H);
+            add(ui);
+        });
+        let w = body.response.rect.width().max(30.0);
+        ui.allocate_ui_with_layout(egui::vec2(w, CAP_H), egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.add(egui::Label::new(egui::RichText::new(caption).size(10.5).color(ui.visuals().text_color().gamma_multiply(0.55))).wrap_mode(egui::TextWrapMode::Extend));
+        });
+    });
+}
+
 /// Large flat button (icon above a short label).
 fn big_button(ui: &mut egui::Ui, icon: char, label: &str, tip: &str) -> egui::Response {
     big_widget(ui, icon, label, false, false).on_hover_text(tip)
@@ -228,6 +273,13 @@ fn big_toggle(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, selected: b
 }
 
 /// Large flat button that opens a dropdown of choices.
+/// A big menu button whose popup stays open until a click outside it (or the content closes it).
+fn big_menu_open(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, content: impl FnOnce(&mut egui::Ui)) -> egui::Response {
+    let resp = big_widget(ui, icon, label, true, false).on_hover_text(tip);
+    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| { content(ui); });
+    resp
+}
+
 fn big_menu(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, content: impl FnOnce(&mut egui::Ui)) -> egui::Response {
     let resp = big_widget(ui, icon, label, true, false).on_hover_text(tip);
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
@@ -282,7 +334,7 @@ impl App {
                 ui.painter().rect_filled(rect, 4.0, egui::Color32::WHITE);
                 if role == current { ui.painter().text(egui::pos2(rect.left() + 8.0, rect.center().y), egui::Align2::LEFT_CENTER, CHECK.to_string(), egui::FontId::new(14.0, icons()), tint(CHECK)); }
                 ui.painter().galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), galley, egui::Color32::from_gray(20));
-                if resp.hovered() { ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, ORANGE), egui::StrokeKind::Inside); }
+                if resp.hovered() { ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, primary(ui)), egui::StrokeKind::Inside); }
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, role.label()));
                 let tip = match role.level() { Some(n) => format!("{} (<h{n}>, {}, {:.0})", role.label(), font, size), None => format!("{} (<p>, {}, {:.0})", role.label(), font, size) };
                 if resp.on_hover_text(tip).clicked() { pick = Some(role); }
@@ -295,8 +347,8 @@ impl App {
             let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), egui::Color32::WHITE).size().x);
             // At the icon's lower right corner (the icon is centred near the top of the large button).
             let r = egui::Rect::from_min_size(egui::pos2(btn.rect.center().x + 13.0 - (w + 3.0), btn.rect.top() + 4.0 + 20.0 - 10.0), egui::vec2(w + 3.0, 10.0));
-            ui.painter().rect_filled(r, 2.0, ORANGE);
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, text, font, egui::Color32::WHITE);
+            ui.painter().rect_filled(r, 2.0, primary(ui));
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, text, font, on_primary(ui));
         }
         if let Some(role) = pick { self.apply_text_style(role); }
     }
@@ -427,9 +479,14 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-pub const TABS: [&str; 7] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master"];
+pub const HELP_TAB: usize = 7;
+pub const TABS: [&str; 8] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master", "Help"];
 pub const MASTER_TAB: usize = 6;
 pub const HOME_TAB: usize = 1;
+const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
+/// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
+/// changes is fixed there and not by shipping a new build.
+pub const COMMUNITY_URL: &str = "https://brainbend.org/discord/";
 
 /// Flat icon button for the title bar.
 /// A title-bar button drawn by hand so it never changes size on hover: an optional icon, a label and an optional
@@ -575,7 +632,7 @@ fn swatch_row(ui: &mut egui::Ui, colours: &[Rgba], cur: Option<Rgba>) -> Option<
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
             ui.painter().rect_filled(rect, 3.0, color(*c));
             let on = cur.is_some_and(|k| (k.0, k.1, k.2) == (c.0, c.1, c.2));
-            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { egui::Color32::from_rgb(0, 140, 255) } else { egui::Color32::from_gray(110) }), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(if on { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::from_gray(110) }), egui::StrokeKind::Inside);
             if resp.on_hover_text(c.hex()).clicked() { picked = Some(*c); }
         }
     });
@@ -786,7 +843,7 @@ fn table_picker(ui: &mut egui::Ui) -> Option<(u16, u16)> {
         for c in 0..C {
             let on = hover.is_some_and(|(hr, hc)| r <= hr && c <= hc);
             let sq = egui::Rect::from_min_size(rect.min + egui::vec2(c as f32 * (cell + 2.0), r as f32 * (cell + 2.0)), egui::vec2(cell, cell));
-            ui.painter().rect_filled(sq, 2.0, if on { egui::Color32::from_rgb(0, 120, 215) } else { ui.visuals().text_color().gamma_multiply(0.12) });
+            ui.painter().rect_filled(sq, 2.0, if on { ACCENT } else { ui.visuals().text_color().gamma_multiply(0.12) });
         }
     }
     match hover { Some((r, c)) => ui.label(format!("{} x {} table", r + 1, c + 1)), None => ui.weak("Choose a size") };
@@ -824,7 +881,7 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
 /// Copy the fields that differ between `a` (before) and `b` (after) onto `t`.
 fn apply_diff(a: &Object, b: &Object, t: &mut Object) {
     macro_rules! field { ($($f:ident),*) => { $( if a.$f != b.$f { t.$f = b.$f.clone(); } )* } }
-    field!(fill, stroke, dash, shadow, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
+    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
     // Picking a flat colour replaces a gradient.
     if a.fill != b.fill && a.gradient == b.gradient { t.gradient = None; }
     macro_rules! sfield { ($($f:ident),*) => { $( if a.style.$f != b.style.$f { t.style.$f = b.style.$f.clone(); } )* } }
@@ -873,7 +930,7 @@ fn quick_styles(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
                     ui.painter().rect_filled(r, 4.0, color(look.fill));
                     if let Some(st) = look.stroke { ui.painter().rect_stroke(r, 4.0, egui::Stroke::new((st.width * 0.6).max(1.0), color(st.color)), egui::StrokeKind::Inside); }
                     ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "Abc", egui::FontId::proportional(12.0), color(look.text));
-                    if resp.hovered() { ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(2.0, ORANGE), egui::StrokeKind::Inside); }
+                    if resp.hovered() { ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(2.0, primary(ui)), egui::StrokeKind::Inside); }
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &format!("{name}, {}", brainbend_doc::master::THEME_COLOR_NAMES[col + 4])));
                     if resp.on_hover_text(format!("{name}, {}", brainbend_doc::master::THEME_COLOR_NAMES[col + 4])).clicked() {
                         obj.fill = Some(look.fill);
@@ -918,33 +975,6 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
                         });
                     }
                 });
-                if !is_line {
-                    ui.horizontal(|ui| {
-                        icon_popup(ui, DROP, "Effects: shadow and corners", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-                            ui.set_min_width(260.0);
-                            let mut has = obj.shadow.is_some();
-                            if ui.checkbox(&mut has, "Shadow").changed() {
-                                obj.shadow = if has { Some(Shadow { dx: 4.0, dy: 4.0, blur: 8.0, spread: 0.0, color: Rgba(0, 0, 0, 90) }) } else { None };
-                                *changed = true;
-                            }
-                            if let Some(sh) = obj.shadow.as_mut() {
-                                let mut c = Some(sh.color);
-                                ui.horizontal(|ui| {
-                                    ui.label("Shadow color");
-                                    if color_menu(ui, DROP, "Shadow color", &mut c, None) { if let Some(c) = c { sh.color = c; *changed = true; } }
-                                });
-                                *changed |= shadow_options(ui, sh);
-                            }
-                            if !is_pic {
-                                ui.separator();
-                                ui.horizontal(|ui| {
-                                    ui.label("Corner radius");
-                                    *changed |= ui.add(egui::DragValue::new(&mut obj.radius).range(0.0..=400.0)).changed();
-                                });
-                            }
-                        });
-                    });
-                }
             }); }); }); });
         }
 }
@@ -970,7 +1000,7 @@ impl App {
                 if !t.states.is_empty() {
                     let (f, st, sh, sk, init) = (t.fill, t.style.clone(), t.shadow, t.stroke, t.initial_state.clone());
                     for s in t.states.iter_mut() {
-                        if s.name == init { s.fill = f; s.shadow = sh; s.stroke = sk; }
+                        if s.name == init { s.fill = f; s.shadow = sh; s.stroke = sk; s.gradient = t.gradient.clone(); }
                         s.style = st.clone();
                     }
                 }
@@ -1013,7 +1043,7 @@ impl App {
                 let master = self.in_master_view();
                 for (i, name) in TABS.into_iter().enumerate() {
                     // The master view has its own short tab list; the Slide Master tab exists only there.
-                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2].contains(&i)) { continue; }
+                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2, HELP_TAB].contains(&i)) { continue; }
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
@@ -1042,7 +1072,7 @@ impl App {
                 // What the groups on Home act on, as a tinted tag after the tabs.
                 if let Some(title) = self.format_title().filter(|_| self.ribbon_tab == HOME_TAB) {
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(title).size(10.5).color(egui::Color32::from_rgb(70, 150, 230)).background_color(egui::Color32::from_rgba_unmultiplied(0, 140, 255, 38)));
+                    ui.label(egui::RichText::new(title).size(10.5).color(egui::Color32::from_rgb(70, 150, 230)).background_color(egui::Color32::from_rgba_unmultiplied(10, 110, 235, 38)));
                 }
             });
         });
@@ -1054,26 +1084,38 @@ impl App {
                 let primary = self.ribbon_target();
                 let mut edited = primary.clone();
                 let mut edit_changed = false;
-                egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        ui.set_min_height(BIG_H);
-                        ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.add_enabled_ui(!self.try_mode, |ui| {
-                        match self.ribbon_tab {
-                            HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
-                            2 => self.insert_tab(ui, normal),
-                            3 => self.slides_tab(ui, ctx),
-                            4 => self.design_tab(ui, ctx),
-                            5 => {
-                                self.transition_groups(ui, ctx);
-                                self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
+                // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
+                let pin_w = if self.project.is_some() { self.pinned_width(ui) } else { 0.0 };
+                let full = ui.available_rect_before_wrap();
+                let h = BIG_H + CAP_H + 8.0;
+                let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w - 8.0).max(80.0), h));
+                let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                    egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.set_min_height(BIG_H);
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            ui.add_enabled_ui(!self.try_mode, |ui| {
+                            match self.ribbon_tab {
+                                HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
+                                2 => self.insert_tab(ui, normal),
+                                3 => self.slides_tab(ui, ctx),
+                                4 => self.design_tab(ui, ctx),
+                                5 => {
+                                    self.transition_groups(ui, ctx);
+                                    self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
+                                }
+                                MASTER_TAB => self.master_tab(ui, ctx),
+                                HELP_TAB => self.help_tab(ui),
+                                _ => self.design_tab(ui, ctx),
                             }
-                            MASTER_TAB => self.master_tab(ui, ctx),
-                            _ => self.design_tab(ui, ctx),
-                        }
+                            });
                         });
                     });
                 });
+                if pin_w > 0.0 {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(pin).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| self.pinned_actions(ui));
+                }
                 if let (true, Some(before), Some(after)) = (edit_changed, primary.as_ref(), edited.as_ref()) {
                     self.apply_object_edit(ctx, before, after);
                 } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
@@ -1094,7 +1136,7 @@ impl App {
                 if ui.add(egui::Label::new(egui::RichText::new("FILE").size(14.0)).sense(egui::Sense::click())).clicked() { leave = true; self.file_view = true; self.file_page = backstage::FilePage::Info; }
                 let resp = ui.add(egui::Label::new(egui::RichText::new("360° IMAGE").size(14.0).strong()).sense(egui::Sense::click()));
                 let r = resp.rect;
-                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, ORANGE));
+                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, primary(ui)));
             });
             ui.add_space(2.0);
         });
@@ -1291,31 +1333,6 @@ impl App {
                 }); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
-                    if has { ui.scope(|ui| {
-                        // Hangs from the top edge of the window: square at the top, rounded below.
-                        let down = egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 };
-                        let resp = pill(ui, "publish", Pill { icon: Some((EXPORT, egui::Color32::WHITE)), label: "Publish", caret: true, fill: Some(ORANGE), ink: egui::Color32::WHITE, outline: false, bold: true, radius: down, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text("Export the project");
-                        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| self.publish_items(ui));
-                    }); }
-                    if has {
-                        ui.add_space(4.0);
-                        let resp = pill(ui, "preview", Pill { icon: Some((PLAY, tint(PLAY))), label: "Preview", caret: true, fill: Some(text_col(ui).gamma_multiply(0.14)), ink: text_col(ui), outline: true, bold: false, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text("Play the lesson in your browser");
-                        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| self.preview_items(ui));
-                        ui.add_space(4.0);
-                        if !self.project.as_ref().is_some_and(|p| p.is_web()) {
-                            // Press buttons on the slide to see their states and layers, view only.
-                            let on = self.try_mode;
-                            let ink = if on { egui::Color32::WHITE } else { text_col(ui) };
-                            let tip = pill(ui, "tryit", Pill { icon: Some((CLICK, if on { egui::Color32::WHITE } else { tint(CLICK) })), label: "Try It", caret: false, fill: Some(if on { egui::Color32::from_rgb(11, 110, 105) } else { text_col(ui).gamma_multiply(0.14) }), ink, outline: true, bold: false, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                                .on_hover_text("Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.");
-                            if tip.clicked() {
-                                self.try_mode = !self.try_mode;
-                            }
-                            ui.add_space(4.0);
-                        }
-                    }
                     let dark = ctx.theme() == egui::Theme::Dark;
                     // The moon is black so it shows on the light theme; the sun keeps its yellow.
                     let ink = text_col(ui);
@@ -1324,7 +1341,53 @@ impl App {
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
                     }
+                    // A newer release is out: a red button to the left of the theme toggle opens the update window.
+                    if let Some(r) = self.updater.available().cloned() {
+                        ui.add_space(4.0);
+                        let white = egui::Color32::WHITE;
+                        let (label, fill) = match &self.updater.state {
+                            update::State::Downloading { .. } => ("Updating…", egui::Color32::from_rgb(200, 36, 36)),
+                            update::State::Ready { .. } => ("Restart to update", egui::Color32::from_rgb(30, 140, 70)),
+                            _ => ("Update available", egui::Color32::from_rgb(200, 36, 36)),
+                        };
+                        let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label, caret: false, fill: Some(fill), ink: white, outline: false, bold: true, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
+                            .on_hover_text(format!("Version {} is available. Click to update.", r.version));
+                        alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                        if alert.clicked() { self.updater.dialog_open = true; }
+                    }
                 });
+            });
+        });
+    }
+
+    /// Help: documentation, reporting problems, the community, and checking for a newer version.
+    fn help_tab(&mut self, ui: &mut egui::Ui) {
+        group(ui, "Help", |ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(false, |ui| { big_button(ui, BOOK_OPEN, "Docs", "Documentation is coming soon"); });
+                if big_button(ui, BUG, "Submit Issue", "Report a problem or suggest a feature on GitHub").clicked() { update::open_in_browser(ISSUES_URL); }
+            });
+        });
+        group(ui, "Community", |ui| {
+            if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
+        });
+        group(ui, "Updates", |ui| {
+            ui.horizontal(|ui| {
+                let checking = matches!(self.updater.state, update::State::Checking(_));
+                let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
+                if check.clicked() { self.updater.start(ui.ctx()); }
+                let mut open: Option<String> = None;
+                ui.vertical(|ui| {
+                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    match &self.updater.state {
+                        update::State::Checking(_) => { ui.weak("Checking…"); }
+                        update::State::UpToDate => { ui.weak("You have the latest version."); }
+                        update::State::Failed(e) => { ui.weak(format!("Could not check: {e}")); }
+                        update::State::Idle => {}
+                        _ => { if let Some(r) = self.updater.available() { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the update window").clicked() { open = Some(r.tag.clone()); } } }
+                    }
+                });
+                if open.is_some() { self.updater.dialog_open = true; }
             });
         });
     }
@@ -1371,11 +1434,7 @@ impl App {
             rows(ui);
                 ui.horizontal(|ui| {
                     framed(ui, |ui| {
-                        combo("rb-font").width(92.0).selected_text(obj.style.font_family.clone()).show_ui(ui, |ui| {
-                            for f in ["Open Sans", "Montserrat"] {
-                                if ui.selectable_label(obj.style.font_family == f, f).clicked() { obj.style.font_family = f.into(); *changed = true; }
-                            }
-                        });
+                        *changed |= crate::font_store::font_menu(ui, "rb-font", &mut obj.style.font_family, 92.0);
                         *changed |= ui.add(egui::DragValue::new(&mut obj.style.size).range(4.0..=400.0).suffix(" pt")).on_hover_text("Font size").changed();
                         let sizes = {
                             let (r, resp) = ui.allocate_exact_size(egui::vec2(14.0, 20.0), egui::Sense::click());
@@ -1479,6 +1538,7 @@ impl App {
         } else {
             self.arrange_group(ui, has_sel, n_sel);
             drawing_group(ui, obj, enabled, changed);
+            effects_group(ui, obj, enabled, changed);
         }
         if let Some(st) = list_click { self.set_list_selected(st); }
     }
@@ -1525,7 +1585,7 @@ impl App {
                         }
                     }
                     let on = self.table_style == st;
-                    ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { egui::Color32::from_rgb(0, 120, 255) } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
+                    ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
                     if resp.on_hover_text(st.label()).clicked() { pick = Some(st); }
                 }
                 ui.vertical(|ui| {
@@ -1598,20 +1658,13 @@ impl App {
     fn format_groups(&mut self, ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
         let has_sel = self.selected.is_some();
         let n_sel = self.selection().len();
-        let mut style_pick: Option<usize> = None;
+        let mut style_pick: Option<crate::button_styles::StyleDef> = None;
         let mut pick_captions = false;
         if obj.has_button_states() {
             group(ui, "Button Styles", |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for row in 0..2 {
-                        ui.horizontal(|ui| {
-                            for k in 0..5 {
-                                let i = row * 5 + k;
-                                if crate::button_styles::swatch(ui, &crate::button_styles::STYLES[i]) { style_pick = Some(i); }
-                            }
-                        });
-                    }
+                let corners = &mut self.button_corners;
+                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colours in four looks, with square, rounded or pill corners", |ui| {
+                    if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
                 });
             });
         }
@@ -1630,7 +1683,6 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;
                         *changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                        if matches!(obj.kind, Kind::Video) { *changed |= ui.checkbox(&mut m.controls, "Show player controls").changed(); }
                     });
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;
@@ -1657,11 +1709,11 @@ impl App {
             }
         }
         if matches!(obj.kind, Kind::Hotspot) { self.hotspot_group(ui, obj, true, n_sel); }
-        if !is_media && !matches!(obj.kind, Kind::Hotspot) { drawing_group(ui, obj, true, changed); }
+        if !is_media && !matches!(obj.kind, Kind::Hotspot) { drawing_group(ui, obj, true, changed); effects_group(ui, obj, true, changed); }
         self.arrange_group(ui, has_sel, n_sel);
         obj.w = obj.w.max(1.0);
         obj.h = obj.h.max(1.0);
-        if let Some(i) = style_pick { self.apply_button_style(i); }
+        if let Some(def) = style_pick { self.apply_button_style(&def); }
         if pick_captions {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
@@ -1880,6 +1932,9 @@ impl App {
         after.stroke = proto.stroke;
         after.dash = proto.dash;
         after.shadow = proto.shadow;
+        after.glow = proto.glow;
+        after.soft_edge = proto.soft_edge;
+        after.reflection = proto.reflection;
         after.radius = proto.radius;
         after.line_spacing = proto.line_spacing;
         self.apply_object_edit(ctx, &before, &after);
@@ -2079,13 +2134,49 @@ impl App {
     }
 
     /// The Publish choices, shared by the title bar and the Home tab.
-    pub(super) fn publish_items(&mut self, ui: &mut egui::Ui) {
-        ui.set_min_width(220.0);
-        if menu_item(ui, EXPORT, "Web (HTML5)").clicked() { self.export_html(); }
-        if menu_item(ui, EXPORT, "SCORM 1.2 (most LMSs, Canvas)").clicked() { self.export_scorm(brainbend_publish_html::Lms::Scorm12); }
-        if menu_item(ui, EXPORT, "SCORM 2004 4th Edition").clicked() { self.export_scorm(brainbend_publish_html::Lms::Scorm2004); }
-        if !self.project.as_ref().is_some_and(|p| p.is_web()) && menu_item(ui, EXPORT, "PowerPoint (.pptx)").clicked() { self.export_pptx(); }
+    /// Whether Try It applies: slide-based projects only.
+    fn can_try(&self) -> bool { self.project.as_ref().is_some_and(|p| !p.is_web()) }
+
+    /// How wide the pinned group is, so the ribbon can leave room for it at the right.
+    fn pinned_width(&self, ui: &egui::Ui) -> f32 {
+        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false)];
+        if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
+        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
     }
+
+    /// Try It, Preview and Publish: pinned at the right end of the ribbon, always in view.
+    fn pinned_actions(&mut self, ui: &mut egui::Ui) {
+        // A thin divider separates the group from the tabs' controls.
+        let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, BIG_H + CAP_H), egui::Sense::hover());
+        let col = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
+        ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
+        ui.add_space(5.0);
+        let can_try = self.can_try();
+        pinned_group(ui, "Try, preview, publish", |ui| {
+            ui.horizontal(|ui| {
+                if can_try {
+                    let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";
+                    if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
+                }
+                big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
+                // Publish is the main action, so it takes the main-action colour.
+                let (fill, ink) = (primary(ui), on_primary(ui));
+                let backing = ui.painter().add(egui::Shape::Noop);
+                let resp = ui.scope(|ui| {
+                    let v = ui.visuals_mut();
+                    v.override_text_color = Some(ink);
+                    let hover = fill.gamma_multiply(0.85);
+                    v.widgets.hovered.weak_bg_fill = hover;
+                    v.widgets.active.weak_bg_fill = hover;
+                    v.widgets.open.weak_bg_fill = hover;
+                    big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
+                }).inner;
+                if resp.clicked() { self.publish_open = true; }
+                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
+            });
+        });
+    }
+
 
     /// The Preview choices, shared by the title bar and the Home tab.
     pub(super) fn preview_items(&mut self, ui: &mut egui::Ui) {
@@ -2321,15 +2412,14 @@ impl App {
                 });
                 if big_button(ui, DROP, "Brand\nColors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
                 big_menu(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts", |ui| {
-                    for (h, b) in [("Montserrat", "Open Sans"), ("Open Sans", "Open Sans"), ("Montserrat", "Montserrat"), ("Open Sans", "Montserrat")] {
-                        let on = proj.theme.heading_font == h && proj.theme.body_font == b;
-                        if ui.selectable_label(on, format!("{h} / {b}")).on_hover_text("Headings / body text").clicked() {
-                            let mut next = proj.theme.clone();
-                            (next.heading_font, next.body_font) = (h.to_string(), b.to_string());
-                            proj.set_theme(next.named());
-                            changed = true;
-                            ui.close();
-                        }
+                    ui.set_min_width(260.0);
+                    let mut next = proj.theme.clone();
+                    let mut moved = false;
+                    ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 170.0); });
+                    ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 170.0); });
+                    if moved {
+                        proj.set_theme(next.named());
+                        changed = true;
                     }
                 });
             });
@@ -2610,51 +2700,240 @@ impl App {
     }
 }
 
-/// Direction pad, distance, blur and spread for a shadow. Returns true when anything changed.
-pub fn shadow_options(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
+/// One effect in the Effects popup: a header with its on/off switch, and its controls underneath while it is on.
+/// Returns true when the switch or anything under it changed.
+fn effect_section(ui: &mut egui::Ui, title: &str, on: &mut bool, body: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let mut changed = ui.checkbox(on, egui::RichText::new(title).strong()).changed();
+    if *on {
+        ui.indent(title, |ui| { changed |= body(ui); });
+    }
+    ui.add_space(4.0);
+    changed
+}
+
+/// A label and a slider with its value, in one tidy row of a grid.
+fn effect_slider(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, suffix: &str) -> bool {
+    effect_slider_if(ui, true, label, value, range, suffix)
+}
+
+/// The same, greyed out and untouchable when `enabled` is false (the row stays in the grid either way).
+fn effect_slider_if(ui: &mut egui::Ui, enabled: bool, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, suffix: &str) -> bool {
+    ui.label(label);
+    let changed = ui.add_enabled(enabled, egui::Slider::new(value, range).suffix(suffix.to_string()).max_decimals(0)).changed();
+    ui.end_row();
+    changed
+}
+
+/// A percentage slider over a 0 to 1 value.
+fn effect_percent(ui: &mut egui::Ui, label: &str, value: &mut f32, min: f32) -> bool {
+    ui.label(label);
+    let changed = ui.add(egui::Slider::new(value, min..=1.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)).custom_parser(|t| t.trim().trim_end_matches('%').parse::<f64>().ok().map(|v| v / 100.0))).changed();
+    ui.end_row();
+    changed
+}
+
+/// A colour button with its label, as one row of a grid.
+fn effect_color(ui: &mut egui::Ui, label: &str, c: &mut Rgba) -> bool {
+    ui.label(label);
+    let mut cur = Some(*c);
+    let mut changed = false;
+    ui.horizontal(|ui| { if color_menu(ui, DROP, label, &mut cur, None) { if let Some(n) = cur { *c = n; changed = true; } } });
+    ui.end_row();
+    changed
+}
+
+/// A round pad for a shadow's direction and distance: drag the dot away from the middle. The sliders beside it do the
+/// same with exact numbers (and by keyboard).
+fn shadow_dial(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
+    const R: f32 = 40.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(R * 2.0 + 8.0, R * 2.0 + 8.0), egui::Sense::click_and_drag());
+    let c = rect.center();
+    let v = ui.visuals();
+    let (ring, ink, accent) = (v.widgets.noninteractive.fg_stroke.color.gamma_multiply(0.5), v.widgets.noninteractive.fg_stroke.color, v.selection.bg_fill);
+    let p = ui.painter();
+    p.circle_filled(c, R, v.extreme_bg_color);
+    p.circle_stroke(c, R, egui::Stroke::new(1.0, ring));
+    p.circle_stroke(c, R / 2.0, egui::Stroke::new(1.0, ring.gamma_multiply(0.5)));
+    p.line_segment([c - egui::vec2(R, 0.0), c + egui::vec2(R, 0.0)], egui::Stroke::new(1.0, ring.gamma_multiply(0.4)));
+    p.line_segment([c - egui::vec2(0.0, R), c + egui::vec2(0.0, R)], egui::Stroke::new(1.0, ring.gamma_multiply(0.4)));
+    let mut changed = false;
+    if resp.dragged() || resp.clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let mut d = pos - c;
+            if d.length() > R { d = d.normalized() * R; }
+            if d.length() < 3.0 { d = egui::Vec2::ZERO; }   // the middle means "straight behind"
+            let (dx, dy) = (d.x.round(), d.y.round());
+            if (dx, dy) != (sh.dx, sh.dy) { sh.dx = dx; sh.dy = dy; changed = true; }
+        }
+    }
+    let off = egui::vec2(sh.dx, sh.dy);
+    let dot = c + if off.length() > R { off.normalized() * R } else { off };
+    ui.painter().line_segment([c, dot], egui::Stroke::new(2.0, accent));
+    ui.painter().circle_filled(dot, 5.5, accent);
+    ui.painter().circle_stroke(dot, 5.5, egui::Stroke::new(1.0, ink));
+    resp.on_hover_text("Drag to set which way the shadow falls and how far");
+    changed
+}
+
+/// The shadow's controls: the dial, distance and angle sliders, blur, spread and colour.
+fn shadow_controls(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        let mut dist = sh.dx.abs().max(sh.dy.abs());
-        let (cx, cy) = (sh.dx.signum() * (sh.dx != 0.0) as i32 as f32, sh.dy.signum() * (sh.dy != 0.0) as i32 as f32);
-        egui::Grid::new("shadow-pad").spacing([2.0, 2.0]).show(ui, |ui| {
-            for gy in [-1.0f32, 0.0, 1.0] {
-                for gx in [-1.0f32, 0.0, 1.0] {
-                    let label = match (gx as i32, gy as i32) {
-                        (-1, -1) => "NW", (0, -1) => "N", (1, -1) => "NE",
-                        (-1, 0) => "W", (0, 0) => "All", (1, 0) => "E",
-                        (-1, 1) => "SW", (0, 1) => "S", _ => "SE",
-                    };
-                    if ui.add(egui::Button::new(label).selected((gx, gy) == (cx, cy)).min_size(egui::vec2(30.0, 22.0))).clicked() {
-                        let d = if gx == 0.0 && gy == 0.0 { 0.0 } else if dist == 0.0 { 4.0 } else { dist };
-                        dist = d;
-                        sh.dx = gx * d;
-                        sh.dy = gy * d;
-                        changed = true;
-                    }
-                }
-                ui.end_row();
-            }
-        });
+        changed |= shadow_dial(ui, sh);
         ui.vertical(|ui| {
-            ui.add_enabled_ui(sh.dx != 0.0 || sh.dy != 0.0, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Distance");
-                    if ui.add(egui::DragValue::new(&mut dist).range(0.0..=100.0)).changed() {
-                        sh.dx = cx * dist;
-                        sh.dy = cy * dist;
-                        changed = true;
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                ui.label("Blur");
-                changed |= ui.add(egui::DragValue::new(&mut sh.blur).range(0.0..=100.0)).changed();
-            });
-            ui.horizontal(|ui| {
-                ui.label("Spread");
-                changed |= ui.add(egui::DragValue::new(&mut sh.spread).range(-50.0..=100.0)).changed();
+            let mut dist = (sh.dx * sh.dx + sh.dy * sh.dy).sqrt();
+            let mut angle = if dist > 0.0 { sh.dy.atan2(sh.dx).to_degrees().rem_euclid(360.0) } else { 90.0 };
+            egui::Grid::new("shadow-dir").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                let d0 = dist;
+                if effect_slider(ui, "Distance", &mut dist, 0.0..=100.0, " px") {
+                    let a = angle.to_radians();
+                    let was_zero = d0 == 0.0;
+                    let a = if was_zero { std::f32::consts::FRAC_PI_2 } else { a };
+                    sh.dx = (dist * a.cos()).round(); sh.dy = (dist * a.sin()).round(); changed = true;
+                }
+                if effect_slider_if(ui, dist > 0.0, "Direction", &mut angle, 0.0..=360.0, "\u{b0}") {
+                    let a = angle.to_radians();
+                    sh.dx = (dist * a.cos()).round(); sh.dy = (dist * a.sin()).round(); changed = true;
+                }
             });
         });
     });
+    egui::Grid::new("shadow-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        changed |= effect_slider(ui, "Blur", &mut sh.blur, 0.0..=100.0, " px");
+        changed |= effect_slider(ui, "Spread", &mut sh.spread, -50.0..=100.0, " px");
+        changed |= effect_color(ui, "Color", &mut sh.color);
+    });
     changed
+}
+
+/// A small sample of the object's look with every effect applied, redrawn as the controls move.
+fn effects_preview(ui: &mut egui::Ui, obj: &Object) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 86.0), egui::Sense::hover());
+    let p = ui.painter_at(rect);
+    p.rect_filled(rect, 4.0, egui::Color32::from_gray(238));   // light in both themes, so a dark shadow shows
+    let sample = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 8.0), egui::vec2(110.0, 34.0));
+    // The sample is smaller than a slide, so its effects are drawn at half size.
+    let mut sample_obj = Object::new("sample", "Sample", Kind::Rect, 0.0, 0.0, sample.width(), sample.height());
+    sample_obj.fill = Some(obj.fill.unwrap_or(Rgba(3, 83, 158, 255)));
+    sample_obj.radius = 8.0;
+    sample_obj.shadow = obj.shadow; sample_obj.glow = obj.glow; sample_obj.reflection = obj.reflection; sample_obj.soft_edge = obj.soft_edge;
+    let fill = color(sample_obj.fill.unwrap());
+    super::effects_paint::behind(&p, &sample_obj, sample, 0.5, Some(fill), &|q| q);
+    if obj.soft_edge > 0.0 { super::effects_paint::soft_fill(&p, &super::effects_paint::figures(&sample_obj, sample, 0.5), sample, fill, obj.soft_edge * 0.5, &|q| q); }
+    else { p.rect_filled(sample, 4.0, fill); }
+    p.text(sample.center(), egui::Align2::CENTER_CENTER, "Sample", egui::FontId::proportional(13.0), egui::Color32::WHITE);
+}
+
+/// The effects buttons: one popup each, so none of them is tall.
+#[derive(Clone, Copy, PartialEq)]
+enum EffectPane { Presets, Shadow, Glow, Reflection, Soft, Corners }
+
+/// The contents of one Effects popup: a small preview, then that effect's controls. Returns true when anything changed.
+fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
+    let mut changed = false;
+    ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
+    ui.spacing_mut().slider_width = 96.0;
+    effects_preview(ui, obj);
+    ui.add_space(6.0);
+    match pane {
+        EffectPane::Presets => {
+            for (name, tip) in [("None", "Remove every effect"), ("Soft shadow", "A gentle shadow just below"), ("Warm glow", "A warm halo"), ("Mirror", "A faded reflection below")] {
+                if ui.add(egui::Button::new(name).min_size(egui::vec2(ui.available_width(), 22.0))).on_hover_text(tip).clicked() {
+                    obj.shadow = None; obj.glow = None; obj.reflection = None; obj.soft_edge = 0.0;
+                    match name {
+                        "Soft shadow" => obj.shadow = Some(Shadow { dx: 0.0, dy: 4.0, blur: 14.0, spread: 0.0, color: Rgba(0, 0, 0, 80) }),
+                        "Warm glow" => obj.glow = Some(Glow { radius: 14.0, color: Rgba(255, 190, 40, 220) }),
+                        "Mirror" => obj.reflection = Some(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 }),
+                        _ => {}
+                    }
+                    changed = true;
+                }
+            }
+        }
+        EffectPane::Shadow => {
+            let mut sh = obj.shadow.unwrap_or(Shadow { dx: 4.0, dy: 4.0, blur: 8.0, spread: 0.0, color: Rgba(0, 0, 0, 90) });
+            let mut on = obj.shadow.is_some();
+            changed |= effect_section(ui, "Use shadow", &mut on, |ui| shadow_controls(ui, &mut sh));
+            obj.shadow = if on { Some(sh) } else { None };
+        }
+        EffectPane::Glow => {
+            let mut gl = obj.glow.unwrap_or(Glow { radius: 12.0, color: Rgba(255, 190, 40, 200) });
+            let mut on = obj.glow.is_some();
+            changed |= effect_section(ui, "Use glow", &mut on, |ui| {
+                let mut c = false;
+                egui::Grid::new("glow-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                    c |= effect_slider(ui, "Size", &mut gl.radius, 1.0..=100.0, " px");
+                    c |= effect_color(ui, "Color", &mut gl.color);
+                });
+                c
+            });
+            obj.glow = if on { Some(gl) } else { None };
+        }
+        EffectPane::Reflection => {
+            let mut rf = obj.reflection.unwrap_or(Reflection { size: 0.5, opacity: 0.4, gap: 2.0 });
+            let mut on = obj.reflection.is_some();
+            changed |= effect_section(ui, "Use reflection", &mut on, |ui| {
+                let mut c = false;
+                egui::Grid::new("refl-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                    c |= effect_percent(ui, "Size", &mut rf.size, 0.1);
+                    c |= effect_percent(ui, "Opacity", &mut rf.opacity, 0.05);
+                    c |= effect_slider(ui, "Gap", &mut rf.gap, 0.0..=100.0, " px");
+                });
+                ui.weak("Not every browser shows reflections.");
+                c
+            });
+            obj.reflection = if on { Some(rf) } else { None };
+        }
+        EffectPane::Soft => {
+            let mut soft = obj.soft_edge;
+            let was = soft > 0.0;
+            let mut on = was;
+            changed |= effect_section(ui, "Use soft edges", &mut on, |ui| {
+                let mut c = false;
+                if !was { soft = 10.0; c = true; }   // just switched on: start with a visible fade
+                egui::Grid::new("soft-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| { c |= effect_slider(ui, "Fade", &mut soft, 1.0..=100.0, " px"); });
+                ui.weak("While on, the shadow and glow are hidden.");
+                c
+            });
+            obj.soft_edge = if on { soft.max(1.0) } else { 0.0 };
+        }
+        EffectPane::Corners => {
+            egui::Grid::new("corner-look").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+                changed |= effect_slider(ui, "Radius", &mut obj.radius, 0.0..=300.0, " px");
+            });
+        }
+    }
+    changed
+}
+
+/// The Effects group of the ribbon: a button for each effect, lit while the object uses it.
+fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
+    let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
+    let is_pic = matches!(obj.kind, Kind::Image);
+    if is_line { return; }
+    group(ui, "Effects", |ui| { ui.add_enabled_ui(enabled && !is_media, |ui| {
+        let panes = [
+            (EffectPane::Presets, "Presets", "Ready-made effects", false),
+            (EffectPane::Shadow, "Shadow", "A shadow behind the object", obj.shadow.is_some()),
+            (EffectPane::Glow, "Glow", "A soft halo of colour around the object", obj.glow.is_some()),
+            (EffectPane::Reflection, "Reflection", "A faded mirror image below the object", obj.reflection.is_some()),
+            (EffectPane::Soft, "Soft edges", "Fade the object's edges", obj.soft_edge > 0.0),
+            (EffectPane::Corners, "Corners", "Round the corners of a shape", obj.radius > 0.0),
+        ];
+        for row in panes.chunks(3) {
+            ui.horizontal(|ui| {
+                for &(pane, label, tip, on) in row {
+                    if pane == EffectPane::Corners && is_pic { continue; }
+                    let btn = ui.scope(|ui| {
+                        ui.spacing_mut().button_padding = egui::vec2(6.0, 1.0);
+                        ui.add(egui::Button::new(egui::RichText::new(label).size(12.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+                    }).inner.on_hover_text(tip);
+                    egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                        *changed |= effect_pane(ui, obj, pane);
+                    });
+                }
+            });
+        }
+    }); });
 }

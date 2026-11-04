@@ -9,8 +9,7 @@ const WEB_PAGE: &str = r##"<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%TITLE%</title>
 <style>
-@font-face{font-family:Montserrat;src:url(fonts/Montserrat.ttf);font-weight:100 900}
-@font-face{font-family:"Open Sans";src:url(fonts/OpenSans.ttf);font-weight:300 800;font-stretch:75% 100%}
+%FONTS%
 :root{%VARS%}
 %CSS%
 %QCSS%
@@ -117,7 +116,7 @@ pub(crate) fn build_web(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<
     if lesson.sections.is_empty() {
         return Err("the lesson has no sections".into());
     }
-    let mut files = base_files();
+    let (mut files, font_css) = font_assets(project);
     let urls = package_assets(project, &mut files);
     let t = &project.theme;
     // The lesson's own primary and secondary colours win over the theme's.
@@ -153,6 +152,7 @@ pub(crate) fn build_web(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<
     let json = serde_json::to_string(&value).map_err(|e| e.to_string())?.replace('<', "\\u003c");
     let html = WEB_PAGE
         .replace("%TITLE%", &escape_html(&project.name))
+        .replace("%FONTS%", &font_css)
         .replace("%VARS%", &vars)
         .replace("%CSS%", WEB_CSS)
         .replace("%QCSS%", QUESTION_CSS)

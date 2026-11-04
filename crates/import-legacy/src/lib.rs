@@ -25,7 +25,7 @@ pub fn font_scale_for(_slide_width: f32, slide_height: f32) -> f32 {
 }
 
 mod still;
-pub use still::{add_stills, still_asset, video_still};
+pub use still::{add_stills, still_asset, still_asset_at, still_asset_from_file, video_still, video_still_from_file};
 
 pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> {
     let parts = read_parts(reader)?;
@@ -528,7 +528,7 @@ fn convert_shapes(list: Option<Node>, ctx: &mut Ctx, hidden: bool) -> Vec<Object
             h: b - t,
             fill,
             stroke,
-            shadow,
+            shadow, glow: None, soft_edge: 0.0, reflection: None,
             hidden: hidden || starts_hidden || is_hidden(n) || n.attribute("parentG").is_some_and(|g| ctx.hidden_groups.contains(g)),
             margins: if is_check { child(src, "margins").map(|m| [num(m, "l", 32.0), num(m, "t", 0.0), num(m, "r", 0.0), num(m, "b", 0.0)]).unwrap_or([32.0, 0.0, 0.0, 0.0]) } else { child(n, "textMargin")
                 .map(|m| [num(m, "l", 0.0), num(m, "t", 0.0), num(m, "r", 0.0), num(m, "b", 0.0)])
@@ -601,7 +601,7 @@ fn table_cells(n: Node, left: f32, top: f32, hidden: bool, ctx: &mut Ctx) -> Vec
                     name: format!("Cell {},{}", ri + 1, ci + 1),
                     kind: Kind::Rect,
                     x: x, y, w: if span_w > 0.0 { span_w } else { w }, h: if span_h > 0.0 { span_h } else { heights.get(ri).copied().unwrap_or(40.0) },
-                    fill, stroke: if all_alike { sides[0] } else { None }, shadow: None, hidden, margins, radius: 0.0,
+                    fill, stroke: if all_alike { sides[0] } else { None }, shadow: None, glow: None, soft_edge: 0.0, reflection: None, hidden, margins, radius: 0.0,
                     alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich, entrance: None, exit: None, timing: None,
                     text, style, asset: None, states: vec![], initial_state: String::new(), placeholder: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: Some(base_id.clone()), table: Some((ri as u16, ci as u16)), table_span: (span != (1, 1)).then_some(span), table_borders: (!all_alike).then_some(sides), emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
                 });
@@ -931,6 +931,7 @@ fn parse_states(n: Node, fallback: &TextParts, ctx: &mut Ctx) -> Vec<ObjectState
             asset,
             size,
             shine: shine_of(shape),
+            gradient: None,
         });
     }
     out

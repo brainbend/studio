@@ -14,9 +14,46 @@ fn ffmpeg() -> Option<PathBuf> {
     })
 }
 
-/// One frame of the video as a JPEG, about a second in (the first frame when the clip is shorter), at most 1280 wide.
-pub fn video_still(bytes: &[u8]) -> Option<Vec<u8>> {
+/// A frame from a video file on disk, read by ffmpeg directly (no copy of the video is made). `None` without ffmpeg.
+pub fn video_still_from_file(path: &Path) -> Option<Vec<u8>> {
+    let ffmpeg = ffmpeg()?;
+    let seek = "0".to_string();
+    static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("brainbend-still-{}-f{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let output = dir.join("still.jpg");
+    let result = (|| {
+        for seek in [seek.as_str()] {
+            let _ = std::fs::remove_file(&output);
+            let ok = Command::new(&ffmpeg)
+                .args(["-nostdin", "-loglevel", "error", "-y", "-ss", seek, "-i"]).arg(path)
+                .args(["-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4"]).arg(&output)
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .status().is_ok_and(|s| s.success());
+            if ok { if let Ok(b) = std::fs::read(&output) { if !b.is_empty() { return Some(b); } } }
+        }
+        None
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// The asset for the still of a video file, named after the file.
+pub fn still_asset_from_file(path: &Path) -> Option<Asset> {
+    let bytes = video_still_from_file(path)?;
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+    Some(Asset { name: format!("{stem} still.jpg"), mime: "image/jpeg".into(), bytes, file: None })
+}
+
+/// The first frame of the video as a JPEG, at most 1280 wide (Storyline's default poster frame).
+pub fn video_still(bytes: &[u8]) -> Option<Vec<u8>> { video_still_at(bytes, 0.0) }
+
+/// The frame `secs` seconds into the video as a JPEG, at most 1280 wide. `None` when there is no ffmpeg or the video is
+/// shorter than that.
+pub fn video_still_at(bytes: &[u8], secs: f64) -> Option<Vec<u8>> {
     if bytes.is_empty() { return None; }
+    let seek = format!("{:.3}", secs.max(0.0));
     let ffmpeg = ffmpeg()?;
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -25,7 +62,7 @@ pub fn video_still(bytes: &[u8]) -> Option<Vec<u8>> {
     let (input, output) = (dir.join("clip"), dir.join("still.jpg"));
     let result = (|| {
         std::fs::write(&input, bytes).ok()?;
-        for seek in ["1", "0"] {
+        for seek in [seek.as_str()] {
             let _ = std::fs::remove_file(&output);
             let ok = Command::new(&ffmpeg)
                 .args(["-nostdin", "-loglevel", "error", "-y", "-ss", seek, "-i"]).arg(&input)
@@ -41,8 +78,11 @@ pub fn video_still(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// The asset for a video's still, named after the video.
-pub fn still_asset(video: &Asset) -> Option<Asset> {
-    let bytes = video_still(&video.bytes)?;
+pub fn still_asset(video: &Asset) -> Option<Asset> { still_asset_at(video, 0.0) }
+
+/// The asset for the frame `secs` seconds into a video.
+pub fn still_asset_at(video: &Asset, secs: f64) -> Option<Asset> {
+    let bytes = video_still_at(&video.bytes, secs)?;
     let stem = Path::new(&video.name).file_stem().and_then(|s| s.to_str()).unwrap_or("video");
     Some(Asset { name: format!("{stem} still.jpg"), mime: "image/jpeg".into(), bytes, file: None })
 }
@@ -94,6 +134,18 @@ mod tests {
         assert_eq!(&still[..2], &[0xFF, 0xD8], "a JPEG");
         let img = image::load_from_memory(&still).unwrap();
         assert_eq!((img.width(), img.height()), (320, 180));
+    }
+
+    #[test]
+    fn a_still_can_be_read_from_the_file_without_copying_it() {
+        let Some(bytes) = clip() else { return };
+        let path = std::env::temp_dir().join(format!("brainbend-stillfile-{}.mp4", std::process::id()));
+        std::fs::write(&path, &bytes).unwrap();
+        let asset = still_asset_from_file(&path).expect("a frame");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(&asset.bytes[..2], &[0xFF, 0xD8], "a JPEG");
+        assert!(asset.name.ends_with("still.jpg") && asset.mime == "image/jpeg");
+        assert!(still_asset_from_file(std::path::Path::new("/no/such/video.mp4")).is_none());
     }
 
     #[test]
