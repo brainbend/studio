@@ -958,7 +958,7 @@ impl App {
         self.leave_master_view();
         let Some(p) = &self.project else { return };
         let target = if as_new || self.path.is_none() {
-            rfd::FileDialog::new().add_filter("BrainBend Studio project", &["brainbend"]).set_file_name(format!("{}.brainbend", p.name)).save_file()
+            rfd::FileDialog::new().add_filter("BrainBend Studio project", &["brainbend"]).set_file_name(format!("{}.brainbend", file_safe_name(&p.name))).save_file()
         } else {
             self.path.clone()
         };
@@ -1062,7 +1062,9 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let Some(dir) = rfd::FileDialog::new().set_title("Choose an empty folder for the HTML5 export").pick_folder() else { return };
+        let Some(parent) = rfd::FileDialog::new().set_title("Choose where to put the web folder").pick_folder() else { return };
+        // The export lives in a folder named for the project, so index.html and its assets never land loose.
+        let dir = parent.join(file_safe_name(&p.name));
         self.status = match brainbend_publish_html::export(p, &dir) {
             Ok(()) => format!("Exported HTML5 to {}", dir.display()),
             Err(e) => format!("Export failed: {e}"),
@@ -1074,7 +1076,7 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint presentation", &["pptx"]).set_file_name(format!("{}.pptx", p.name)).save_file() else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("PowerPoint presentation", &["pptx"]).set_file_name(format!("{}.pptx", file_safe_name(&p.name))).save_file() else { return };
         match brainbend_export_pptx::export(p) {
             Ok((bytes, notes)) => match std::fs::write(&path, bytes) {
                 Ok(()) => {
@@ -1091,10 +1093,9 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
-        let tag = if version == brainbend_publish_html::Lms::Scorm12 { "scorm12" } else { "scorm2004" };
         let Some(path) = rfd::FileDialog::new()
             .add_filter("SCORM package", &["zip"])
-            .set_file_name(format!("{}-{tag}.zip", p.name))
+            .set_file_name(format!("{}.zip", file_safe_name(&p.name)))
             .save_file()
         else {
             return;
@@ -7388,8 +7389,22 @@ impl App {
     }
 }
 
+/// A project name made safe to use as a file or folder name on any system.
+pub(crate) fn file_safe_name(name: &str) -> String {
+    let cleaned: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
+    let cleaned = cleaned.trim().trim_matches('.').trim();
+    if cleaned.is_empty() { "Untitled".into() } else { cleaned.into() }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn project_names_become_safe_file_names() {
+        assert_eq!(super::file_safe_name("My Course"), "My Course");
+        assert_eq!(super::file_safe_name("Q1/Q2: Safety?"), "Q1-Q2- Safety-");
+        assert_eq!(super::file_safe_name("  ..  "), "Untitled");
+    }
+
     use super::*;
 
     fn harness(app: App) -> egui_kittest::Harness<'static, App> {
