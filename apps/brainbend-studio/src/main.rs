@@ -3405,7 +3405,7 @@ impl App {
         let Some(p) = self.project.as_ref() else { self.focus_open = false; return };
         let (si, li) = (self.slide, self.layer);
         let Some(layer) = p.slides.get(si).and_then(|s| s.layers.get(li)) else { self.focus_open = false; return };
-        let rows: Vec<(usize, String, char, bool, bool)> = layer.focus_indices().into_iter().map(|i| { let o = &layer.objects[i]; (i, o.name.clone(), objects_panel::kind_icon(o), o.decorative, o.hidden) }).collect();
+        let rows: Vec<(usize, String, char, Option<u8>, bool, bool)> = layer.focus_indices().into_iter().map(|i| { let o = &layer.objects[i]; (i, o.name.clone(), objects_panel::kind_icon(o), o.role.level().filter(|_| matches!(o.kind, Kind::Text)), o.decorative, o.hidden) }).collect();
         let (title, custom) = (layer.name.clone(), !layer.focus_order.is_empty());
         let mut open = true;
         let mut mv: Option<(usize, i32)> = None;
@@ -3417,10 +3417,14 @@ impl App {
             ui.add_space(4.0);
             let last = rows.len().saturating_sub(1);
             egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                for (pos, (i, name, icon, decorative, hidden)) in rows.iter().enumerate() {
+                for (pos, (i, name, icon, heading, decorative, hidden)) in rows.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.add_sized([22.0, 20.0], egui::Label::new(egui::RichText::new(format!("{}", pos + 1)).weak()));
-                        ui.label(egui::RichText::new(icon.to_string()).family(ribbon::icons()).size(14.0));
+                        // A heading shows its level (H1, H2...) where other text shows the Text icon.
+                        match heading {
+                            Some(level) => { ui.add_sized([20.0, 20.0], egui::Label::new(egui::RichText::new(format!("H{level}")).strong().size(12.0))).on_hover_text(format!("Heading {level}")); }
+                            None => { ui.label(egui::RichText::new(icon.to_string()).family(ribbon::icons()).size(14.0)); }
+                        }
                         let dim = *decorative || *hidden;
                         let mut t = egui::RichText::new(name);
                         if dim { t = t.weak(); }
@@ -8195,6 +8199,19 @@ mod tests {
         h.state_mut().undo();
         h.run_steps(2);
         assert_eq!(order(&h).len(), 3, "reset is one undo step");
+    }
+
+    #[test]
+    fn gui_focus_order_shows_the_heading_level_of_headings() {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        a.insert_text();
+        a.project.as_mut().unwrap().slides[0].layers[0].objects[0].role = TextRole::H2;
+        a.focus_open = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        { use egui_kittest::kittest::Queryable; assert_eq!(h.get_all_by_label("H2").count(), 1, "the heading shows its level; the ordinary text keeps its icon"); assert!(h.query_by_label("H1").is_none()); }
     }
 
     #[test]

@@ -29,7 +29,8 @@ enum Choice {
     Page(FilePage),
 }
 
-/// What the New page offers. Only the media lesson can be created today.
+/// What the New page offers. Only the media lesson can be created today; web lessons are marked Coming soon until their
+/// editor is finished.
 struct Template {
     kind: ProjectKind,
     icon: char,
@@ -38,7 +39,7 @@ struct Template {
 }
 
 const TEMPLATES: [Template; 2] = [
-    Template { kind: ProjectKind::WebLesson, icon: WEB, blurb: "A scrolling, mobile-friendly lesson built from content blocks: text, images, lists and knowledge checks.", available: true },
+    Template { kind: ProjectKind::WebLesson, icon: WEB, blurb: "A scrolling, mobile-friendly lesson built from content blocks: text, images, lists and knowledge checks.", available: false },
     Template { kind: ProjectKind::MediaLesson, icon: MEDIA, blurb: "A deck-style lesson: slides with layers, triggers, variables, animation, video and graded quizzes. Publishes to the web and SCORM.", available: true },
 ];
 
@@ -266,5 +267,17 @@ impl App {
             Ok(_) => "Print view opened in your browser".into(),
             Err(e) => format!("Wrote {} but could not open it: {e}", file.display()),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_media_lesson_can_be_created_until_web_lessons_are_finished() {
+        for t in &TEMPLATES {
+            assert_eq!(t.available, matches!(t.kind, ProjectKind::MediaLesson), "{} availability", t.kind.label());
+        }
     }
 }
