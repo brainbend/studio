@@ -3716,9 +3716,7 @@ impl App {
         let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
         let n = slide.layers.len();
         if self.visible.len() != n { self.visible = vec![true; n]; }
-        ui.add_space(2.0);
-        section_label(ui, "Slide Layers");
-        ui.add_space(2.0);
+        doc_tabs::panel_tabs(ui, &["Slide Layers".to_string()], &mut 0);
         let list_h = (ui.available_height() - 40.0).max(40.0);
         egui::ScrollArea::vertical().id_salt("layers").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -5848,8 +5846,7 @@ impl App {
         let mut want_thumb: Option<(usize, usize)> = None;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
-        egui::Panel::right("inspector").default_size(326.0).show(root, |ui| {
-            ui.add_space(6.0);
+        egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
@@ -5860,12 +5857,11 @@ impl App {
             self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
             if !self.in_master_view() {
-                egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).show(ui, |ui| {
+                egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
             }
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.right_tab, 0, "Properties");
+            {
                 let owner_id = self.selected_object().map(|o| o.id.clone());
                 let count = {
                     let sl = &self.project.as_ref().unwrap().slides[slide_idx];
@@ -5877,9 +5873,9 @@ impl App {
                         _ => false,
                     }).count()
                 };
-                ui.selectable_value(&mut self.right_tab, 1, if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() });
-            });
-            ui.separator();
+                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }];
+                doc_tabs::panel_tabs(ui, &labels, &mut self.right_tab);
+            }
             if self.right_tab == 1 {
                 self.triggers_panel(ui, ctx, slide_idx);
                 return;
@@ -6256,14 +6252,10 @@ impl App {
             }
         }
 
-        egui::Panel::bottom("timeline").resizable(true).default_size(200.0).show(root, |ui| {
+        egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             ui.add_enabled_ui(editable, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.bottom_tab, 0, "Timeline");
-                ui.selectable_value(&mut self.bottom_tab, 1, "Slide Notes");
-                ui.selectable_value(&mut self.bottom_tab, 2, "States");
-            });
+            doc_tabs::panel_tabs(ui, &["Timeline".to_string(), "Slide Notes".to_string(), "States".to_string()], &mut self.bottom_tab);
             if self.bottom_tab == 0 {
                 self.timeline_panel(ui, slide_idx);
             } else if self.bottom_tab == 2 {
@@ -8893,7 +8885,7 @@ mod tests {
         // Dragging the area's grip moves it; one undo step puts it back.
         let area = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[1].kind { SlideKind::Question(q) => q.area.unwrap(), _ => unreachable!() };
         let before = area(&h);
-        let (from, to) = (egui::pos2(362.0, 306.0), egui::pos2(462.0, 356.0));
+        let (from, to) = (egui::pos2(362.0, 294.0), egui::pos2(462.0, 344.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -8909,7 +8901,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(786.0, 669.0), egui::pos2(736.0, 619.0));
+        let (from, to) = (egui::pos2(786.0, 657.0), egui::pos2(736.0, 607.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -10943,6 +10935,27 @@ mod tests {
     }
 
     #[test]
+    fn about_is_its_own_page_at_the_bottom_of_the_file_menu() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.state_mut().file_view = true;
+        h.state_mut().file_page = backstage::FilePage::Info;
+        h.run_steps(3);
+        assert!(h.query_by_label("Check for updates").is_none(), "Project Info no longer carries the About section");
+        assert!(h.query_by_label("Project name").is_some());
+        h.get_by_label("About").click();
+        h.run_steps(3);
+        assert!(h.state().file_page == backstage::FilePage::About);
+        assert!(h.query_by_label("Check for updates").is_some());
+        assert!(h.query_by_label_contains("Version ").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("file-about.png")).unwrap();
+        }
+    }
+
+    #[test]
     fn the_open_page_lists_recent_projects_and_clicking_one_opens_it() {
         use egui_kittest::kittest::Queryable;
         let path = saved_project("Safety Course");
@@ -11287,7 +11300,7 @@ mod tests {
             h.run_steps(2);
         };
         // Rows run front to back: the first listed is the last object.
-        let (x, y0, step) = (300.0, 853.0, 28.0);
+        let (x, y0, step) = (300.0, 847.0, 28.0);
         click(&mut h, egui::pos2(x, y0));
         assert_eq!(h.state().selected, Some((0, 2)), "clicking a name in the timeline selects that object");
         click(&mut h, egui::pos2(x, y0 + step));
@@ -11360,7 +11373,7 @@ mod tests {
         }
         assert!(h.state().tl_open.is_empty());
         // Click the fold arrow at the left of the first row.
-        let at = egui::pos2(264.0, 909.0);
+        let at = egui::pos2(264.0, 903.0);
         h.event(egui::Event::PointerMoved(at));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11373,7 +11386,7 @@ mod tests {
         // Dragging the group's bar moves every member's start together.
         let timings = |h: &egui_kittest::Harness<'static, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.timing).collect::<Vec<_>>();
         assert!(timings(&h).iter().all(|t| t.is_none()));
-        let (from, to) = (egui::pos2(700.0, 909.0), egui::pos2(800.0, 909.0));
+        let (from, to) = (egui::pos2(700.0, 903.0), egui::pos2(800.0, 903.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11564,7 +11577,7 @@ mod tests {
         }
         let point = |h: &egui_kittest::Harness<'_, App>| h.state().selected_object().unwrap().motion.as_ref().unwrap().points[1];
         let before = point(&h);
-        let (from, to) = (egui::pos2(720.0, 364.0), egui::pos2(760.0, 404.0)); // path point 1 in the 9n screenshot
+        let (from, to) = (egui::pos2(720.0, 352.0), egui::pos2(760.0, 392.0)); // path point 1 in the 9n screenshot
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });

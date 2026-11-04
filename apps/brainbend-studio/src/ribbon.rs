@@ -2135,9 +2135,9 @@ impl App {
 
     /// How wide the pinned group is, so the ribbon can leave room for it at the right.
     fn pinned_width(&self, ui: &egui::Ui) -> f32 {
-        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", true)];
+        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false)];
         if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
-        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 18.0
+        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
     }
 
     /// Try It, Preview and Publish: pinned at the right end of the ribbon, always in view.

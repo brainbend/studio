@@ -20,6 +20,7 @@ pub enum FilePage {
     New,
     Open,
     Info,
+    About,
 }
 
 enum Choice {
@@ -101,7 +102,7 @@ impl App {
         let has_project = self.project.is_some();
         if has_project && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.file_view = false; return false; }
         // With nothing open there is no Project Info to show.
-        if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open) { self.file_page = FilePage::New; }
+        if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open | FilePage::About) { self.file_page = FilePage::New; }
         let mut choice: Option<Choice> = None;
         let mut create: Option<ProjectKind> = None;
         let mut open_action: Option<OpenAction> = None;
@@ -125,20 +126,12 @@ impl App {
                     // The first entry is the way out; keep it apart from the file commands.
                     if n == 1 { ui.add_space(8.0); }
                     let selected = matches!(&ch, Choice::Page(p) if *p == self.file_page);
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 42.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-                    if selected || (enabled && resp.hovered()) {
-                        ui.painter().rect_filled(rect, RIBBON_RADIUS, egui::Color32::from_white_alpha(if selected { 48 } else { 26 }));
-                    }
-                    if selected {
-                        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, egui::Color32::WHITE);
-                    }
-                    let alpha = if enabled { 255 } else { 130 };
-                    let icon_col = egui::Color32::from_white_alpha(alpha);
-                    ui.painter().text(egui::pos2(rect.left() + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(20.0, icons()), icon_col);
-                    ui.painter().text(egui::pos2(rect.left() + 54.0, rect.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(15.0), egui::Color32::from_white_alpha(alpha));
-                    if enabled && resp.clicked() { choice = Some(ch); }
+                    if nav_row(ui, icon, label, enabled, selected) { choice = Some(ch); }
                 }
+                // About sits at the bottom, apart from the commands above.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    if nav_row(ui, ribbon::QUESTION, "About", true, self.file_page == FilePage::About) { choice = Some(Choice::Page(FilePage::About)); }
+                });
             });
         // Every page shares one column: left-aligned, starting at the same place under its heading, up to 980px wide.
         egui::CentralPanel::default().frame(egui::Frame::new().fill(root.visuals().panel_fill).inner_margin(egui::Margin::symmetric(48, 36))).show(root, |ui| {
@@ -147,6 +140,7 @@ impl App {
             let used = ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 match self.file_page {
                     FilePage::Info if has_project => self.info_page(ui),
+                    FilePage::About => self.about_page(ui),
                     FilePage::Open => open_action = self.open_page(ui),
                     _ => create = self.new_page(ui),
                 }
@@ -286,13 +280,16 @@ impl App {
             row("Variables", p.variables.len().to_string());
             row("Pass mark", format!("{}%", p.pass_mark));
         });
-        ui.add_space(24.0);
-        ui.separator();
-        ui.add_space(12.0);
+    }
+
+    /// The About page: the version, updates, and credits. It needs no project, so it is there from the start.
+    fn about_page(&mut self, ui: &mut egui::Ui) {
         ui.heading("About BrainBend Studio");
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+        ui.add_space(6.0);
         self.update_controls(ui);
+        ui.add_space(6.0);
         ui.label("A free, lightweight authoring tool for interactive lessons that publish to the web and to LMSs (SCORM 1.2 and 2004).");
         ui.add_space(6.0);
         ui.weak("Fonts: Montserrat and Open Sans (SIL Open Font License 1.1). Icons: Phosphor (MIT). Spelling: SCOWL en_US word list (permissive license, crates/spell/dict).");
@@ -339,6 +336,23 @@ impl App {
             Err(e) => format!("Wrote {} but could not open it: {e}", file.display()),
         };
     }
+}
+
+/// One row of the File menu's list: icon and label on the accent blue. Returns whether it was clicked.
+fn nav_row(ui: &mut egui::Ui, icon: char, label: &str, enabled: bool, selected: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 42.0), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+    if selected || (enabled && resp.hovered()) {
+        ui.painter().rect_filled(rect, RIBBON_RADIUS, egui::Color32::from_white_alpha(if selected { 48 } else { 26 }));
+    }
+    if selected {
+        ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, egui::Color32::WHITE);
+    }
+    let alpha = if enabled { 255 } else { 130 };
+    let ink = egui::Color32::from_white_alpha(alpha);
+    ui.painter().text(egui::pos2(rect.left() + 20.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(20.0, icons()), ink);
+    ui.painter().text(egui::pos2(rect.left() + 54.0, rect.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(15.0), ink);
+    enabled && resp.clicked()
 }
 
 /// The BrainBend logo, faint, in the bottom-right corner of the page. It only appears where it fits without touching

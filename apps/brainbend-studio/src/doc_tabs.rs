@@ -194,6 +194,50 @@ impl App {
 /// and muted text, with a faint fill on hover. The × shows on the active tab and on hover. Returns the tab and
 /// whether its × was pressed.
 fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32) -> (egui::Response, bool) {
+    tab_chip_sized(ui, icon, label, active, closable, width, if closable { 12.5 } else { 11.5 })
+}
+
+/// A row of tabs for a panel (Properties/Triggers, Timeline/Slide Notes/States, Slide Layers), drawn like the
+/// document tabs: the active one is a blue block that meets a blue line under the row. Returns whether a tab
+/// other than the current one was clicked; `current` is updated to it.
+pub(super) fn panel_tabs(ui: &mut egui::Ui, labels: &[String], current: &mut usize) -> bool {
+    let mut changed = false;
+    let before = ui.spacing().item_spacing.x;
+    ui.spacing_mut().item_spacing.x = 0.0;
+    // The same gap above as between the ribbon and the document tabs, and the same grey band behind the tabs,
+    // reaching the panel's edges.
+    ui.add_space(PANEL_TABS_GAP);
+    let band = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+    let top = ui.cursor().min.y;
+    let full = ui.max_rect().expand2(egui::vec2(8.0, 0.0));
+    let painter = ui.painter().with_clip_rect(full);
+    painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), top), egui::pos2(full.right(), top + 30.0)), 0.0, band);
+    let row = ui.horizontal(|ui| {
+        for (i, label) in labels.iter().enumerate() {
+            let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(12.5), egui::Color32::WHITE).size().x);
+            let (r, _) = tab_chip_sized(ui, None, label, *current == i, false, tw + 28.0, 12.5);
+            r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *current == i, label));
+            if r.clicked() && *current != i { *current = i; changed = true; }
+        }
+    });
+    let bottom = row.response.rect.bottom();
+    painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), bottom - 2.0), egui::pos2(full.right(), bottom)), 0.0, ui.visuals().selection.bg_fill);
+    ui.spacing_mut().item_spacing.x = before;
+    ui.add_space(PANEL_TABS_GAP + 2.0);
+    changed
+}
+
+/// The space above a row of panel tabs, as between the ribbon and the document tabs. The space below the blue line is 2 more.
+const PANEL_TABS_GAP: f32 = 6.0;
+
+/// The frame for a panel that starts with a row of tabs: no space above them, so the gap is the same everywhere.
+/// `nested` is for a panel inside another, whose edges already have the outer panel's margin.
+pub(super) fn tabbed_panel_frame(style: &egui::Style, nested: bool) -> egui::Frame {
+    let side = if nested { 0 } else { 8 };
+    egui::Frame::side_top_panel(style).inner_margin(egui::Margin { left: side, right: side, top: 0, bottom: 8 })
+}
+
+fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32) -> (egui::Response, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click());
     let dark = ui.visuals().dark_mode;
     let text = ui.visuals().text_color();
@@ -212,7 +256,7 @@ fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, cl
         left += 24.0;
     }
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max - egui::vec2(if closable { 28.0 } else { 8.0 }, 0.0));
-    let font = if closable { egui::FontId::proportional(12.5) } else { egui::FontId::proportional(11.5) };
+    let font = egui::FontId::proportional(size);
     ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
     let mut closed = false;
     if closable && (active || resp.hovered()) {
