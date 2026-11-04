@@ -43,7 +43,7 @@ impl Look {
 /// The object looks like `st` (a state's fill replaces any gradient; a picture state swaps the picture).
 pub fn show_state(o: &mut Object, st: &ObjectState) {
     o.fill = st.fill;
-    o.gradient = None;
+    o.gradient = st.gradient.clone();
     o.stroke = st.stroke;
     o.shadow = st.shadow;
     o.text = st.text.clone();
@@ -94,6 +94,7 @@ pub fn end(slides: &mut [Slide], swap: Swap) {
     let is_image = matches!(o.kind, Kind::Image);
     if let Some(st) = o.states.iter_mut().find(|s| s.name == swap.viewed) {
         st.fill = seen.fill;
+        st.gradient = seen.gradient.clone();
         st.stroke = seen.stroke;
         st.shadow = seen.shadow;
         st.text = seen.text.clone();
@@ -117,7 +118,7 @@ pub fn unswap(slides: &mut [Slide], swap: &Swap) {
 }
 
 fn state_of(o: &Object) -> ObjectState {
-    ObjectState { shine: None, name: "Normal".into(), rich: o.rich.clone(), fill: o.fill, stroke: o.stroke, shadow: o.shadow, text: o.text.clone(), style: o.style.clone(), asset: o.asset.clone().filter(|_| matches!(o.kind, Kind::Image)), size: None }
+    ObjectState { shine: None, gradient: o.gradient.clone(), name: "Normal".into(), rich: o.rich.clone(), fill: o.fill, stroke: o.stroke, shadow: o.shadow, text: o.text.clone(), style: o.style.clone(), asset: o.asset.clone().filter(|_| matches!(o.kind, Kind::Image)), size: None }
 }
 
 /// Add whichever of Normal, Hover, Down, Visited and Disabled the object does not have yet.
@@ -308,7 +309,8 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
         q.rect_filled(pv, 0.0, egui::Color32::from_gray(120));
         q.text(pv.center(), egui::Align2::CENTER_CENTER, "Picture", egui::FontId::proportional(11.0), egui::Color32::WHITE);
     } else {
-        if let Some(f) = st.fill { q.rect_filled(pv, 2.0, crate::color(f)); }
+        if let Some(g) = st.gradient.as_ref().filter(|g| !g.stops.is_empty()) { crate::paint_gradient(&q, pv, g.angle, &g.stops); }
+        else if let Some(f) = st.fill { q.rect_filled(pv, 2.0, crate::color(f)); }
         if let Some(s) = st.stroke { q.rect_stroke(pv, 2.0, egui::Stroke::new((s.width * k).max(1.0), crate::color(s.color)), egui::StrokeKind::Inside); }
         if let Some(sh) = st.shine {
             q.rect_filled(pv, 2.0, egui::Color32::from_white_alpha((sh.alpha * 90.0) as u8));

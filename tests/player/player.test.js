@@ -1569,6 +1569,18 @@ test('player layout: the banner tops the sidebar, the logo sits small beside the
   assert.deepEqual(errors, []);
 });
 
+test('button styles: a state can be a gradient, so a button keeps its look when hovered', () => {
+  const { w, errors } = boot(fixture('buttonstyle'));
+  const btn = $$(w, '.obj')[0];
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(110,179,215,1\) 0%,rgba\(47,78,162,1\) 100%\)/, 'the resting face is the gradient');
+  assert.match(btn.style.boxShadow, /^0px 4px 3\.5px 0px /, 'with its drop shadow');
+  btn.dispatchEvent(new w.MouseEvent('mouseenter'));
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat colour');
+  btn.dispatchEvent(new w.MouseEvent('mouseleave'));
+  assert.match(btn.style.background, /rgba\(110,179,215,1\)/, 'and it goes back');
+  assert.deepEqual(errors, []);
+});
+
 test('button effects: a glow is a halo, soft edges fade along the outline, a reflection mirrors it, and none of it touches a plain button', () => {
   const { w, errors } = boot(fixture('buttoneffects'));
   const order = ['glow', 'soft', 'reflect', 'plain', 'star', 'starglow', 'oval'];   // the example's objects, in order

@@ -26,7 +26,7 @@ fn main() {
     let mut locked = text("locked", "Locked", 100.0, 460.0);
     locked.initial_state = "Disabled".into();
     for name in ["Normal", "Disabled"] {
-        locked.states.push(ObjectState { shine: None, name: name.into(), rich: None, fill: locked.fill, stroke: None, shadow: None, text: "Locked".into(), style: locked.style.clone(), asset: None, size: None });
+        locked.states.push(ObjectState { shine: None, gradient: None, name: name.into(), rich: None, fill: locked.fill, stroke: None, shadow: None, text: "Locked".into(), style: locked.style.clone(), asset: None, size: None });
     }
     let close = text("close", "Close", 100.0, 100.0);
     let next = text("next", "Next topic", 100.0, 100.0);

@@ -901,6 +901,9 @@ pub struct ObjectState {
     pub size: Option<(f32, f32)>,
     #[serde(default)]
     pub shine: Option<Shine>,
+    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat colour).
+    #[serde(default)]
+    pub gradient: Option<Gradient>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1981,7 +1984,7 @@ mod tests {
         p.slides.push(Slide::new("s", "S", 100.0, 100.0));
         let mut pic = Object::new("p", "Pic", Kind::Image, 0.0, 0.0, 10.0, 10.0);
         pic.asset = Some("front".into());
-        let st = |asset: &str| ObjectState { shine: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
+        let st = |asset: &str| ObjectState { shine: None, gradient: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
         pic.states = vec![st("front"), st("side")];
         let slider = Object::new("sl", "Slider", Kind::Slider(Slider { thumb: Some("knob".into()), ..Slider::new() }), 0.0, 20.0, 100.0, 20.0);
         p.slides[0].layers[0].objects.extend([pic, slider]);

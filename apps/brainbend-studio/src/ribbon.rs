@@ -259,6 +259,13 @@ fn big_toggle(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, selected: b
 }
 
 /// Large flat button that opens a dropdown of choices.
+/// A big menu button whose popup stays open until a click outside it (or the content closes it).
+fn big_menu_open(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, content: impl FnOnce(&mut egui::Ui)) -> egui::Response {
+    let resp = big_widget(ui, icon, label, true, false).on_hover_text(tip);
+    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| { content(ui); });
+    resp
+}
+
 fn big_menu(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, content: impl FnOnce(&mut egui::Ui)) -> egui::Response {
     let resp = big_widget(ui, icon, label, true, false).on_hover_text(tip);
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
@@ -979,7 +986,7 @@ impl App {
                 if !t.states.is_empty() {
                     let (f, st, sh, sk, init) = (t.fill, t.style.clone(), t.shadow, t.stroke, t.initial_state.clone());
                     for s in t.states.iter_mut() {
-                        if s.name == init { s.fill = f; s.shadow = sh; s.stroke = sk; }
+                        if s.name == init { s.fill = f; s.shadow = sh; s.stroke = sk; s.gradient = t.gradient.clone(); }
                         s.style = st.clone();
                     }
                 }
@@ -1641,20 +1648,13 @@ impl App {
     fn format_groups(&mut self, ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
         let has_sel = self.selected.is_some();
         let n_sel = self.selection().len();
-        let mut style_pick: Option<usize> = None;
+        let mut style_pick: Option<crate::button_styles::StyleDef> = None;
         let mut pick_captions = false;
         if obj.has_button_states() {
             group(ui, "Button Styles", |ui| {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for row in 0..2 {
-                        ui.horizontal(|ui| {
-                            for k in 0..5 {
-                                let i = row * 5 + k;
-                                if crate::button_styles::swatch(ui, &crate::button_styles::STYLES[i]) { style_pick = Some(i); }
-                            }
-                        });
-                    }
+                let corners = &mut self.button_corners;
+                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colours in four looks, with square, rounded or pill corners", |ui| {
+                    if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
                 });
             });
         }
@@ -1704,7 +1704,7 @@ impl App {
         self.arrange_group(ui, has_sel, n_sel);
         obj.w = obj.w.max(1.0);
         obj.h = obj.h.max(1.0);
-        if let Some(i) = style_pick { self.apply_button_style(i); }
+        if let Some(def) = style_pick { self.apply_button_style(&def); }
         if pick_captions {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();

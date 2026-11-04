@@ -1159,7 +1159,7 @@
     if (entry.drawCheck) entry.drawCheck();
     var o = entry.o, s = stateFor(entry);
     var fill = s ? s.fill : o.fill, text = s ? s.text : o.text, st = s ? s.style : o.style, rich = s ? s.rich : o.rich;
-    var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow;
+    var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow, grad = s ? s.gradient : o.gradient;
     if (entry.node._path) {
       entry.node.style.background = 'none';
       entry.node._path.setAttribute('fill', (!s && entry.node._gradId) ? 'url(#' + entry.node._gradId + ')' : fill ? css(fill) : 'none');
@@ -1167,11 +1167,11 @@
       entry.node._path.setAttribute('stroke-width', stroke ? stroke.width : 0);
       entry.node._path.setAttribute('stroke-dasharray', stroke ? dashArray(o.dash, stroke.width) : '');
       stroke = null;
-    } else if (s && s.shine && fill) {
+    } else if (s && s.shine && (fill || grad)) {
       // A button's "shine": a light gradient over the fill, stronger on hover.
       var sh = s.shine;
-      entry.node.style.background = 'linear-gradient(' + (sh.reverse ? '0deg' : '180deg') + ',rgba(255,255,255,' + sh.alpha + '),rgba(255,255,255,' + (sh.alpha * 0.1) + ')),' + css(fill);
-    } else entry.node.style.background = (!s && o.gradient) ? gradCss(o.gradient) : css(fill);
+      entry.node.style.background = 'linear-gradient(' + (sh.reverse ? '0deg' : '180deg') + ',rgba(255,255,255,' + sh.alpha + '),rgba(255,255,255,' + (sh.alpha * 0.1) + ')),' + (grad ? gradCss(grad) : css(fill));
+    } else entry.node.style.background = grad ? gradCss(grad) : css(fill);
     if (entry.node._line) {
       entry.node.style.border = 'none';
       entry.node._line.setAttribute('stroke', stroke ? css(stroke.color) : 'none');

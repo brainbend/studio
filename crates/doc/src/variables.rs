@@ -413,7 +413,7 @@ mod tests {
         let mut p = project();
         let mut shape = text_box("a", "You scored %Score% of 10, %Score% again, and %Passed%");
         shape.rich = Some(vec![crate::Paragraph { runs: vec![crate::Run { text: "Rich %Score%".into(), bold: Some(true), ..Default::default() }, crate::Run { text: " tail".into(), ..Default::default() }], indent: 0 }]);
-        shape.states = vec![crate::ObjectState { name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: "Hover %Score%".into(), style: shape.style.clone(), asset: None, size: None, shine: None }];
+        shape.states = vec![crate::ObjectState { name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: "Hover %Score%".into(), style: shape.style.clone(), asset: None, size: None, shine: None, gradient: None }];
         p.slides[0].layers[0].objects = vec![shape, text_box("b", "No variable here, and Score without percent signs")];
         p.master.objects = vec![text_box("m", "Master shows %Score%")];
         let report = rename(&mut p, "v1", "Points").unwrap();

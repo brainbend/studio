@@ -113,7 +113,7 @@ impl App {
     /// cut out of it, or the number written in it. Triggers are put on it like on any button.
     pub(super) fn insert_marker(&mut self, face: Face) {
         let accent = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255));
-        let look = button_styles::StyleDef { name: "Marker", fill: accent, text: Rgba(255, 255, 255, 255), outline: None, radius: 0.0, glossy: false };
+        let look = button_styles::StyleDef { name: "Marker", fill: accent, text: Rgba(255, 255, 255, 255), look: button_styles::Look::Plain, radius: 0.0, hue: None };
         let size = 120.0;
         let mut o = match face {
             Face::Icon(icon) => {

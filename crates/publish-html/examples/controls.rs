@@ -25,7 +25,7 @@ fn main() {
     let mut pic = Object::new("pic", "Picture", Kind::Image, 500.0, 100.0, 100.0, 50.0);
     pic.asset = Some("a".into());
     pic.initial_state = "A".into();
-    let state = |name: &str, asset: &str, size: (f32, f32)| ObjectState { shine: None, name: name.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: Some(size) };
+    let state = |name: &str, asset: &str, size: (f32, f32)| ObjectState { shine: None, gradient: None, name: name.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: Some(size) };
     pic.states = vec![state("A", "a", (100.0, 50.0)), state("B", "b", (60.0, 30.0))];
     let check = |id: &str, y: f32| {
         let mut o = Object::new(id, id, Kind::Text, 100.0, y, 600.0, 60.0);
@@ -38,7 +38,7 @@ fn main() {
     let mut submit = Object::new("submit", "Submit", Kind::Rect, 100.0, 700.0, 200.0, 60.0);
     submit.text = "Submit".into();
     submit.initial_state = "Disabled".into();
-    let look = |name: &str, fill: Rgba| ObjectState { shine: None, name: name.into(), rich: None, fill: Some(fill), stroke: None, shadow: None, text: "Submit".into(), style: submit.style.clone(), asset: None, size: None };
+    let look = |name: &str, fill: Rgba| ObjectState { shine: None, gradient: None, name: name.into(), rich: None, fill: Some(fill), stroke: None, shadow: None, text: "Submit".into(), style: submit.style.clone(), asset: None, size: None };
     submit.states = vec![look("Normal", Rgba(3, 83, 158, 255)), look("Disabled", Rgba(150, 150, 150, 255))];
     let mut spot = Object::new("spot", "Triangle", Kind::Hotspot, 1000.0, 100.0, 200.0, 200.0);
     spot.hit_area = Some(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]);

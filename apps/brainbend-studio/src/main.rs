@@ -12,6 +12,7 @@ mod doc_tabs;
 mod crop;
 mod outline;
 mod player_dialog;
+mod button_faces;
 mod button_styles;
 mod master_view;
 mod objects_panel;
@@ -124,6 +125,8 @@ struct App {
     state_dim: bool,
     /// "Try it" in the States tab: press buttons on the canvas to see their states, view only.
     try_mode: bool,
+    /// The corner choice in the Button Styles gallery.
+    button_corners: button_styles::Corners,
     /// The layers showing while trying (ids), and the slide they were worked out for.
     try_layers: Vec<String>,
     try_slide: Option<usize>,
@@ -398,7 +401,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1299,7 +1302,7 @@ impl App {
         let mut o = blank_object(self.new_id("obj"), "Button", Kind::Rect, 0.0, 0.0, 420.0, 120.0);
         o.text = "Button".into();
         o.style = plain_style(40.0, Rgba(255, 255, 255, 255), true, Align::Center);
-        button_styles::apply(&mut o, &button_styles::STYLES[0]);
+        button_styles::apply(&mut o, &button_styles::StyleDef::new(&button_styles::HUES[2], button_styles::Look::Gradient, button_styles::Corners::Rounded));
         self.insert(o);
     }
 
@@ -9660,34 +9663,109 @@ mod tests {
         assert_eq!(ids, vec!["keep"]);
     }
 
+    fn style_of(hue: &str, look: button_styles::Look, corners: button_styles::Corners) -> button_styles::StyleDef {
+        button_styles::StyleDef::new(button_styles::HUES.iter().find(|h| h.name == hue).unwrap(), look, corners)
+    }
+
     #[test]
     fn a_button_style_sets_every_state_and_keeps_the_text() {
+        use button_styles::{Corners, Look};
         let mut a = app();
         a.insert_button();
         let (li, oi) = a.selected.unwrap();
         { let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi]; o.text = "Start".into(); for s in o.states.iter_mut() { s.text = "Start".into(); } }
-        let orange = button_styles::STYLES.iter().position(|d| d.name == "Orange").unwrap();
-        a.apply_button_style(orange);
+        let def = style_of("Orange", Look::Gradient, Corners::Rounded);
+        a.apply_button_style(&def);
         let o = a.selected_object().unwrap().clone();
-        let def = &button_styles::STYLES[orange];
         assert_eq!(o.fill, Some(def.fill), "the object wears the Normal fill");
-        assert_eq!(o.radius, def.radius);
+        assert_eq!(o.radius, 5.0, "rounded corners are 5 px, as in Storyline");
+        assert!(o.gradient.is_some() && o.shadow.is_some() && o.stroke.is_some(), "a gradient style has a gradient, a drop shadow and an outline");
         assert!(o.states.iter().all(|s| s.text == "Start"), "each state keeps its text");
         let hover = o.states.iter().find(|s| s.name == "Hover").unwrap();
         assert_ne!(hover.fill, o.states[0].fill, "hover differs from rest");
-        assert!(hover.shine.is_some() && o.states[0].shine.is_some(), "a glossy style has shine");
-        let outline = button_styles::STYLES.iter().position(|d| d.name == "Outline").unwrap();
-        a.apply_button_style(outline);
+        assert!(hover.gradient.is_some(), "and keeps the look");
+        assert!(o.states.iter().find(|s| s.name == "Disabled").unwrap().gradient.is_none(), "disabled is a flat grey");
+        // A flat style has an outline but no gradient or shadow, and light colours get dark text.
+        a.apply_button_style(&style_of("Grey", Look::Flat, Corners::Square));
         let o = a.selected_object().unwrap().clone();
-        assert!(o.stroke.is_some() && o.states.iter().all(|s| s.shine.is_none()), "a flat outline style has no shine");
-        assert_eq!(o.style.color, button_styles::STYLES[outline].text);
+        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a colour and an outline");
+        assert_eq!(o.radius, 0.0);
+        assert_eq!(o.style.color, button_styles::HUES[1].text, "dark text on light grey");
+        a.apply_button_style(&style_of("Teal", Look::Gloss, Corners::Pill));
+        assert!(a.selected_object().unwrap().radius >= 100.0, "a pill is as round as it can be");
+        a.undo();
         a.undo();
         a.selected = Some((li, oi));
-        assert_eq!(a.selected_object().unwrap().fill, Some(def.fill), "one undo step goes back to the previous style");
+        assert_eq!(a.selected_object().unwrap().fill, Some(def.fill), "undo steps go back through the styles");
+    }
+
+    #[test]
+    fn the_gallery_has_nine_colours_in_four_looks_and_three_corner_shapes() {
+        use button_styles::{Corners, Look, HUES};
+        assert_eq!(HUES.len(), 9);
+        assert_eq!(Look::GALLERY.len(), 4);
+        assert_eq!(Corners::ALL.len(), 3);
+        // Every look gives the colour it is built on to the resting state, so a swatch's colour is its hue's.
+        for hue in &HUES { for look in Look::GALLERY {
+            let mut o = Object::new("b", "b", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
+            button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, look, Corners::Rounded));
+            assert_eq!(o.states[0].fill, Some(hue.fill), "{} {:?}", hue.name, look);
+        } }
+    }
+
+    #[test]
+    fn the_gallery_uses_storylines_published_values() {
+        use button_styles::{Corners, Look, HUES};
+        let faces = |hue: usize, look: usize| &crate::button_faces::FACES[hue][look];
+        // Blue, flat: #4F81BD with a #385D8A outline, lighter on hover, darker pressed.
+        assert_eq!(faces(2, 0).normal.fill, Rgba(79, 129, 189, 255));
+        assert_eq!(faces(2, 0).normal.stroke, Some(Rgba(56, 93, 138, 255)));
+        assert_eq!(faces(2, 0).hover.fill, Rgba(128, 157, 201, 255));
+        assert_eq!(faces(2, 0).down.fill, Rgba(68, 113, 166, 255));
+        // Blue, gradient: #6EB3D7 at the top to #2F4EA2 at the bottom, with a 40% black outline; pressed it turns upside down.
+        let g = faces(2, 1);
+        assert_eq!(g.normal.angle, 180.0);
+        assert_eq!(g.normal.stops, &[(0.0, Rgba(110, 179, 215, 255)), (1.0, Rgba(47, 78, 162, 255))]);
+        assert_eq!(g.normal.stroke, Some(Rgba(0, 0, 0, 102)));
+        assert_eq!(g.down.stops, &[(0.0, Rgba(59, 96, 171, 255)), (1.0, Rgba(98, 159, 204, 255))]);
+        // Blue, side shine: dark edges and a light middle, with no outline.
+        assert_eq!(faces(2, 2).normal.angle, 90.0);
+        assert_eq!(faces(2, 2).normal.stops.len(), 3);
+        assert!(faces(2, 2).normal.stroke.is_none());
+        // Blue, split gloss: the top half is one flat colour, with a hard edge in the middle.
+        let gloss = faces(2, 3).normal.stops;
+        assert!(gloss.windows(2).any(|w| w[0].0 == w[1].0 && w[0].1 != w[1].1), "a hard edge: two stops at one position");
+        assert_eq!(gloss[0].1, gloss[1].1, "the top half is flat");
+        // Every look of every colour has its three faces, and the shaded looks all have a gradient.
+        for hue in 0..HUES.len() { for look in 0..4 {
+            let f = faces(hue, look);
+            for face in [&f.normal, &f.hover, &f.down] { assert_eq!(face.stops.is_empty(), look == 0, "{} look {}", HUES[hue].name, look); }
+        } }
+        let _ = (Corners::Square, Look::Flat);
+    }
+
+    #[test]
+    fn gui_button_styles_render_like_storylines_gallery() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        use button_styles::{Corners, Look, HUES};
+        let mut a = app();
+        for (r, look) in Look::GALLERY.iter().enumerate() {
+            for (cidx, hue) in HUES.iter().enumerate() {
+                let mut o = Object::new(&format!("b{r}{cidx}"), "Test", Kind::Rect, 60.0 + cidx as f32 * 205.0, 40.0 + r as f32 * 100.0, 156.0, 68.0);
+                o.text = "Test".into();
+                o.style.size = 28.0;
+                button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, *look, Corners::Rounded));
+                a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+            }
+        }
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-gallery-real.png")).unwrap();
     }
 
     #[test]
     fn gui_button_styles_gallery_shows_for_a_button_and_applies() {
+        use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.insert_button();
         let mut h = harness(a);
@@ -9695,15 +9773,18 @@ mod tests {
         assert_eq!(h.state().format_title(), Some("BUTTON"), "a selected button has its own tab");
         h.state_mut().ribbon_tab = ribbon::HOME_TAB;
         h.run_steps(3);
+        h.get_by_label("Styles").click();
+        h.run_steps(4);
+        for label in ["Square", "Rounded", "Pill"] { assert!(h.query_by_label(label).is_some(), "{label} is in the gallery"); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-styles.png")).unwrap();
         }
-        // Click the Teal swatch (second in the first row) on Home: found by its colour, so the ribbon can be rearranged.
-        let teal = button_styles::STYLES.iter().find(|d| d.name == "Teal").unwrap().fill;
+        // Click the first Teal swatch (its flat look): found by its colour, so the popup can be rearranged.
+        let teal = button_styles::HUES.iter().find(|d| d.name == "Teal").unwrap().fill;
         let img = h.render().expect("renderer");
         let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0.0f32);
-        for y in 60..160u32 {
-            for x in 0..1200u32 {
+        for y in 60..400u32 {
+            for x in 0..1400u32 {
                 let p = img.get_pixel(x, y);
                 if (p[0] as i32 - teal.0 as i32).abs() < 3 && (p[1] as i32 - teal.1 as i32).abs() < 3 && (p[2] as i32 - teal.2 as i32).abs() < 3 { sx += x as f32; sy += y as f32; n += 1.0; }
             }
@@ -9716,8 +9797,9 @@ mod tests {
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
         h.run_steps(3);
-        let teal = button_styles::STYLES.iter().find(|d| d.name == "Teal").unwrap().fill;
-        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].fill, Some(teal), "the swatch restyled the button");
+        let o = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        assert_eq!(o.fill, Some(teal), "the swatch restyled the button");
+        assert!(o.gradient.is_none() && o.stroke.is_some(), "the flat look");
     }
 
     #[test]

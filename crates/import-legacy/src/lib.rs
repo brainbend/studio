@@ -931,6 +931,7 @@ fn parse_states(n: Node, fallback: &TextParts, ctx: &mut Ctx) -> Vec<ObjectState
             asset,
             size,
             shine: shine_of(shape),
+            gradient: None,
         });
     }
     out
