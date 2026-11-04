@@ -5340,8 +5340,20 @@ fn variable_shown(v: &Variable, in_triggers: &std::collections::HashSet<String>,
         && match usage { 1 => in_triggers.contains(&v.id), 2 => !in_triggers.contains(&v.id), _ => true }
 }
 
+/// The app icon follows the theme: the light icon in the light theme, the dark-grey one in the dark theme. (A bundled
+/// macOS icon is a single image, so the running app swaps the Dock and window icon itself.)
+fn sync_app_icon(ctx: &egui::Context) {
+    let dark = ctx.global_style().visuals.dark_mode;
+    let id = egui::Id::new("app-icon-dark");
+    if ctx.data(|d| d.get_temp::<bool>(id)) == Some(dark) { return; }
+    ctx.data_mut(|d| d.insert_temp(id, dark));
+    let bytes: &[u8] = if dark { include_bytes!("../../../assets/brainbend-icon-dark-256.png") } else { include_bytes!("../../../assets/brainbend-icon-256.png") };
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(bytes) { ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(std::sync::Arc::new(icon)))); }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        sync_app_icon(root.ctx());
         self.show(root);
     }
 }
