@@ -72,3 +72,7 @@ Press **Publish** to choose how the project goes out:
 - **PowerPoint**: a `.pptx` file.
 
 BrainBend Review, BrainBend LMS, Video and Word are marked Coming soon.
+
+## License
+
+BrainBend Studio is dual-licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option. The bundled fonts (Montserrat and Open Sans) are under the SIL Open Font License 1.1; their license files are in `assets/fonts/` and are copied into every export. The BrainBend name and logo are not covered by these licenses.
