@@ -281,7 +281,7 @@ pub fn not_run_note(parts: &[String]) -> Option<String> {
         _ => unreachable!(),
     };
     let more = if parts.len() > 3 { " and more" } else { "" };
-    Some(format!("This button {list}{more}. Try It does not run that: use Preview."))
+    Some(format!("This button {list}{more}. Use Preview to test this action."))
 }
 
 /// What the panel asks the app to do.
@@ -502,10 +502,10 @@ mod tests {
     #[test]
     fn the_banner_note_reads_as_a_sentence() {
         assert_eq!(not_run_note(&[]), None);
-        assert_eq!(not_run_note(&["jumps to Quiz 1".into()]).unwrap(), "This button jumps to Quiz 1. Try It does not run that: use Preview.");
-        assert_eq!(not_run_note(&["jumps to Quiz 1".into(), "runs JavaScript".into()]).unwrap(), "This button jumps to Quiz 1 and runs JavaScript. Try It does not run that: use Preview.");
+        assert_eq!(not_run_note(&["jumps to Quiz 1".into()]).unwrap(), "This button jumps to Quiz 1. Use Preview to test this action.");
+        assert_eq!(not_run_note(&["jumps to Quiz 1".into(), "runs JavaScript".into()]).unwrap(), "This button jumps to Quiz 1 and runs JavaScript. Use Preview to test this action.");
         let many: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(not_run_note(&many).unwrap(), "This button a, b and c and more. Try It does not run that: use Preview.");
+        assert_eq!(not_run_note(&many).unwrap(), "This button a, b and c and more. Use Preview to test this action.");
     }
 
     fn button(id: &str, set: Option<&str>) -> Object {
