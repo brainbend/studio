@@ -7,7 +7,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-          - os: macos-latest
+          - os: macos-15
           # One test at a time on Windows: the GUI tests crashed there (STATUS_ACCESS_VIOLATION) when run in parallel.
           - os: windows-latest
             test_args: "--test-threads=1"
