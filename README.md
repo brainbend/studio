@@ -62,6 +62,13 @@ Every change is built and tested on macOS, Windows and Linux. Releases are on th
 | Survey questions (not scored) | Rating scale · Free text |
 | Results | A quiz results slide that reports the score |
 
+## Fonts
+
+- **Bundled:** 20 open-licensed families, including Inter, Roboto, Lato, Poppins, Montserrat, Open Sans, Playfair Display, Lora and JetBrains Mono, each shown in its own face in the font menu.
+- **From Google Fonts:** add any of the 1,900+ families from inside the app. They are saved on your computer and show up in every font menu.
+- **Installed on your computer:** every font you have is available while you edit.
+- **Published lessons carry their fonts.** Bundled and Google fonts are embedded in the web, SCORM and PDF output so a lesson looks the same on every learner's computer. An installed font is embedded only where its own license allows it; the Publish dialog lists which fonts travel and which fall back.
+
 ## Publish
 
 Press **Publish** to choose how the project goes out:
@@ -75,4 +82,4 @@ BrainBend Review, BrainBend LMS, Video and Word are marked Coming soon.
 
 ## License
 
-BrainBend Studio is dual-licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option. The bundled fonts (Montserrat and Open Sans) are under the SIL Open Font License 1.1; their license files are in `assets/fonts/` and are copied into every export. The BrainBend name and logo are not covered by these licenses.
+BrainBend Studio is dual-licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option. The bundled fonts are under the SIL Open Font License 1.1 (texts in [FONT-LICENSES.md](FONT-LICENSES.md)), and the license of each font a lesson uses is copied into its export. Other open-source software the app uses is listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). The BrainBend name and logo are not covered by these licenses.

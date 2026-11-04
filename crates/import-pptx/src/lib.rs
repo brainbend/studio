@@ -112,7 +112,7 @@ impl Report {
         if *c == 0 { self.order.push(m); }
         *c += 1;
     }
-    /// A font the file uses that BrainBend Studio does not bundle.
+    /// A font the file uses that is not available here.
     pub fn font(&mut self, name: &str) {
         self.fonts.insert(name.to_string());
     }
@@ -120,7 +120,7 @@ impl Report {
         let fonts: Vec<String> = std::mem::take(&mut self.fonts).into_iter().collect();
         let mut out: Vec<String> = self.order.into_iter().map(|m| { let n = self.counts[&m]; if n > 1 { format!("{m} (×{n})") } else { m } }).collect();
         if !fonts.is_empty() {
-            out.push(format!("Fonts not bundled with BrainBend Studio ({}) are shown in Open Sans here; the published course uses the learner's own copy if they have one.", fonts.join(", ")));
+            out.push(format!("Fonts not available here ({}) are shown in Open Sans. Install them, or add them from Google Fonts, to see them as designed; the published course uses the learner's own copy if they have one.", fonts.join(", ")));
         }
         out
     }

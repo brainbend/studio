@@ -294,8 +294,8 @@ fn apply_text(cx: &mut Cx, o: &mut Object, tx: Option<Node>, tc: &TextCtx) {
         valign: o.style.valign,
     };
     for f in std::iter::once(o.style.font_family.clone()).chain(parsed.iter().flat_map(|p| p.runs.iter().filter_map(|(_, r)| r.font.clone()))) {
-        let safe = ["open sans", "montserrat", "arial", "helvetica", "times new roman", "georgia", "verdana", "tahoma", "courier new", "trebuchet ms"];
-        if !safe.contains(&f.to_ascii_lowercase().as_str()) && !f.is_empty() {
+        // A font is fine if the library has it: bundled, downloaded from Google Fonts, or installed on this computer.
+        if !f.is_empty() && !brainbend_fonts::available(&f) {
             cx.report.font(&f);
         }
     }

@@ -123,6 +123,12 @@ impl App {
         let mut handout = self.handout;
         let mut range = self.handout_range;
         let counts = (p.slides.len(), p.scene_slides(self.current_scene()).len(), self.slide_selection().len());
+        // Which fonts travel is worked out once per opening: it reads the font files.
+        let fonts_id = egui::Id::new("publish-fonts-report");
+        let fonts: brainbend_publish_html::FontsReport = match ctx.data(|d| d.get_temp::<brainbend_publish_html::FontsReport>(fonts_id)) {
+            Some(r) => r,
+            None => { let r = brainbend_publish_html::fonts_report(p); ctx.data_mut(|d| d.insert_temp(fonts_id, r.clone())); r }
+        };
         let (mut go, mut cancel) = (false, false);
         let modal = egui::Modal::new(egui::Id::new("publish-dialog")).show(ctx, |ui| {
             // A fixed size: a dialog that resizes itself as its contents change moves under the pointer.
@@ -193,6 +199,18 @@ impl App {
                                 ui.end_row();
                             }
                         });
+                        if matches!(page, PublishPage::Web | PublishPage::OtherLms | PublishPage::Pdf) {
+                            ui.add_space(14.0);
+                            ui.label(egui::RichText::new("Fonts").strong());
+                            ui.add_space(4.0);
+                            if !fonts.embedded.is_empty() {
+                                ui.label(format!("Included with the lesson: {}.", fonts.embedded.join(", ")));
+                            }
+                            if !fonts.fallback.is_empty() {
+                                ui.colored_label(ui.visuals().warn_fg_color, format!("Not included: {}.", fonts.fallback.join(", ")));
+                                ui.weak("These are not installed here, or their license does not allow embedding. Learners see them only if they have the font; otherwise a similar one. Choose another font, or add it from Google Fonts, to be sure.");
+                            }
+                        }
                     });
                 });
             });
@@ -210,6 +228,7 @@ impl App {
         self.publish_lms = lms;
         self.handout = handout;
         self.handout_range = range;
+        if modal.should_close() || cancel || go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(fonts_id)); }
         if modal.should_close() || cancel { self.publish_open = false; }
         if go && page.available() {
             self.publish_open = false;

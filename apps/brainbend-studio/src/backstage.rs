@@ -292,7 +292,7 @@ impl App {
         ui.add_space(6.0);
         ui.label("A free, lightweight authoring tool for interactive lessons that publish to the web and to LMSs (SCORM 1.2 and 2004).");
         ui.add_space(6.0);
-        ui.weak("Fonts: Montserrat and Open Sans (SIL Open Font License 1.1). Icons: Phosphor (MIT). Spelling: SCOWL en_US word list (permissive license, crates/spell/dict).");
+        ui.weak("Fonts: the bundled families are under the SIL Open Font License 1.1 (see FONT-LICENSES.md); fonts added from Google Fonts keep their own license. Icons: Phosphor (MIT). Spelling: SCOWL en_US word list (permissive license, crates/spell/dict). Other open-source software: THIRD-PARTY-LICENSES.md.");
     }
 
     /// The update line of the About section: what the last check found, a button to check now, and the launch preference.

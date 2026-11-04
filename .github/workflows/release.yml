@@ -81,12 +81,12 @@ jobs:
         shell: pwsh
         run: |
           cargo build --release -p brainbend-studio
-          Compress-Archive -Path target/release/brainbend-studio.exe, LICENSE-MIT, LICENSE-APACHE, THIRD-PARTY-LICENSES.md -DestinationPath "BrainBend-Studio-${{ needs.check.outputs.tag }}-windows.zip"
+          Compress-Archive -Path target/release/brainbend-studio.exe, LICENSE-MIT, LICENSE-APACHE, THIRD-PARTY-LICENSES.md, FONT-LICENSES.md -DestinationPath "BrainBend-Studio-${{ needs.check.outputs.tag }}-windows.zip"
       - name: Package (Linux)
         if: matrix.name == 'linux'
         run: |
           cargo build --release -p brainbend-studio
-          tar -czf "BrainBend-Studio-${{ needs.check.outputs.tag }}-linux.tar.gz" -C target/release brainbend-studio -C ../.. LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.md
+          tar -czf "BrainBend-Studio-${{ needs.check.outputs.tag }}-linux.tar.gz" -C target/release brainbend-studio -C ../.. LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.md FONT-LICENSES.md
       - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.name }}

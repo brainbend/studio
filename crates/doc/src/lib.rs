@@ -1802,6 +1802,28 @@ impl Project {
         self.recent_colors.retain(|r| *r != c);
     }
 
+    /// The names of every font the project uses: text styles and runs, the theme's heading and body fonts, and the
+    /// player's font. Found by walking the saved form, so a new place that holds a font is covered without a change here.
+    pub fn fonts_used(&self) -> std::collections::BTreeSet<String> {
+        fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    for (k, x) in m {
+                        if matches!(k.as_str(), "font_family" | "font" | "heading_font" | "body_font") {
+                            if let Some(name) = x.as_str().filter(|n| !n.trim().is_empty()) { out.insert(name.to_string()); }
+                        }
+                        walk(x, out);
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+                _ => {}
+            }
+        }
+        let mut out = std::collections::BTreeSet::new();
+        if let Ok(v) = serde_json::to_value(self) { walk(&v, &mut out); }
+        out
+    }
+
     /// Asset keys that objects (media, captions) still reference.
     pub fn referenced_assets(&self) -> std::collections::BTreeSet<&str> {
         let mut out = std::collections::BTreeSet::new();
@@ -1995,6 +2017,22 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fonts_used_cover_text_runs_the_theme_and_the_player() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        let mut o = Object::new("a", "A", Kind::Rect, 0.0, 0.0, 10.0, 10.0);
+        o.style.font_family = "Lora".into();
+        p.slides[0].layers[0].objects.push(o);
+        p.player.font = "Poppins".into();
+        p.theme.heading_font = "Oswald".into();
+        let used = p.fonts_used();
+        for f in ["Lora", "Poppins", "Oswald"] { assert!(used.contains(f), "{f}"); }
+        assert!(!used.contains("Nothing"));
+    }
+
     #[test]
     fn the_players_logo_and_banner_count_as_used_assets_and_are_not_pruned() {
         let mut p = Project::new("t");

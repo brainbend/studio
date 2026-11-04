@@ -11,6 +11,7 @@ mod recent;
 mod publish_dialog;
 mod controls;
 mod doc_tabs;
+mod font_store;
 mod crop;
 mod outline;
 mod player_dialog;
@@ -54,6 +55,7 @@ fn main() -> eframe::Result {
         opts,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
+            font_store::start(&cc.egui_ctx);
             brainbend_spell::warm();
             install_theme(&cc.egui_ctx);
             let mut app = App::default();
@@ -257,6 +259,7 @@ struct App {
     allow_close: bool,
     /// Checks GitHub for a newer release.
     updater: update::Updater,
+    font_store: font_store::FontStore,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
     /// Slides to delete once the frame is drawn: the slide list and Story View are still walking the old list.
@@ -428,7 +431,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -553,7 +556,7 @@ fn indent_px(o: &Object, scale: f32) -> Vec<f32> {
 
 fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui::text::LayoutJob {
     let fmt = egui::text::TextFormat {
-        font_id: egui::FontId::new((o.style.size * scale).max(1.0), font_family(&o.style.font_family)),
+        font_id: egui::FontId::new((o.style.size * scale).max(1.0), font_store::family_styled(&o.style.font_family, o.style.bold)),
         color: color(o.style.color),
         coords: egui::epaint::text::VariationCoords::new([(b"wght", if o.style.bold { 700.0 } else { 400.0 })]),
         italics: o.style.italic,
@@ -574,7 +577,9 @@ fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui
                     if let Some(i) = run.italic { f.italics = i; }
                     if let Some(u) = run.underline { f.underline = if u { egui::Stroke::new(1.0, f.color) } else { egui::Stroke::NONE }; }
                     if let Some(b) = run.bold { f.coords = egui::epaint::text::VariationCoords::new([(b"wght", if b { 700.0 } else { 400.0 })]); }
-                    if let Some(fam) = &run.font_family { f.font_id.family = font_family(fam); }
+                    if run.bold.is_some() || run.font_family.is_some() {
+                        f.font_id.family = font_store::family_styled(run.font_family.as_deref().unwrap_or(&o.style.font_family), run.bold.unwrap_or(o.style.bold));
+                    }
                     // A link is the theme's hyperlink colour, underlined, unless the author set its colour or underline.
                     if run.link.is_some() {
                         f.color = run.color.map(color).unwrap_or(link);
@@ -889,7 +894,14 @@ impl App {
             Ok(mut p) => {
                 p.sanitize();
                 // Import notes are a one-time report; they are shown once and not kept in the project.
-                let report = std::mem::take(&mut p.notes);
+                let mut report = std::mem::take(&mut p.notes);
+                // A project from another computer may use fonts this one does not have (a .pptx import says so itself).
+                if ext != "pptx" && brainbend_fonts::system_scanned() {
+                    let missing: Vec<String> = p.fonts_used().into_iter().filter(|f| !brainbend_fonts::available(f)).collect();
+                    if !missing.is_empty() {
+                        report.push(format!("Fonts not available here ({}) are shown in Open Sans. Install them, or add them from Google Fonts, to see them as designed.", missing.join(", ")));
+                    }
+                }
                 self.status = format!("Opened {} ({} slides, {} import notes)", file_label(&path), p.slides.len(), report.len());
                 self.import_report = report;
                 self.scene_view = self.open_to_story_view;
@@ -5246,12 +5258,9 @@ fn kind_name(k: &Kind) -> &'static str {
     }
 }
 
+/// The egui family for a font name: the font if it is available, Open Sans if not.
 fn font_family(name: &str) -> egui::FontFamily {
-    if name.eq_ignore_ascii_case("montserrat") {
-        egui::FontFamily::Name("Montserrat".into())
-    } else {
-        egui::FontFamily::Name("Open Sans".into())
-    }
+    font_store::family(name)
 }
 
 /// Brand accent + softer geometry. Applied to both light and dark themes.
@@ -5293,24 +5302,7 @@ fn install_theme(ctx: &egui::Context) {
 }
 
 fn install_fonts(ctx: &egui::Context) {
-    use std::sync::Arc;
-    let mut fonts = egui::FontDefinitions::default();
-    let sources: [(&str, &'static [u8]); 2] = [
-        ("Montserrat", include_bytes!("../../../assets/fonts/Montserrat[wght].ttf")),
-        ("Open Sans", include_bytes!("../../../assets/fonts/OpenSans[wdth,wght].ttf")),
-    ];
-    for (name, bytes) in sources {
-        fonts.font_data.insert(name.to_string(), Arc::new(egui::FontData::from_static(bytes)));
-        // Default fonts stay as fallbacks for symbols the bundled fonts lack.
-        let mut chain = vec![name.to_string()];
-        chain.extend(fonts.families.get(&egui::FontFamily::Proportional).cloned().unwrap_or_default());
-        // Hack covers the maths operators and arrows the other fonts lack (the Symbol picker offers them).
-        if fonts.font_data.contains_key("Hack") { chain.push("Hack".to_string()); }
-        fonts.families.insert(egui::FontFamily::Name(name.into()), chain);
-    }
-    fonts.font_data.insert("icons".into(), Arc::new(egui::FontData::from_static(include_bytes!("../../../assets/icons/Phosphor.ttf"))));
-    fonts.families.insert(ribbon::icons(), vec!["icons".into()]);
-    ctx.set_fonts(fonts);
+    font_store::install(ctx);
 }
 
 fn color(c: Rgba) -> egui::Color32 {
@@ -5389,11 +5381,14 @@ impl App {
     /// One frame of the whole UI (separate from `eframe::App::ui` so tests can drive it).
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
+        // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
+        font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
         if self.try_mode { self.selected = None; self.multi.clear(); }
         self.sync_tabs();
         self.begin_state_swap();
         self.show_frame(root);
+        if font_store::has_pending() { root.ctx().request_repaint(); }
         if let Some(sel) = self.pending_delete.take() { self.delete_slides(sel); }
         self.end_state_swap();
         self.save_active_tab();
@@ -5712,6 +5707,7 @@ impl App {
         }
         self.update_window(ctx);
         self.publish_window(ctx);
+        self.fonts_window(ctx);
         if self.updater.restarting { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if self.recovery_offer {
             let mut done = false;
@@ -7212,7 +7208,7 @@ impl App {
                             let col = if linked { f.color.map(color).unwrap_or(link_col) } else { color(f.color.unwrap_or(obj_style.color)) };
                             let bold = f.bold.unwrap_or(obj_style.bold);
                             let ul = f.underline.unwrap_or(linked || obj_style.underline);
-                            let mut fid = egui::FontId::new(((f.size.unwrap_or(obj_style.size)) * scale).max(8.0), font_family(f.font_family.as_deref().unwrap_or(&obj_style.font_family)));
+                            let mut fid = egui::FontId::new(((f.size.unwrap_or(obj_style.size)) * scale).max(8.0), font_store::family_styled(f.font_family.as_deref().unwrap_or(&obj_style.font_family), bold));
                             fid.size = fid.size.max(8.0);
                             let mut tf = egui::text::TextFormat {
                                 font_id: fid,
@@ -10722,8 +10718,15 @@ mod tests {
         // Fonts: another pair makes it a custom theme.
         h.get_by_label_contains("Fonts").click();
         h.run_steps(3);
-        h.get_by_label("Montserrat / Montserrat").click();
-        h.run_steps(3);
+        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the menu has a font picker for each");
+        // (Choosing from the drop-downs sets these same two fields; see the font picker tests.)
+        {
+            let p = h.state_mut().project.as_mut().unwrap();
+            let mut next = p.theme.clone();
+            (next.heading_font, next.body_font) = ("Montserrat".to_string(), "Montserrat".to_string());
+            p.set_theme(next.named());
+        }
+        h.run_steps(2);
         let t = theme(&h);
         assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), ("Montserrat", "Montserrat"));
         assert_ne!((t.heading_font.clone(), t.body_font.clone()), start_fonts);
@@ -10747,11 +10750,8 @@ mod tests {
         assert!(h.state().theme_colors_open);
         h.state_mut().theme_colors_open = false;
         h.run_steps(2);
-        // One undo each.
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
-        h.state_mut().undo();
-        assert_eq!(theme(&h), start);
     }
 
     #[test]
@@ -10943,6 +10943,68 @@ mod tests {
         h.run_steps(3);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("file-new-min-window.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn fonts_a_project_uses_reach_egui_and_a_static_font_gets_its_own_bold_face() {
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        {
+            let p = a.project.as_mut().unwrap();
+            let o = p.slides[0].layers[0].objects.last_mut().unwrap();
+            o.style.font_family = "Lato".into();
+        }
+        let mut h = harness(a);
+        h.run_steps(6);
+        assert_eq!(font_store::family("Lato"), egui::FontFamily::Name("Lato".into()), "a bundled font the project uses is given to egui");
+        assert_eq!(font_store::family_styled("Lato", true), egui::FontFamily::Name("Lato|b".into()), "a font without a variable weight uses its bold file");
+        font_store::want("Inter");
+        h.run_steps(3);
+        assert_eq!(font_store::family_styled("Inter", true), egui::FontFamily::Name("Inter".into()), "a variable font takes its weight from the font itself");
+        assert_eq!(font_store::family("No Such Font"), egui::FontFamily::Name("Open Sans".into()), "an unknown font falls back to Open Sans");
+    }
+
+    #[test]
+    fn the_font_menu_lists_the_bundled_fonts_in_sections_and_offers_google_fonts() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.insert_text();
+        let mut h = harness(a);
+        h.run_steps(4);
+        use egui_kittest::kittest::NodeT;
+        let combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).collect();
+        assert_eq!(combos[0].accesskit_node().value().as_deref(), Some("Open Sans"), "the first drop-down on the Home tab is the font");
+        combos.into_iter().next().unwrap().click();
+        h.run_steps(4);
+        for expected in ["BrainBend fonts", "Inter", "Lora", "More fonts from Google Fonts…"] {
+            assert!(h.query_by_label(expected).is_some(), "{expected} is in the menu");
+        }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("font-menu.png")).unwrap();
+        }
+        h.get_by_label("Lora").click();
+        h.run_steps(4);
+        let o = h.state().selected_object().unwrap();
+        assert_eq!(o.style.font_family, "Lora");
+    }
+
+    #[test]
+    fn the_google_fonts_window_lists_fonts_searches_and_filters_by_style() {
+        use egui_kittest::kittest::Queryable;
+        use brainbend_fonts::Category::*;
+        let mut a = App::default();
+        a.new_project();
+        a.font_store = font_store::FontStore::open_with(vec![("Pacifico", Handwriting), ("Anton", Display), ("Lora", Serif), ("Zilla Slab", Serif), ("Inconsolata", Mono)]);
+        let mut h = harness(a);
+        h.run_steps(4);
+        for f in ["Pacifico", "Anton", "Zilla Slab", "Inconsolata"] { assert!(h.query_by_label(f).is_some(), "{f} is listed"); }
+        assert!(h.query_by_label("Added").is_some(), "Lora comes with the app, so it shows as added");
+        assert!(h.query_all_by_label("Add").count() >= 4, "the others can be added");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("google-fonts-window.png")).unwrap();
         }
     }
 

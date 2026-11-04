@@ -3,8 +3,6 @@
 use super::*;
 use brainbend_doc::{ButtonStyle, GlossaryTerm, PlayerSettings, PlayerTheme, Resource, SidebarSide};
 
-const FONTS: [&str; 8] = ["Open Sans", "Montserrat", "Arial", "Georgia", "Verdana", "Trebuchet MS", "Times New Roman", "Courier New"];
-
 fn c32(c: Rgba) -> egui::Color32 {
     egui::Color32::from_rgb(c.0, c.1, c.2)
 }
@@ -206,11 +204,7 @@ fn colors_pane(ui: &mut egui::Ui, p: &mut PlayerSettings, changed: &mut bool) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label("Font");
-        combo("player-font").selected_text(p.font.clone()).show_ui(ui, |ui| {
-            for f in FONTS {
-                if ui.selectable_label(p.font == f, f).clicked() && p.font != f { p.font = f.to_string(); *changed = true; }
-            }
-        });
+        *changed |= crate::font_store::font_menu(ui, "player-font", &mut p.font, 150.0);
         let mut pct = p.font_scale;
         if ui.add(egui::DragValue::new(&mut pct).range(70..=160).suffix(" %")).changed() { p.font_scale = pct; *changed = true; }
     });

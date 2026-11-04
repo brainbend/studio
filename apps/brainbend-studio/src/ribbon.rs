@@ -1434,11 +1434,7 @@ impl App {
             rows(ui);
                 ui.horizontal(|ui| {
                     framed(ui, |ui| {
-                        combo("rb-font").width(92.0).selected_text(obj.style.font_family.clone()).show_ui(ui, |ui| {
-                            for f in ["Open Sans", "Montserrat"] {
-                                if ui.selectable_label(obj.style.font_family == f, f).clicked() { obj.style.font_family = f.into(); *changed = true; }
-                            }
-                        });
+                        *changed |= crate::font_store::font_menu(ui, "rb-font", &mut obj.style.font_family, 92.0);
                         *changed |= ui.add(egui::DragValue::new(&mut obj.style.size).range(4.0..=400.0).suffix(" pt")).on_hover_text("Font size").changed();
                         let sizes = {
                             let (r, resp) = ui.allocate_exact_size(egui::vec2(14.0, 20.0), egui::Sense::click());
@@ -2416,15 +2412,14 @@ impl App {
                 });
                 if big_button(ui, DROP, "Brand\nColors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
                 big_menu(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts", |ui| {
-                    for (h, b) in [("Montserrat", "Open Sans"), ("Open Sans", "Open Sans"), ("Montserrat", "Montserrat"), ("Open Sans", "Montserrat")] {
-                        let on = proj.theme.heading_font == h && proj.theme.body_font == b;
-                        if ui.selectable_label(on, format!("{h} / {b}")).on_hover_text("Headings / body text").clicked() {
-                            let mut next = proj.theme.clone();
-                            (next.heading_font, next.body_font) = (h.to_string(), b.to_string());
-                            proj.set_theme(next.named());
-                            changed = true;
-                            ui.close();
-                        }
+                    ui.set_min_width(260.0);
+                    let mut next = proj.theme.clone();
+                    let mut moved = false;
+                    ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 170.0); });
+                    ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 170.0); });
+                    if moved {
+                        proj.set_theme(next.named());
+                        changed = true;
                     }
                 });
             });

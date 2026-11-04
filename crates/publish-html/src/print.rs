@@ -407,6 +407,22 @@ const CAPTION_MM: f32 = 7.0;
 const NOTES_BELOW_MM: f32 = 28.0;
 
 /// Build the printable document; opening it in a browser shows the print dialog.
+/// `@font-face` rules for the fonts the handout uses, with the files inside the page, so the handout looks right
+/// in any browser (it is a single file opened from a temporary folder).
+fn handout_fonts(p: &Project) -> String {
+    let mut used = p.fonts_used();
+    used.insert("Open Sans".into());
+    let e = brainbend_fonts::embed(&used, "");
+    let mut css = e.css;
+    for (path, bytes) in &e.files {
+        let Some(file) = path.strip_prefix("fonts/") else { continue };
+        if file.ends_with(".txt") { continue; }
+        let mime = if file.ends_with(".otf") { "font/otf" } else { "font/ttf" };
+        css = css.replace(&format!("url({file})"), &format!("url(data:{mime};base64,{})", base64(bytes)));
+    }
+    css.replace('\n', "")
+}
+
 pub fn print_html(project: &Project) -> String { print_html_with(project, &HandoutOptions::default()) }
 
 /// The handout laid out as `options` say. Sizes are in millimetres and leave room for the browser's margins, so the pages
@@ -471,6 +487,7 @@ pub fn print_html_with(project: &Project, options: &HandoutOptions) -> String {
     )).collect();
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>\
+{fonts}\
 @page{{size:{orientation};margin:12mm}}\
 *{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\
 body{{font-family:'Open Sans',Arial,sans-serif;margin:0;color:#222}}\
@@ -495,6 +512,7 @@ body{{font-family:'Open Sans',Arial,sans-serif;margin:0;color:#222}}\
 .qa{{padding:40px 60px;font-size:18px}}.qa h2{{margin-top:0}}.qa li{{margin:6px 0;list-style:none}}.qa ol li{{list-style:decimal}}.note{{color:#666;font-size:14px}}\
 </style></head><body>{pages}<script>window.addEventListener('load',function(){{setTimeout(function(){{window.print();}},500);}});</script></body></html>",
         title = esc(&p.name),
+        fonts = handout_fonts(p),
         orientation = if portrait { "portrait" } else { "landscape" },
         cap = CAPTION_MM,
     )
