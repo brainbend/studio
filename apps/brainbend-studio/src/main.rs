@@ -6708,16 +6708,16 @@ impl App {
                 (true, Some(o)) => o.hit_area.as_ref().map(|a| a.iter().map(|&f| { let p = outline::to_slide(o, f); origin + egui::vec2(p.0, p.1) * scale }).collect()).unwrap_or_default(),
                 _ => vec![],
             };
-            let orange = egui::Color32::from_rgb(226, 91, 28);
+            let purple = ribbon::PURPLE;
             for (i, p) in outline_pts.iter().enumerate() {
                 let chosen = self.outline_sel == Some(i);
                 // Orange squares like the crop handles; the chosen corner is larger and white inside.
                 let hr = egui::Rect::from_center_size(*p, egui::Vec2::splat(HANDLE_PX + if chosen { 4.0 } else { 0.0 }));
-                painter.rect_filled(hr, 1.0, if chosen { egui::Color32::WHITE } else { orange });
-                painter.rect_stroke(hr, 1.0, egui::Stroke::new(if chosen { 3.0 } else { 1.5 }, if chosen { orange } else { egui::Color32::WHITE }), egui::StrokeKind::Inside);
+                painter.rect_filled(hr, 1.0, if chosen { egui::Color32::WHITE } else { purple });
+                painter.rect_stroke(hr, 1.0, egui::Stroke::new(if chosen { 3.0 } else { 1.5 }, if chosen { purple } else { egui::Color32::WHITE }), egui::StrokeKind::Inside);
             }
             if let (Some(r), false) = (sel_rect, outlining) {
-                let handle_color = if cropping { egui::Color32::from_rgb(226, 91, 28) } else { ribbon::ACCENT };
+                let handle_color = if cropping { ribbon::PURPLE } else { ribbon::ACCENT };
                 for h in HANDLES {
                     let hr = egui::Rect::from_center_size(handle_pos(r, h), egui::Vec2::splat(HANDLE_PX));
                     painter.rect_filled(hr, 1.0, if cropping { handle_color } else { egui::Color32::WHITE });
@@ -6743,16 +6743,16 @@ impl App {
                 if let Some(o) = self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)) {
                     let c = egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0);
                     let line: Vec<egui::Pos2> = o.motion.as_ref().map(|m| m.sampled(12).into_iter().map(|p| origin + (c + egui::vec2(p.0, p.1)) * scale).collect()).unwrap_or_default();
-                    let orange = egui::Color32::from_rgb(226, 91, 28);
-                    painter.add(egui::Shape::line(line.clone(), egui::Stroke::new(2.0, orange)));
+                    let purple = ribbon::PURPLE;
+                    painter.add(egui::Shape::line(line.clone(), egui::Stroke::new(2.0, purple)));
                     if let [.., a, b] = line.as_slice() {
                         let dir = (*b - *a).normalized();
                         let n = egui::vec2(-dir.y, dir.x);
-                        painter.add(egui::Shape::convex_polygon(vec![*b + dir * 6.0, *b - dir * 8.0 + n * 6.0, *b - dir * 8.0 - n * 6.0], orange, egui::Stroke::NONE));
+                        painter.add(egui::Shape::convex_polygon(vec![*b + dir * 6.0, *b - dir * 8.0 + n * 6.0, *b - dir * 8.0 - n * 6.0], purple, egui::Stroke::NONE));
                     }
                     for (i, p) in motion_pts.iter().enumerate().skip(1) {
-                        painter.circle(*p, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(2.0, orange));
-                        painter.text(*p, egui::Align2::CENTER_CENTER, i.to_string(), egui::FontId::proportional(9.0), orange);
+                        painter.circle(*p, HANDLE_PX / 2.0 + 1.0, egui::Color32::WHITE, egui::Stroke::new(2.0, purple));
+                        painter.text(*p, egui::Align2::CENTER_CENTER, i.to_string(), egui::FontId::proportional(9.0), purple);
                     }
                 }
             }
@@ -6854,11 +6854,11 @@ impl App {
                 if screen.len() >= outline::MIN_POINTS {
                     painter.add(egui::Shape::convex_polygon(screen.clone(), egui::Color32::from_rgba_unmultiplied(10, 110, 235, 36), egui::Stroke::NONE));
                 }
-                painter.add(egui::Shape::line(line, egui::Stroke::new(2.0, orange)));
+                painter.add(egui::Shape::line(line, egui::Stroke::new(2.0, purple)));
                 for (i, p) in screen.iter().enumerate() {
-                    painter.circle(*p, if i == 0 { HANDLE_PX / 2.0 + 2.0 } else { HANDLE_PX / 2.0 - 1.0 }, egui::Color32::WHITE, egui::Stroke::new(2.0, orange));
+                    painter.circle(*p, if i == 0 { HANDLE_PX / 2.0 + 2.0 } else { HANDLE_PX / 2.0 - 1.0 }, egui::Color32::WHITE, egui::Stroke::new(2.0, purple));
                 }
-                painter.text(origin + egui::vec2(8.0, 8.0), egui::Align2::LEFT_TOP, "Click each corner. Enter, double-click or the first corner finishes; Backspace undoes a corner; Esc cancels.", egui::FontId::proportional(13.0), orange);
+                painter.text(origin + egui::vec2(8.0, 8.0), egui::Align2::LEFT_TOP, "Click each corner. Enter, double-click or the first corner finishes; Backspace undoes a corner; Esc cancels.", egui::FontId::proportional(13.0), purple);
             }
             if !drawing && (resp.drag_started() || resp.clicked()) {
                 // A drag is only reported after the pointer has moved a few pixels, so grab where it was pressed.
@@ -11610,9 +11610,9 @@ mod tests {
         }
     }
 
-    /// The centres of the orange crop handles in a rendered frame, as screen points.
-    fn orange_handles(img: &image::RgbaImage) -> Vec<egui::Pos2> {
-        let near = |p: &image::Rgba<u8>| (p[0] as i32 - 226).abs() < 12 && (p[1] as i32 - 91).abs() < 12 && (p[2] as i32 - 28).abs() < 12;
+    /// The centres of the purple crop handles in a rendered frame, as screen points.
+    fn purple_handles(img: &image::RgbaImage) -> Vec<egui::Pos2> {
+        let near = |p: &image::Rgba<u8>| (p[0] as i32 - 110).abs() < 12 && (p[1] as i32 - 70).abs() < 12 && (p[2] as i32 - 200).abs() < 12;
         let mut seen = vec![false; (img.width() * img.height()) as usize];
         let mut out = vec![];
         for y in 0..img.height() {
@@ -11632,7 +11632,7 @@ mod tests {
                     }
                 }
                 let c = egui::pos2(sum.0 / n, sum.1 / n);
-                // Only the canvas (not the orange Publish button or the ribbon icons), one point per handle.
+                // Only the canvas (not the purple Publish button or the ribbon icons), one point per handle.
                 if n >= 6.0 && (240.0..1170.0).contains(&c.x) && (180.0..720.0).contains(&c.y) && !out.iter().any(|o: &egui::Pos2| o.distance(c) < 14.0) { out.push(c); }
             }
         }
@@ -11672,7 +11672,7 @@ mod tests {
 
         // The handle on the left edge, found by its colour in the rendered frame.
         let img = h.render().expect("renderer");
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "eight crop handles: {handles:?}");
         let mut by_x = handles.clone();
         by_x.sort_by(|a, b| a.x.total_cmp(&b.x));
@@ -11799,7 +11799,7 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         let img = h.render().expect("renderer");
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "{handles:?}");
         // Drag the bottom-right corner: the frame stays square.
         let br = *handles.iter().max_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y))).unwrap();
@@ -11866,7 +11866,7 @@ mod tests {
         h.run_steps(3);
         let img = h.render().expect("renderer");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { img.save(std::path::PathBuf::from(dir).join("9t-outline-mode.png")).unwrap(); }
-        let handles = orange_handles(&img);
+        let handles = purple_handles(&img);
         assert_eq!(handles.len(), 4, "a handle on each corner: {handles:?}");
         // Drag the bottom-right corner up and in.
         let br = *handles.iter().max_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y))).unwrap();

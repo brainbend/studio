@@ -4,7 +4,7 @@
 //! Destinations that do not exist yet (BrainBend Review, BrainBend LMS, Video) are listed and greyed with a Coming soon
 //! tag, so they show up as features to come.
 use super::*;
-use super::ribbon::{icons, tint, ORANGE, RIBBON_RADIUS};
+use super::ribbon::{icons, on_primary, primary, tint, RIBBON_RADIUS};
 use brainbend_publish_html::{HandoutOrientation, Lms};
 
 const PRINTER: char = '\u{e3dc}';
@@ -146,7 +146,7 @@ impl App {
                         ui.label(page.blurb());
                         ui.add_space(12.0);
                         if !page.available() {
-                            ui.label(egui::RichText::new("Coming soon").strong().color(ORANGE));
+                            ui.label(egui::RichText::new("Coming soon").strong().color(primary(ui)));
                             ui.weak("This option is not available in this version of BrainBend Studio.");
                             return;
                         }
@@ -200,7 +200,7 @@ impl App {
             ui.separator();
             ui.add_space(6.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let publish = egui::Button::new(egui::RichText::new("Publish").strong().color(egui::Color32::WHITE)).fill(ORANGE).corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(120.0, 34.0));
+                let publish = egui::Button::new(egui::RichText::new("Publish").strong().color(on_primary(ui))).fill(primary(ui)).corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(120.0, 34.0));
                 let enabled = page.available();
                 if ui.add_enabled(enabled, publish).on_disabled_hover_text("Coming soon").clicked() { go = true; }
                 if ui.add(egui::Button::new("Cancel").corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(100.0, 34.0))).clicked() { cancel = true; }
@@ -234,7 +234,7 @@ fn destination_row(ui: &mut egui::Ui, pg: PublishPage, selected: &mut PublishPag
     if on || resp.hovered() {
         ui.painter().rect_filled(rect, RIBBON_RADIUS, text.gamma_multiply(if on { 0.14 } else { 0.07 }));
     }
-    if on { ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, ORANGE); }
+    if on { ui.painter().rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 8.0), egui::vec2(3.0, 26.0)), 1.0, primary(ui)); }
     let icon_col = if pg.available() { tint(pg.icon()) } else { tint(pg.icon()).gamma_multiply(0.45) };
     let ink = if pg.available() { text } else { text.gamma_multiply(0.55) };
     ui.painter().text(egui::pos2(rect.left() + 18.0, rect.center().y), egui::Align2::LEFT_CENTER, pg.icon(), egui::FontId::new(20.0, icons()), icon_col);

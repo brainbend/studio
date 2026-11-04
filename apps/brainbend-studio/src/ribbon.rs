@@ -143,7 +143,15 @@ fn text_col(ui: &egui::Ui) -> egui::Color32 {
     if ui.is_enabled() { ui.visuals().text_color() } else { ui.visuals().weak_text_color() }
 }
 
-pub const ORANGE: egui::Color32 = egui::Color32::from_rgb(226, 91, 28);
+/// The logo's yellow and purple. Blue marks what is selected; these mark the main actions and what is hot.
+pub const YELLOW: egui::Color32 = egui::Color32::from_rgb(255, 205, 0);
+pub const PURPLE: egui::Color32 = egui::Color32::from_rgb(110, 70, 200);
+
+/// The main-action colour: yellow on the dark theme, purple on the light one, where yellow would not stand out.
+pub fn primary(ui: &egui::Ui) -> egui::Color32 { if ui.visuals().dark_mode { YELLOW } else { PURPLE } }
+
+/// Text on `primary`: near-black on the yellow, white on the purple.
+pub fn on_primary(ui: &egui::Ui) -> egui::Color32 { if ui.visuals().dark_mode { egui::Color32::from_rgb(28, 28, 30) } else { egui::Color32::WHITE } }
 
 /// The one blue of the app: selected tabs and ribbon items, buttons, the selected slide and layer, selection handles,
 /// and the File menu's list. White text on it reads clearly.
@@ -326,7 +334,7 @@ impl App {
                 ui.painter().rect_filled(rect, 4.0, egui::Color32::WHITE);
                 if role == current { ui.painter().text(egui::pos2(rect.left() + 8.0, rect.center().y), egui::Align2::LEFT_CENTER, CHECK.to_string(), egui::FontId::new(14.0, icons()), tint(CHECK)); }
                 ui.painter().galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), galley, egui::Color32::from_gray(20));
-                if resp.hovered() { ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, ORANGE), egui::StrokeKind::Inside); }
+                if resp.hovered() { ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, primary(ui)), egui::StrokeKind::Inside); }
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, role.label()));
                 let tip = match role.level() { Some(n) => format!("{} (<h{n}>, {}, {:.0})", role.label(), font, size), None => format!("{} (<p>, {}, {:.0})", role.label(), font, size) };
                 if resp.on_hover_text(tip).clicked() { pick = Some(role); }
@@ -339,8 +347,8 @@ impl App {
             let w = ui.fonts_mut(|f| f.layout_no_wrap(text.clone(), font.clone(), egui::Color32::WHITE).size().x);
             // At the icon's lower right corner (the icon is centred near the top of the large button).
             let r = egui::Rect::from_min_size(egui::pos2(btn.rect.center().x + 13.0 - (w + 3.0), btn.rect.top() + 4.0 + 20.0 - 10.0), egui::vec2(w + 3.0, 10.0));
-            ui.painter().rect_filled(r, 2.0, ORANGE);
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, text, font, egui::Color32::WHITE);
+            ui.painter().rect_filled(r, 2.0, primary(ui));
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, text, font, on_primary(ui));
         }
         if let Some(role) = pick { self.apply_text_style(role); }
     }
@@ -922,7 +930,7 @@ fn quick_styles(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
                     ui.painter().rect_filled(r, 4.0, color(look.fill));
                     if let Some(st) = look.stroke { ui.painter().rect_stroke(r, 4.0, egui::Stroke::new((st.width * 0.6).max(1.0), color(st.color)), egui::StrokeKind::Inside); }
                     ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "Abc", egui::FontId::proportional(12.0), color(look.text));
-                    if resp.hovered() { ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(2.0, ORANGE), egui::StrokeKind::Inside); }
+                    if resp.hovered() { ui.painter().rect_stroke(rect, 5.0, egui::Stroke::new(2.0, primary(ui)), egui::StrokeKind::Inside); }
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &format!("{name}, {}", brainbend_doc::master::THEME_COLOR_NAMES[col + 4])));
                     if resp.on_hover_text(format!("{name}, {}", brainbend_doc::master::THEME_COLOR_NAMES[col + 4])).clicked() {
                         obj.fill = Some(look.fill);
@@ -1128,7 +1136,7 @@ impl App {
                 if ui.add(egui::Label::new(egui::RichText::new("FILE").size(14.0)).sense(egui::Sense::click())).clicked() { leave = true; self.file_view = true; self.file_page = backstage::FilePage::Info; }
                 let resp = ui.add(egui::Label::new(egui::RichText::new("360° IMAGE").size(14.0).strong()).sense(egui::Sense::click()));
                 let r = resp.rect;
-                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, ORANGE));
+                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, primary(ui)));
             });
             ui.add_space(2.0);
         });
@@ -2155,19 +2163,20 @@ impl App {
                     if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
                 }
                 big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
-                // Publish is the main action, so it is orange with white ink.
+                // Publish is the main action, so it takes the main-action colour.
+                let (fill, ink) = (primary(ui), on_primary(ui));
                 let backing = ui.painter().add(egui::Shape::Noop);
                 let resp = ui.scope(|ui| {
                     let v = ui.visuals_mut();
-                    v.override_text_color = Some(egui::Color32::WHITE);
-                    let hover = ORANGE.gamma_multiply(0.85);
+                    v.override_text_color = Some(ink);
+                    let hover = fill.gamma_multiply(0.85);
                     v.widgets.hovered.weak_bg_fill = hover;
                     v.widgets.active.weak_bg_fill = hover;
                     v.widgets.open.weak_bg_fill = hover;
                     big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
                 }).inner;
                 if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, ORANGE));
+                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
             });
         });
     }

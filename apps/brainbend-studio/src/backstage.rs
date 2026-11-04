@@ -1,7 +1,7 @@
 //! The full-screen File view ("backstage"): Back to Project, Project Info, New, Open, Save, Save As, Publish.
 //! Project Info, New and Open are pages, like tabs. With no project open it is the app's start page, showing New.
 use super::*;
-use super::ribbon::{icons, tint, ORANGE, RIBBON_RADIUS};
+use super::ribbon::{icons, on_primary, primary, tint, RIBBON_RADIUS};
 
 const BACK: char = '\u{e058}';
 const INFO: char = '\u{e2ce}';
@@ -45,7 +45,7 @@ fn card(ui: &mut egui::Ui, height: f32, icon: char, name: &str, blurb: &str, foo
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, available, name));
     let hot = available && resp.hovered();
     ui.painter().rect_filled(rect, RIBBON_RADIUS, card_fill);
-    ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ORANGE } else { ui.visuals().text_color().gamma_multiply(0.18) }), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { primary(ui) } else { ui.visuals().text_color().gamma_multiply(0.18) }), egui::StrokeKind::Inside);
     let text = ui.visuals().text_color();
     let muted = if available { text } else { text.gamma_multiply(0.55) };
     let icon_col = if available { tint(icon) } else { tint(icon).gamma_multiply(0.45) };
@@ -56,8 +56,8 @@ fn card(ui: &mut egui::Ui, height: f32, icon: char, name: &str, blurb: &str, foo
     let footer_rect = egui::Rect::from_min_size(rect.left_bottom() + egui::vec2(20.0, -44.0), egui::vec2(rect.width() - 40.0, 26.0));
     match footer {
         Footer::Action(label) => {
-            ui.painter().rect_filled(footer_rect, RIBBON_RADIUS, ORANGE);
-            ui.painter().text(footer_rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.5), egui::Color32::WHITE);
+            ui.painter().rect_filled(footer_rect, RIBBON_RADIUS, primary(ui));
+            ui.painter().text(footer_rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.5), on_primary(ui));
         }
         Footer::Tag(label) => {
             ui.painter().rect_stroke(footer_rect, RIBBON_RADIUS, egui::Stroke::new(1.0, text.gamma_multiply(0.3)), egui::StrokeKind::Inside);
@@ -235,7 +235,7 @@ impl App {
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, found, format!("{name}, {folder}, {when}")));
             let hot = found && resp.hovered();
             ui.painter().rect_filled(rect, RIBBON_RADIUS, card_fill);
-            ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ORANGE } else { text.gamma_multiply(0.18) }), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { primary(ui) } else { text.gamma_multiply(0.18) }), egui::StrokeKind::Inside);
             let ink = if found { text } else { text.gamma_multiply(0.55) };
             ui.painter().text(rect.left_top() + egui::vec2(16.0, 10.0), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(15.0), ink);
             ui.painter().text(rect.left_top() + egui::vec2(16.0, 32.0), egui::Align2::LEFT_TOP, &folder, egui::FontId::proportional(12.0), ink.gamma_multiply(0.7));
