@@ -107,14 +107,15 @@ fn clip_above(poly: &[Pos2], limit: f32) -> Vec<Pos2> {
 /// Everything that goes behind the object: its shadow, its glow and its reflection. A softened object has no shadow or
 /// glow (the fade would cut them off in the published player).
 pub(crate) fn behind(painter: &egui::Painter, o: &Object, r: Rect, scale: f32, fill: Option<Color32>, map: Map) {
+    if !(r.width().is_finite() && r.height().is_finite() && r.width() < 1.0e5 && r.height() < 1.0e5) { return; }
     let figs = figures(o, r, scale);
     let soft = o.soft_edge > 0.0;
     if let (Some(g), false) = (o.glow, soft) {
         // The published player draws a glow as a shadow with no offset, a quarter of its size solid and the rest blurred.
-        halo(painter, &figs, r, g.radius / 4.0 * scale, g.radius * scale, super::color(g.color), map, egui::Vec2::ZERO);
+        halo(painter, &figs, r, g.radius.clamp(0.0, 500.0) / 4.0 * scale, g.radius.clamp(0.0, 500.0) * scale, super::color(g.color), map, egui::Vec2::ZERO);
     }
     if let (Some(sh), false) = (o.shadow, soft) {
-        halo(painter, &figs, r, sh.spread * scale, sh.blur * scale, super::color(sh.color), map, egui::vec2(sh.dx, sh.dy) * scale);
+        halo(painter, &figs, r, sh.spread.clamp(-500.0, 500.0) * scale, sh.blur.clamp(0.0, 500.0) * scale, super::color(sh.color), map, egui::vec2(sh.dx, sh.dy) * scale);
     }
     if let (Some(rf), Some(f)) = (o.reflection, fill) {
         reflection(painter, &figs, r, f, rf.size, rf.opacity, rf.gap * scale, map);
@@ -123,7 +124,7 @@ pub(crate) fn behind(painter: &egui::Painter, o: &Object, r: Rect, scale: f32, f
 
 /// Fill the outline with `color`, fading to nothing over `edge` pixels at its border.
 pub(crate) fn soft_fill(painter: &egui::Painter, figs: &Figures, bounds: Rect, color: Color32, edge: f32, map: Map) {
-    let e = edge.min(0.45 * bounds.width().min(bounds.height())).max(1.0);
+    let e = edge.min(0.45 * bounds.width().min(bounds.height())).clamp(1.0, 500.0);
     let n = ((e / 1.5).ceil() as usize).clamp(3, 16);
     let alpha = color.a() as f32 / 255.0;
     let ds: Vec<f32> = (0..=n).map(|k| -e * k as f32 / n as f32).collect();

@@ -1925,6 +1925,37 @@ impl Project {
         Ok(buf.into_inner())
     }
 
+    /// Write the project as a package straight to `w`, one asset at a time, without making a second copy of the media
+    /// (`to_package` copies every asset, and builds the whole package in memory, so it needs several times the size of
+    /// the project). `&mut self` is only so the assets can be set aside while the rest is copied; they are put back
+    /// before anything that can fail.
+    pub fn write_package<W: std::io::Write + std::io::Seek>(&mut self, w: W) -> Result<(), String> {
+        use std::io::Write;
+        let assets = std::mem::take(&mut self.assets);
+        let mut meta = self.clone();
+        self.assets = assets;
+        meta.format = FORMAT_ID.into();
+        let mut members: Vec<(String, &Asset)> = Vec::new();
+        for (i, (key, a)) in self.assets.iter().enumerate() {
+            let file = format!("assets/{i}");
+            meta.assets.insert(key.clone(), Asset { name: a.name.clone(), mime: a.mime.clone(), bytes: Vec::new(), file: Some(file.clone()) });
+            members.push((file, a));
+        }
+        let json = serde_json::to_vec_pretty(&meta).map_err(|e| e.to_string())?;
+        let mut z = zip::ZipWriter::new(w);
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        z.start_file("project.json", opts).map_err(|e| e.to_string())?;
+        z.write_all(&json).map_err(|e| e.to_string())?;
+        for (name, asset) in members {
+            // Media is already compressed; store it as it is.
+            let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(asset.bytes.len() as u64 > u32::MAX as u64);
+            z.start_file(name, stored).map_err(|e| e.to_string())?;
+            z.write_all(&asset.bytes).map_err(|e| e.to_string())?;
+        }
+        z.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Read either a package (ZIP) or the legacy plain-JSON form.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         use std::io::Read;
@@ -2349,5 +2380,28 @@ mod object_effects_tests {
         for k in ["glow", "soft_edge", "reflection"] { v.as_object_mut().unwrap().remove(k); }
         let old: Object = serde_json::from_value(v).unwrap();
         assert!(old.glow.is_none() && old.reflection.is_none() && old.soft_edge == 0.0, "a project saved before these effects opens without them");
+    }
+}
+
+#[cfg(test)]
+mod streamed_package_tests {
+    use super::*;
+
+    #[test]
+    fn a_streamed_package_reads_back_like_the_buffered_one_and_leaves_the_project_whole() {
+        let mut p = Project::new("Streamed");
+        p.assets.insert("a".into(), Asset { name: "a.bin".into(), mime: "video/mp4".into(), bytes: (0..5000u32).map(|i| (i % 251) as u8).collect(), file: None });
+        p.assets.insert("b".into(), Asset { name: "b.png".into(), mime: "image/png".into(), bytes: vec![1, 2, 3], file: None });
+        let buffered = Project::from_bytes(&p.to_package().unwrap()).unwrap();
+        let mut out = std::io::Cursor::new(Vec::new());
+        p.write_package(&mut out).unwrap();
+        assert_eq!(p.assets["a"].bytes.len(), 5000, "the project keeps its media");
+        let back = Project::from_bytes(&out.into_inner()).unwrap();
+        assert_eq!(back.name, "Streamed");
+        for k in ["a", "b"] {
+            assert_eq!(back.assets[k].bytes, p.assets[k].bytes, "{k}");
+            assert_eq!(back.assets[k].bytes, buffered.assets[k].bytes, "{k}");
+            assert_eq!((&back.assets[k].name, &back.assets[k].mime), (&p.assets[k].name, &p.assets[k].mime));
+        }
     }
 }

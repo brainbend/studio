@@ -125,6 +125,8 @@ struct App {
     state_dim: bool,
     /// "Try it" in the States tab: press buttons on the canvas to see their states, view only.
     try_mode: bool,
+    /// The file the last video or audio was added from, so its still frame can be read from the file itself.
+    last_media_path: Option<PathBuf>,
     /// The corner choice in the Button Styles gallery.
     button_corners: button_styles::Corners,
     /// The layers showing while trying (ids), and the slide they were worked out for.
@@ -401,7 +403,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(),
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -755,7 +757,10 @@ fn path_polygons(cmds: &[PathCmd], r: egui::Rect) -> Vec<Vec<egui::Pos2>> {
 fn figure_triangles(figs: &[Vec<egui::Pos2>]) -> Vec<(Vec<egui::Pos2>, Vec<usize>)> {
     use i_overlay::core::fill_rule::FillRule;
     use i_overlay::float::simplify::SimplifyShape;
-    let contours: Vec<Vec<[f32; 2]>> = figs.iter().filter(|f| f.len() > 2).map(|f| f.iter().map(|p| [p.x, p.y]).collect()).collect();
+    // An outline with a coordinate that is not a number, or is absurdly far away, would make the polygon library panic
+    // (or take forever), so it is not drawn.
+    let sane = |f: &&Vec<egui::Pos2>| f.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.x.abs() < 1.0e6 && p.y.abs() < 1.0e6);
+    let contours: Vec<Vec<[f32; 2]>> = figs.iter().filter(|f| f.len() > 2).filter(sane).map(|f| f.iter().map(|p| [p.x, p.y]).collect()).collect();
     let mut out = vec![];
     for shape in contours.simplify_shape(FillRule::NonZero) {
         let mut pts: Vec<egui::Pos2> = vec![];
@@ -822,6 +827,23 @@ fn plain_style(size: f32, color: Rgba, bold: bool, align: Align) -> TextStyle {
 
 fn blank_object(id: String, name: &str, kind: Kind, x: f32, y: f32, w: f32, h: f32) -> Object {
     Object::new(&id, name, kind, x, y, w, h)
+}
+
+/// Write `p` as a package to `path`, streaming it so the media is not copied (see `Project::write_package`).
+fn write_package_file(p: &mut Project, path: &std::path::Path) -> Result<(), String> {
+    use std::io::Write;
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut w = std::io::BufWriter::new(file);
+    p.write_package(&mut w)?;
+    w.flush().map_err(|e| e.to_string())
+}
+
+/// The largest video, audio or caption file Studio will add. A project keeps its media in memory, and a lesson with a
+/// file much bigger than this would not publish or play well anyway.
+const MAX_MEDIA_BYTES: u64 = 1_000_000_000;
+
+fn megabytes(bytes: u64) -> String {
+    if bytes >= 1_000_000_000 { format!("{:.1} GB", bytes as f64 / 1e9) } else { format!("{:.0} MB", bytes as f64 / 1e6) }
 }
 
 impl App {
@@ -909,10 +931,7 @@ impl App {
         };
         let Some(target) = target else { return };
         let tmp = target.with_extension("brainbend.tmp");
-        let res = p.to_package().and_then(|b| {
-            std::fs::write(&tmp, b).map_err(|e| e.to_string())?;
-            std::fs::rename(&tmp, &target).map_err(|e| e.to_string())
-        });
+        let res = self.project.as_mut().ok_or_else(|| "no project".to_string()).and_then(|p| write_package_file(p, &tmp)).and_then(|()| std::fs::rename(&tmp, &target).map_err(|e| e.to_string()));
         match res {
             Ok(()) => {
                 self.status = format!("Saved {}", file_label(&target));
@@ -927,13 +946,18 @@ impl App {
     /// Write a recovery copy when there are unsaved changes (called periodically).
     fn autosave(&mut self) {
         self.last_autosave = std::time::Instant::now();
-        let (Some(p), Some(path)) = (self.committed(), recovery_path()) else { return };
+        let Some(path) = recovery_path() else { return };
         if !self.dirty { return; }
         if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
-        if let Ok(bytes) = p.to_package() {
-            let tmp = path.with_extension("tmp");
-            if std::fs::write(&tmp, bytes).is_ok() { let _ = std::fs::rename(&tmp, &path); }
-        }
+        let tmp = path.with_extension("tmp");
+        // The common case streams the project to the file without copying its media; only the master view (whose
+        // stand-ins have to be folded back in first) makes a copy.
+        let written = if self.master_stash.is_none() {
+            self.project.as_mut().ok_or_else(|| "no project".to_string()).and_then(|p| write_package_file(p, &tmp))
+        } else {
+            self.committed().ok_or_else(|| "no project".to_string()).and_then(|mut p| write_package_file(&mut p, &tmp))
+        };
+        if written.is_ok() { let _ = std::fs::rename(&tmp, &path); } else { let _ = std::fs::remove_file(&tmp); }
     }
 
     fn clear_recovery() {
@@ -2121,6 +2145,12 @@ impl App {
     /// Add a media asset (video/audio/captions) from a file; returns its asset key.
     fn load_media(&mut self, filters: &[&str], label: &str) -> Option<(String, String)> {
         let path = rfd::FileDialog::new().add_filter(label, filters).pick_file()?;
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if size > MAX_MEDIA_BYTES {
+            self.status = format!("{} is {}, which is too large to add (the limit is {}). Compress it first, for example with HandBrake, and add it again.", path.file_name().and_then(|n| n.to_str()).unwrap_or("That file"), megabytes(size), megabytes(MAX_MEDIA_BYTES));
+            return None;
+        }
+        self.last_media_path = Some(path.clone());
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
@@ -2146,7 +2176,8 @@ impl App {
         let Some((key, name)) = self.load_media(&["mp4", "m4v", "webm"], "Video") else { return };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Video, 0.0, 0.0, 1280.0, 720.0);
         // A frame of the video to show before it plays (needs ffmpeg; without it there is none).
-        if let Some(still) = self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset) {
+        let from_file = self.last_media_path.take().and_then(|p| brainbend_import_legacy::still_asset_from_file(&p));
+        if let Some(still) = from_file.or_else(|| self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset)) {
             let still_key = format!("{key}-still");
             if let Some(p) = self.project.as_mut() { p.assets.insert(still_key.clone(), still); }
             o.poster = Some(still_key);
@@ -9711,6 +9742,30 @@ mod tests {
             button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, look, Corners::Rounded));
             assert_eq!(o.states[0].fill, Some(hue.fill), "{} {:?}", hue.name, look);
         } }
+    }
+
+    #[test]
+    fn autosave_streams_a_project_with_media_and_leaves_it_whole() {
+        let home = std::env::temp_dir().join(format!("bb-home-media-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        let mut a = app();
+        let media: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+        a.project.as_mut().unwrap().assets.insert("clip".into(), Asset { name: "clip.mp4".into(), mime: "video/mp4".into(), bytes: media.clone(), file: None });
+        a.dirty = true;
+        a.autosave();
+        assert_eq!(a.project.as_ref().unwrap().assets["clip"].bytes, media, "the open project keeps its media");
+        let back = Project::from_bytes(&std::fs::read(recovery_path().unwrap()).unwrap()).unwrap();
+        assert_eq!(back.assets["clip"].bytes, media, "and the recovery copy has it too");
+        assert_eq!(back.assets["clip"].name, "clip.mp4");
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn media_sizes_are_said_in_megabytes_and_gigabytes() {
+        assert_eq!(megabytes(79_199_914), "79 MB");
+        assert_eq!(megabytes(7_900_000_000), "7.9 GB");
+        assert_eq!(megabytes(MAX_MEDIA_BYTES), "1.0 GB");
     }
 
     #[test]
