@@ -1673,7 +1673,6 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;
                         *changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                        if matches!(obj.kind, Kind::Video) { *changed |= ui.checkbox(&mut m.controls, "Show player controls").changed(); }
                     });
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 14.0;

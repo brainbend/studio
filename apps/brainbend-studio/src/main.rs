@@ -6057,9 +6057,6 @@ impl App {
                 egui::CollapsingHeader::new("Playback").default_open(true).show(ui, |ui| {
                     let m = &mut obj.media;
                     changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                    if matches!(obj.kind, Kind::Video) {
-                        changed |= ui.checkbox(&mut m.controls, "Show player controls").changed();
-                    }
                     changed |= ui.checkbox(&mut m.looped, "Loop").changed();
                     changed |= ui.checkbox(&mut m.muted, "Muted").changed();
                     ui.horizontal(|ui| {

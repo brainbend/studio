@@ -245,7 +245,7 @@
           media.src = P.assetUrls[o.asset]; media.preload = 'metadata';
           if (o.poster && P.assetUrls[o.poster]) media.poster = P.assetUrls[o.poster];
           var mp = o.media || { autoplay: false, controls: true, looped: false, muted: false, volume: 1 };
-          media.controls = mp.controls; media.loop = mp.looped; media.muted = mp.muted; media.dataset.authorMuted = mp.muted ? '1' : ''; media.volume = mp.volume;
+          media.controls = o.kind === 'Audio' && mp.controls; media.loop = mp.looped; media.muted = mp.muted; media.dataset.authorMuted = mp.muted ? '1' : ''; media.volume = mp.volume;
           media.setAttribute('aria-label', o.alt || o.name || (o.kind === 'Video' ? 'Video' : 'Audio'));
           // Cue points: "media reaches" fires once each time playback passes the time (again after seeking back).
           var cues = {};
