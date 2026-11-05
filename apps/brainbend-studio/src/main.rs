@@ -199,6 +199,8 @@ struct App {
     /// Open a project into the Story View (the app turns this on; tests keep the slide view).
     open_to_story_view: bool,
     scene_rename: Option<usize>,
+    /// The slide whose name is being edited in the slide list.
+    slide_rename: Option<usize>,
     /// Ids of further selected slides (besides the current one): ⌘-click toggles, ⇧-click selects a range.
     slide_multi: Vec<String>,
     /// Notes from the last import, shown once in a dialog.
@@ -459,7 +461,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(), word_capture: None,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(), word_capture: None,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1777,6 +1779,7 @@ impl App {
         }
         let numbers = self.scene_numbers(si);
         let (mut select, mut open) = (None, None);
+        let mut start_slide_rename: Option<usize> = None;
         // Jumps that are not a tree connector (back-links, sideways jumps, jumps out of the scene) show as a chip on the slide.
         let mut hover_line: Option<(egui::Pos2, egui::Rect)> = None;
         let mut chips: Vec<(usize, Vec<usize>)> = Vec::new();
@@ -1825,9 +1828,23 @@ impl App {
                         select = Some(i);
                     }
                 }
-                let p = self.project.as_ref().unwrap();
                 let n = numbers.get(&i).copied().unwrap_or(0);
-                ui.add(egui::Label::new(egui::RichText::new(format!("{}.{} {}", si + 1, n, p.slides[i].name)).size(11.5)).truncate());
+                if self.slide_rename == Some(i) {
+                    let mut name = self.project.as_ref().unwrap().slides[i].name.clone();
+                    let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(tw));
+                    if !r.has_focus() && !r.lost_focus() { r.request_focus(); }
+                    // A space typed at the end stays while typing; the name is trimmed when the box is left.
+                    if r.changed() && !name.trim().is_empty() { self.project.as_mut().unwrap().slides[i].name = name; self.dirty = true; }
+                    if r.lost_focus() {
+                        self.slide_rename = None;
+                        let t = self.project.as_ref().unwrap().slides[i].name.trim().to_string();
+                        self.project.as_mut().unwrap().slides[i].name = t;
+                    }
+                } else {
+                    let p = self.project.as_ref().unwrap();
+                    let l = ui.add(egui::Label::new(egui::RichText::new(format!("{}.{} {}", si + 1, n, p.slides[i].name)).size(11.5)).truncate().sense(egui::Sense::click()));
+                    if l.double_clicked() { start_slide_rename = Some(i); }
+                }
             });
             if let Some((_, targets)) = chips.iter().find(|c| c.0 == i) {
                 let p = self.project.as_ref().unwrap();
@@ -1849,6 +1866,10 @@ impl App {
             let c = ribbon::ACCENT;
             ui.painter().line_segment([from, to.center()], egui::Stroke::new(2.0, c));
             ui.painter().rect_stroke(to, 3.0, egui::Stroke::new(2.0, c), egui::StrokeKind::Outside);
+        }
+        if let Some(i) = start_slide_rename {
+            self.snapshot();
+            self.slide_rename = Some(i);
         }
         (select, open)
     }
@@ -12952,6 +12973,32 @@ mod tests {
         let p = h.state().project.as_ref().unwrap();
         assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");
         assert_eq!(p.layouts[n0 - 2].name, "Quiz page", "and so is the new order");
+    }
+
+    #[test]
+    fn double_clicking_a_slide_title_in_the_slide_list_renames_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.add_slide_with_layout(SlideKind::Normal, None);
+        let name = a.project.as_ref().unwrap().slides[1].name.clone();
+        let mut h = harness_fast(a);
+        h.run_steps(3);
+        let at = h.get_by_label(&format!("1.2 {name}")).rect().center();
+        for pressed in [true, false, true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            h.run_steps(1);
+        }
+        h.run_steps(3);
+        assert_eq!(h.state().slide_rename, Some(1), "the title became a box");
+        h.state_mut().project.as_mut().unwrap().slides[1].name = "Welcome ".into();
+        h.run_steps(2);
+        assert_eq!(h.state().slide_rename, Some(1));
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert_eq!(h.state().slide_rename, None);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].name, "Welcome", "trimmed when done");
+        h.state_mut().undo();
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].name, name, "one undo puts the old name back");
     }
 
     #[test]
