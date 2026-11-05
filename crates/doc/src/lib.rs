@@ -1671,12 +1671,31 @@ impl Question {
     }
 }
 
+thread_local! {
+    /// While set, an asset's bytes are left out of its serialized form (see `Project::fonts_used`).
+    static LEAVE_OUT_BYTES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn serialize_bytes<S: serde::Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    if LEAVE_OUT_BYTES.with(|f| f.get()) { s.serialize_seq(Some(0))?.end() } else { serde::Serialize::serialize(bytes, s) }
+}
+
+/// Sets `LEAVE_OUT_BYTES` for as long as it lives.
+struct LeaveOutBytes;
+impl LeaveOutBytes {
+    fn new() -> Self { LEAVE_OUT_BYTES.with(|f| f.set(true)); LeaveOutBytes }
+}
+impl Drop for LeaveOutBytes {
+    fn drop(&mut self) { LEAVE_OUT_BYTES.with(|f| f.set(false)); }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub name: String,
     pub mime: String,
     /// Raw bytes. In a `.brainbend` package these live in `assets/<file>` rather than in the JSON.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "serialize_bytes")]
     pub bytes: Vec<u8>,
     /// Package member holding the bytes (set when writing a package).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1821,6 +1840,8 @@ impl Project {
             }
         }
         let mut out = std::collections::BTreeSet::new();
+        // The pictures, video and audio hold no font names and, written out as JSON numbers, would make this take seconds.
+        let _leave_out = LeaveOutBytes::new();
         if let Ok(v) = serde_json::to_value(self) { walk(&v, &mut out); }
         out
     }
@@ -2032,6 +2053,20 @@ mod tests {
         let used = p.fonts_used();
         for f in ["Lora", "Poppins", "Oswald"] { assert!(used.contains(f), "{f}"); }
         assert!(!used.contains("Nothing"));
+    }
+
+    #[test]
+    fn finding_the_fonts_does_not_write_out_the_media_and_leaves_saving_alone() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        p.theme.heading_font = "Oswald".into();
+        p.assets.insert("big".into(), Asset { name: "big.mp4".into(), mime: "video/mp4".into(), bytes: vec![7u8; 4_000_000], file: None });
+        let t = std::time::Instant::now();
+        assert!(p.fonts_used().contains("Oswald"));
+        assert!(t.elapsed() < std::time::Duration::from_millis(500), "4 MB of media must not slow it down: {:?}", t.elapsed());
+        // The bytes are still written when the project is serialized afterwards.
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("[7,7,7"), "the bytes are not lost from the saved form");
     }
 
     #[test]
