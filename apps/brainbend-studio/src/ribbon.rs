@@ -485,8 +485,8 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-/// The tabs, left to right, in the order an author works through them. Slide Master shows only inside the master view.
-pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Slide Master", "Review", "Help"];
+/// The tabs, left to right, in the order an author works through them. Layout Builder shows only inside its own mode.
+pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"];
 pub const HOME_TAB: usize = 1;
 pub const THEME_TAB: usize = 2;
 pub const SLIDES_TAB: usize = 3;
@@ -1054,7 +1054,7 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
                 for (i, name) in TABS.into_iter().enumerate() {
-                    // The master view has its own short tab list; the Slide Master tab exists only there.
+                    // The master view has its own short tab list; the Layout Builder tab exists only there.
                     if master != (i == MASTER_TAB) && i != 0 && !(master && [HOME_TAB, OBJECTS_TAB, HELP_TAB].contains(&i)) { continue; }
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
@@ -2348,6 +2348,10 @@ impl App {
                 });
             });
         });
+        // Delete and Insert change the slide list and the current slide: look again before using the index.
+        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
+        let cur = self.slide.min(n.saturating_sub(1));
+        let is_layout = cur > 0 && cur < n;
         group(ui, "Placeholders", |ui| {
             big_menu(ui, TEXTBOX, "Placeholder", "Add a title or text placeholder", |ui| {
                 for k in [PlaceholderKind::Title, PlaceholderKind::Subtitle, PlaceholderKind::Body] {
@@ -2383,7 +2387,7 @@ impl App {
             if changed { self.commit_project_edit(ctx, before); }
         });
         group(ui, "Close", |ui| {
-            if big_button(ui, CHECK, "Close Master View", "Return to the slides").clicked() { self.leave_master_view(); }
+            if big_button(ui, CHECK, "Close Layout Builder", "Return to the slides").clicked() { self.leave_master_view(); }
         });
         if want_picture {
             if let Some((key, ..)) = self.load_image_asset() {
@@ -2421,7 +2425,7 @@ impl App {
         let mut want_picture = false;
         group(ui, "Master", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, STACK, "Slide Master", "Edit the master and layouts").clicked() { open_master = true; }
+                if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
                 big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
                     let current = proj.slides[slide_idx].layout.clone();
                     for l in proj.layouts.clone() {

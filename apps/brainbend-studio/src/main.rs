@@ -278,7 +278,7 @@ struct App {
     /// The look the Table panel applies, and which parts of it.
     table_style: brainbend_doc::tables::TableStyle,
     table_opts: brainbend_doc::tables::StyleOptions,
-    /// Set while the Slide Master view is open.
+    /// Set while the Layout Builder view is open.
     master_stash: Option<master_view::MasterStash>,
 }
 
@@ -8166,7 +8166,7 @@ mod tests {
                 Err(_) => (0..n.min(4)).collect(),
             };
             if let Ok(v) = std::env::var("BRAINBEND_MASTER") {
-                // Slide Master view on layout number `v` (1-based), instead of the slides.
+                // Layout Builder view on layout number `v` (1-based), instead of the slides.
                 h.state_mut().enter_master_view();
                 h.state_mut().slide = v.parse().unwrap_or(1);
                 h.run_steps(3);
@@ -9796,6 +9796,8 @@ mod tests {
     fn app() -> App {
         let mut a = App::default();
         a.new_project();
+        let p = a.project.as_mut().unwrap();
+        p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
         a
     }
 
@@ -10866,6 +10868,7 @@ mod tests {
         a.new_project();
         {
             let p = a.project.as_mut().unwrap();
+            p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
             p.master.objects.push(Object::new("logo", "Logo", Kind::Rect, 0.0, 0.0, 50.0, 50.0));
             let id = p.layouts[1].id.clone();
             p.slides[0].layout = Some(id);
@@ -11243,7 +11246,7 @@ mod tests {
     #[test]
     fn the_tabs_follow_the_authors_workflow_and_the_theme_and_review_tabs_hold_their_groups() {
         use egui_kittest::kittest::Queryable;
-        assert_eq!(ribbon::TABS, ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Slide Master", "Review", "Help"]);
+        assert_eq!(ribbon::TABS, ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"]);
         let mut a = app();
         a.file_view = false;
         let mut h = harness(a);
@@ -11251,13 +11254,13 @@ mod tests {
         let x = |h: &egui_kittest::Harness<'static, App>, name: &str| h.query_all_by_label(name).next().map(|n| { use egui_kittest::kittest::NodeT; n.accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) });
         let xs: Vec<f64> = ["Home", "Theme", "Slides", "Objects", "Animations", "Review", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in that order: {xs:?}");
-        assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Slide Master").is_none(), "the old names are gone, and Slide Master is not a tab here");
+        assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Layout Builder").is_none(), "the old names are gone, and Layout Builder is not a tab here");
         h.state_mut().ribbon_tab = ribbon::THEME_TAB;
         h.run_steps(3);
-        for name in ["Fonts", "Slide Master", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
+        for name in ["Fonts", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
         assert!(h.query_all_by_label_contains("Colors").next().is_some(), "Brand Colors is on Theme");
-        let gx: Vec<f64> = ["Slide Master", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
-        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Slide Master, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
+        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
         for gone in ["Themes", "Player", "Spelling", "Focus Order"] { assert!(h.query_all_by_label_contains(gone).next().is_none(), "{gone} is not on Theme"); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-theme.png")).unwrap(); }
         h.state_mut().ribbon_tab = ribbon::REVIEW_TAB;
@@ -11266,10 +11269,10 @@ mod tests {
         assert!(h.query_all_by_label_contains("Player").next().is_some() && h.query_all_by_label_contains("Settings").next().is_some(), "Player Settings is on Review");
         assert!(h.query_all_by_label_contains("Accessibility").next().is_some(), "the Accessibility Checker is on Review");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-review.png")).unwrap(); }
-        // Inside the master view the bar is Home, Objects, Slide Master, Help.
+        // Inside the master view the bar is Home, Objects, Layout Builder, Help.
         h.state_mut().enter_master_view();
         h.run_steps(4);
-        let xs: Vec<f64> = ["Home", "Objects", "Slide Master", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        let xs: Vec<f64> = ["Home", "Objects", "Layout Builder", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
         assert!(h.query_all_by_label("Theme").next().is_none() && h.query_all_by_label("Review").next().is_none(), "the other tabs wait outside the master view");
     }
@@ -12886,6 +12889,69 @@ mod tests {
         }
         assert!(moved, "dragging the border changed column widths: {before:?} -> {:?}", widths(&h));
         assert!(h.state().undo.len() >= 1);
+    }
+
+    #[test]
+    fn layout_builder_deletes_a_layout_even_one_slides_use_and_keeps_working() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.add_slide_with_layout(SlideKind::Normal, Some("layout-content".into()));
+        a.add_slide_with_layout(SlideKind::Normal, Some("layout-title".into()));
+        a.enter_master_view();
+        let mut h = harness(a);
+        h.run_steps(3);
+        for _ in 0..4 {
+            let n = h.state().project.as_ref().unwrap().slides.len();
+            let last = n - 1;
+            h.state_mut().slide = last;
+            h.run_steps(2);
+            h.get_by_label("Delete").click();
+            h.run_steps(4);
+            assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n - 1);
+            assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n - 2, "the layout list stays in step");
+        }
+        h.state_mut().leave_master_view();
+        h.run_steps(3);
+        let p = h.state().project.as_ref().unwrap();
+        assert!(p.slides.iter().all(|s| s.layout.as_deref().is_none_or(|l| p.layout(l).is_some())), "no slide points at a deleted layout");
+    }
+
+    #[test]
+    fn leaving_the_layout_builder_is_quick_however_much_media_the_project_holds() {
+        let mut a = app();
+        a.project.as_mut().unwrap().assets.insert("big".into(), Asset { name: "big.mp4".into(), mime: "video/mp4".into(), bytes: vec![7; 60_000_000], file: None });
+        a.enter_master_view();
+        a.insert_layout(None);
+        let t = std::time::Instant::now();
+        a.leave_master_view();
+        assert!(t.elapsed().as_millis() < 300, "took {:?}", t.elapsed());
+        assert_eq!(a.project.as_ref().unwrap().assets["big"].bytes.len(), 60_000_000, "the media is still there");
+    }
+
+    #[test]
+    fn layout_builder_panel_adds_renames_moves_and_deletes_layouts() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.enter_master_view();
+        let mut h = harness(a);
+        h.run_steps(3);
+        let n0 = h.state().project.as_ref().unwrap().slides.len();
+        h.get_by_label("+ Add layout").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n0 + 1);
+        let i = h.state().slide;
+        assert_eq!(i, n0, "the new layout is selected");
+        h.state_mut().rename_layout(i, "Quiz ");
+        h.state_mut().rename_layout(i, "Quiz page");
+        h.state_mut().move_layout(i, false);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[n0 - 1].name, "Quiz page");
+        assert_eq!(h.state().slide, n0 - 1);
+        h.state_mut().move_layout(1, false);
+        assert_eq!(h.state().slide, n0 - 1, "the first layout cannot move up, nor the All layouts stand-in");
+        h.state_mut().leave_master_view();
+        let p = h.state().project.as_ref().unwrap();
+        assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");
+        assert_eq!(p.layouts[n0 - 2].name, "Quiz page", "and so is the new order");
     }
 
     #[test]

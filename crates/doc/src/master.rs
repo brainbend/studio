@@ -174,8 +174,15 @@ impl SlideLayout {
     }
 }
 
-/// The starter set of layouts for a slide of `w` x `h`.
-pub fn default_layouts(theme: &Theme, w: f32, h: f32) -> Vec<SlideLayout> {
+/// What a new project starts with: one blank layout. Authors build their own.
+pub fn default_layouts(_theme: &Theme, _w: f32, _h: f32) -> Vec<SlideLayout> {
+    vec![SlideLayout::new("layout-blank", "Blank")]
+}
+
+/// A set of ready-made layouts (Title Slide, Title and Content, ...). The app no longer offers
+/// these; tests use them as a ready-made set of layouts with placeholders.
+#[doc(hidden)]
+pub fn sample_layouts(theme: &Theme, w: f32, h: f32) -> Vec<SlideLayout> {
     use PlaceholderKind::*;
     let m = w * 0.06;
     let ph = |id: &str, k, x, y, ww, hh| placeholder_object(id, k, theme, x, y, ww, hh);
@@ -209,7 +216,7 @@ impl Project {
         self.layouts.iter().find(|l| l.id == id)
     }
 
-    /// Give a project that has no layouts the starter set.
+    /// Give a project that has no layouts the one blank layout.
     pub fn ensure_layouts(&mut self) {
         if self.layouts.is_empty() {
             let (w, h) = self.slides.first().map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
@@ -383,6 +390,7 @@ mod tests {
         let mut p = Project::new("t");
         p.slides.push(Slide::new("s1", "S1", 1920.0, 1080.0));
         p.sanitize();
+        p.layouts = sample_layouts(&p.theme, 1920.0, 1080.0);
         p
     }
 
@@ -398,14 +406,19 @@ mod tests {
     }
 
     #[test]
-    fn old_projects_without_layouts_load_with_starter_layouts() {
+    fn a_new_project_has_one_blank_layout_and_old_ones_without_layouts_get_it() {
+        let p = Project::new("t");
+        let mut q = p.clone();
+        q.sanitize();
+        assert_eq!(q.layouts.len(), 1);
+        assert_eq!((q.layouts[0].id.as_str(), q.layouts[0].name.as_str(), q.layouts[0].objects.len()), ("layout-blank", "Blank", 0));
         let mut p = project();
-        assert!(p.layouts.len() >= 5);
+        assert!(p.layouts.len() >= 5, "the sample set is still there for tests");
         p.layouts.clear();
         let json = p.to_json().unwrap();
         let mut back = Project::from_json(&json).unwrap();
         back.sanitize();
-        assert!(back.layout("layout-content").is_some());
+        assert_eq!(back.layouts.len(), 1);
     }
 
     #[test]

@@ -18,6 +18,7 @@ fn project() -> Project {
         p.slides.push(Slide::new(&format!("s{}", i + 1), name, 1920.0, 1080.0));
     }
     p.sanitize();
+    p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
     p.scenes = vec![Scene { id: "a".into(), name: "Part A".into(), bank: None }, Scene { id: "b".into(), name: "Part B".into(), bank: None }];
     p.slides[0].scene = "a".into();
     p.slides[1].scene = "b".into();
