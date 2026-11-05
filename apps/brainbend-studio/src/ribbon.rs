@@ -1303,6 +1303,28 @@ impl App {
         if !open { self.theme_colors_open = false; }
     }
 
+    /// The theme's heading and body fonts. A window rather than a menu, because a drop-down opened inside a menu closes the menu.
+    pub(super) fn theme_fonts_window(&mut self, ctx: &egui::Context) {
+        if !self.theme_fonts_open { return; }
+        let Some(proj) = self.project.as_mut() else { self.theme_fonts_open = false; return };
+        let mut open = true;
+        let before = Snap::of(proj);
+        let mut next = proj.theme.clone();
+        let mut moved = false;
+        egui::Window::new("Fonts").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.set_min_width(300.0);
+            ui.weak("The fonts of the master and layouts, and of slides that still follow them. Other text keeps its font.");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 190.0); });
+            ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 190.0); });
+        });
+        if moved {
+            proj.set_theme(next.named());
+            self.commit_project_edit(ctx, before);
+        }
+        if !open { self.theme_fonts_open = false; }
+    }
+
     /// Custom title bar: window buttons stay native on macOS, then Save / Undo / Redo / Preview,
     /// the centred title, and the theme toggle plus Publish at the right.
     fn title_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
@@ -2393,6 +2415,7 @@ impl App {
         let mut open_player = false;
         let mut layout_pick: Option<Option<String>> = None;
         let mut open_theme_colors = false;
+        let mut open_theme_fonts = false;
         group(ui, "Theme", |ui| {
             ui.horizontal(|ui| {
                 big_menu(ui, SHAPES, "Themes", "Colours and fonts for the master, layouts and new content", |ui| {
@@ -2411,17 +2434,7 @@ impl App {
                     }
                 });
                 if big_button(ui, DROP, "Brand\nColors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
-                big_menu(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts", |ui| {
-                    ui.set_min_width(260.0);
-                    let mut next = proj.theme.clone();
-                    let mut moved = false;
-                    ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 170.0); });
-                    ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 170.0); });
-                    if moved {
-                        proj.set_theme(next.named());
-                        changed = true;
-                    }
-                });
+                if big_button(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts").clicked() { open_theme_fonts = true; }
             });
         });
         group(ui, "Master", |ui| {
@@ -2483,6 +2496,7 @@ impl App {
         if open_master { self.enter_master_view(); }
         if open_player { self.player_open = true; }
         if open_theme_colors { self.theme_colors_open = true; }
+        if open_theme_fonts { self.theme_fonts_open = !self.theme_fonts_open; }
         if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
         if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
         if want_picture {
