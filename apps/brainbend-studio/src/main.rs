@@ -406,13 +406,15 @@ impl Snap {
     }
 }
 
-/// Holding Shift while dragging a corner handle keeps the shape: `(gx, gy)` is how much the width and height would grow
-/// (negative to shrink); this returns the growth that keeps the proportions of a `w` x `h` box, following whichever side
-/// the pointer moved further, and never shrinks it below `min`.
-fn keep_proportions(w: f32, h: f32, (gx, gy): (f32, f32), min: f32) -> (f32, f32) {
-    if w <= 0.0 || h <= 0.0 { return (gx, gy); }
+/// Holding Shift while dragging a handle keeps the shape of the `w` x `h` box. `(gx, gy)` is how much the width and height
+/// would grow (negative to shrink) with the handle `(hx, hy)`; this returns the growth that keeps the proportions, never
+/// shrinking either side below `min`. A corner follows whichever side the pointer moved further; a side handle sets the
+/// scale itself, and the other side grows to match (the caller spreads that half and half, so it grows about the middle).
+fn keep_proportions(w: f32, h: f32, (hx, hy): (i8, i8), (gx, gy): (f32, f32), min: f32) -> (f32, f32) {
+    if w <= 0.0 || h <= 0.0 || (hx == 0 && hy == 0) { return (gx, gy); }
     let (kx, ky) = ((w + gx) / w, (h + gy) / h);
-    let k = (if (kx - 1.0).abs() >= (ky - 1.0).abs() { kx } else { ky }).max(min / w).max(min / h);
+    let k = if hy == 0 { kx } else if hx == 0 { ky } else if (kx - 1.0).abs() >= (ky - 1.0).abs() { kx } else { ky };
+    let k = k.max(min / w).max(min / h);
     (w * k - w, h * k - h)
 }
 
@@ -7198,9 +7200,10 @@ impl App {
                                 let a = o.rotation.to_radians();
                                 let (ldx, ldy) = (d.x * a.cos() + d.y * a.sin(), -d.x * a.sin() + d.y * a.cos());
                                 let (mut gx, mut gy) = (hx as f32 * ldx, hy as f32 * ldy);
-                                if hx != 0 && hy != 0 && ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (gx, gy), 4.0); }
-                                let (el, er) = (if hx < 0 { -gx } else { 0.0 }, if hx > 0 { gx } else { 0.0 });
-                                let (et, eb) = (if hy < 0 { -gy } else { 0.0 }, if hy > 0 { gy } else { 0.0 });
+                                if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (hx, hy), (gx, gy), 4.0); }
+                                // A side that was not dragged only grows (with Shift), evenly at both ends.
+                                let (el, er) = if hx < 0 { (-gx, 0.0) } else if hx > 0 { (0.0, gx) } else { (-gx / 2.0, gx / 2.0) };
+                                let (et, eb) = if hy < 0 { (-gy, 0.0) } else if hy > 0 { (0.0, gy) } else { (-gy / 2.0, gy / 2.0) };
                                 let (nw, nh) = ((o.w - el + er).max(4.0), (o.h - et + eb).max(4.0));
                                 let shift = egui::vec2((el + er) / 2.0, (et + eb) / 2.0);
                                 let world = egui::vec2(shift.x * a.cos() - shift.y * a.sin(), shift.x * a.sin() + shift.y * a.cos());
@@ -7209,11 +7212,12 @@ impl App {
                                 (o.x, o.y) = (cxn - nw / 2.0, cyn - nh / 2.0);
                             }
                             DragMode::Resize(hx, hy) => {
-                                // Shift on a corner keeps the object's proportions, the opposite corner staying put.
+                                // Shift keeps the object's proportions: a corner leaves the opposite corner where it is, and a side
+                                // handle leaves the opposite side, the other sides growing about the middle.
                                 let (mut gx, mut gy) = (hx as f32 * d.x, hy as f32 * d.y);
-                                if hx != 0 && hy != 0 && ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (gx, gy), 4.0); }
-                                if hx < 0 { o.x -= gx; o.w += gx; } else if hx > 0 { o.w += gx; }
-                                if hy < 0 { o.y -= gy; o.h += gy; } else if hy > 0 { o.h += gy; }
+                                if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (hx, hy), (gx, gy), 4.0); }
+                                if hx < 0 { o.x -= gx; o.w += gx; } else if hx > 0 { o.w += gx; } else { o.x -= gx / 2.0; o.w += gx; }
+                                if hy < 0 { o.y -= gy; o.h += gy; } else if hy > 0 { o.h += gy; } else { o.y -= gy / 2.0; o.h += gy; }
                                 if o.w < 4.0 { if hx < 0 { o.x -= 4.0 - o.w; } o.w = 4.0; }
                                 if o.h < 4.0 { if hy < 0 { o.y -= 4.0 - o.h; } o.h = 4.0; }
                             }
@@ -7230,13 +7234,10 @@ impl App {
                         for &k in &members { let o = &objs[k]; x0 = x0.min(o.x); y0 = y0.min(o.y); x1 = x1.max(o.x + o.w); y1 = y1.max(o.y + o.h); }
                         let (ow, oh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
                         let (mut nx0, mut ny0, mut nx1, mut ny1) = (x0, y0, x1, y1);
-                        let mut d = d;
-                        if hx != 0 && hy != 0 && ctx.input(|i| i.modifiers.shift) {
-                            let (gx, gy) = keep_proportions(ow, oh, (hx as f32 * d.x, hy as f32 * d.y), 8.0);
-                            d = egui::vec2(hx as f32 * gx, hy as f32 * gy);
-                        }
-                        if hx < 0 { nx0 += d.x; } else if hx > 0 { nx1 += d.x; }
-                        if hy < 0 { ny0 += d.y; } else if hy > 0 { ny1 += d.y; }
+                        let (mut gx, mut gy) = (hx as f32 * d.x, hy as f32 * d.y);
+                        if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(ow, oh, (hx, hy), (gx, gy), 8.0); }
+                        if hx < 0 { nx0 -= gx; } else if hx > 0 { nx1 += gx; } else { nx0 -= gx / 2.0; nx1 += gx / 2.0; }
+                        if hy < 0 { ny0 -= gy; } else if hy > 0 { ny1 += gy; } else { ny0 -= gy / 2.0; ny1 += gy / 2.0; }
                         if nx1 - nx0 >= 8.0 && ny1 - ny0 >= 8.0 {
                             let (kx, ky) = ((nx1 - nx0) / ow, (ny1 - ny0) / oh);
                             for &k in &members {
@@ -12260,10 +12261,43 @@ mod tests {
     }
 
     #[test]
+    fn shift_on_a_side_handle_keeps_the_proportions_growing_the_other_side_about_the_middle() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        // The right edge: the left edge stays, and the height grows evenly above and below.
+        let right = origin + egui::vec2(700.0, 400.0) * scale;
+        drag_with_shift(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01 && w > 450.0, "{w} x {hgt}");
+        assert!((x - 300.0).abs() < 0.5, "the left edge stayed: {x}");
+        assert!(((y + hgt / 2.0) - 400.0).abs() < 0.5, "it grew about the middle: y {y} h {hgt}");
+        // The top edge: the bottom stays, and the width grows evenly left and right.
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let top = origin + egui::vec2(500.0, 300.0) * scale;
+        drag_with_shift(&mut h, top, top - egui::vec2(0.0, 60.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01 && hgt > 250.0, "{w} x {hgt}");
+        assert!(((y + hgt) - 500.0).abs() < 0.5, "the bottom stayed: {}", y + hgt);
+        assert!(((x + w / 2.0) - 500.0).abs() < 0.5, "it grew about the middle: x {x} w {w}");
+    }
+
+    #[test]
+    fn without_shift_a_side_handle_changes_only_that_side() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let right = origin + egui::vec2(700.0, 400.0) * scale;
+        drag(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert_eq!((x, y, hgt), (300.0, 300.0, 200.0));
+        assert!(w > 450.0);
+    }
+
+    #[test]
     fn keep_proportions_follows_the_bigger_move_and_never_shrinks_past_the_minimum() {
-        assert_eq!(keep_proportions(400.0, 200.0, (100.0, 0.0), 4.0), (100.0, 50.0));
-        assert_eq!(keep_proportions(400.0, 200.0, (0.0, 100.0), 4.0), (200.0, 100.0));
-        let (gx, gy) = keep_proportions(400.0, 200.0, (-1000.0, -1000.0), 4.0);
+        assert_eq!(keep_proportions(400.0, 200.0, (1, 1), (100.0, 0.0), 4.0), (100.0, 50.0));
+        assert_eq!(keep_proportions(400.0, 200.0, (1, 1), (0.0, 100.0), 4.0), (200.0, 100.0));
+        let (gx, gy) = keep_proportions(400.0, 200.0, (-1, -1), (-1000.0, -1000.0), 4.0);
         assert!(400.0 + gx >= 8.0 - 0.01 && 200.0 + gy >= 4.0 - 0.01 && ((400.0 + gx) / (200.0 + gy) - 2.0).abs() < 0.01, "{gx} {gy}");
     }
 
