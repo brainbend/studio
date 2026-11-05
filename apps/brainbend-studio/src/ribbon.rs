@@ -236,6 +236,12 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
     resp
 }
 
+/// `c` mixed towards black by `t` (0 to 1), still fully opaque.
+fn shade(c: egui::Color32, t: f32) -> egui::Color32 {
+    let k = 1.0 - t;
+    egui::Color32::from_rgb((c.r() as f32 * k).round() as u8, (c.g() as f32 * k).round() as u8, (c.b() as f32 * k).round() as u8)
+}
+
 /// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
 fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
     let lines = label_lines(ui, label);
@@ -2189,19 +2195,22 @@ impl App {
                 }
                 big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
                 // Publish is the main action, so it takes the main-action colour.
+                // Darker when the pointer is over it, darker still while pressed or while the Publish window is open. (The
+                // shade must be opaque: a see-through one would show the button's own colour through it and look unchanged.)
                 let (fill, ink) = (primary(ui), on_primary(ui));
+                let (hover, pressed) = (shade(fill, 0.12), shade(fill, 0.24));
                 let backing = ui.painter().add(egui::Shape::Noop);
+                let publishing = self.publish_open;
                 let resp = ui.scope(|ui| {
                     let v = ui.visuals_mut();
                     v.override_text_color = Some(ink);
-                    let hover = fill.gamma_multiply(0.85);
                     v.widgets.hovered.weak_bg_fill = hover;
-                    v.widgets.active.weak_bg_fill = hover;
-                    v.widgets.open.weak_bg_fill = hover;
+                    v.widgets.active.weak_bg_fill = pressed;
+                    v.widgets.open.weak_bg_fill = pressed;
                     big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
                 }).inner;
                 if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
+                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, if publishing { pressed } else { fill }));
             });
         });
     }

@@ -12295,6 +12295,29 @@ mod tests {
     }
 
     #[test]
+    fn the_publish_button_darkens_when_hovered_and_more_while_its_window_is_open() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let b = h.get_all_by_label("Publish").next().unwrap().accesskit_node().raw_bounds().unwrap();
+        // A point on the button's padding, clear of its icon and its name.
+        let (px, py) = ((b.x0 + 5.0) as u32, ((b.y0 + b.y1) / 2.0) as u32);
+        let sample = |h: &mut egui_kittest::Harness<'static, App>| { let img = h.render().expect("renderer"); let p = img.get_pixel(px, py); p.0[0] as u32 + p.0[1] as u32 + p.0[2] as u32 };
+        let rest = sample(&mut h);
+        h.event(egui::Event::PointerMoved(egui::pos2(px as f32 + 6.0, py as f32)));
+        h.run_steps(3);
+        let hovered = sample(&mut h);
+        assert!(hovered + 20 < rest, "hovering darkens it: {rest} -> {hovered}");
+        h.event(egui::Event::PointerMoved(egui::pos2(5.0, 400.0)));
+        h.state_mut().publish_open = true;
+        h.run_steps(3);
+        let open = sample(&mut h);
+        assert!(open + 20 < rest && open < hovered + 1, "it stays dark while the Publish window is open: {rest} / {hovered} / {open}");
+    }
+
+    #[test]
     fn restore_aspect_ratio_keeps_the_width_and_the_corner_and_takes_one_undo_step() {
         let mut a = app_with_a_400_by_200_picture();
         let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
