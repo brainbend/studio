@@ -4,7 +4,7 @@
 //! own, else the layout's, else the master's) and the decorative objects drawn behind the slide's
 //! content. Placeholders are different: they are real objects on the slide that remember which
 //! layout placeholder they came from, so the layout can restyle them without hiding the content.
-use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextStyle, VAlign};
+use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextRole, TextStyle, VAlign};
 use serde::{Deserialize, Serialize};
 
 /// What fills a slide's background.
@@ -102,6 +102,12 @@ impl Theme {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaceholderKind {
+    Heading2,
+    Heading3,
+    Heading4,
+    /// Normal text.
+    Text,
+    // What older versions and PowerPoint files call these: still read, no longer offered.
     Title,
     Subtitle,
     Body,
@@ -110,15 +116,34 @@ pub enum PlaceholderKind {
 impl PlaceholderKind {
     pub fn label(self) -> &'static str {
         match self {
+            PlaceholderKind::Heading2 => "Heading 2",
+            PlaceholderKind::Heading3 => "Heading 3",
+            PlaceholderKind::Heading4 => "Heading 4",
+            PlaceholderKind::Text => "Normal Text",
             PlaceholderKind::Title => "Title",
             PlaceholderKind::Subtitle => "Subtitle",
             PlaceholderKind::Body => "Text",
         }
     }
 
+    /// What the placeholders offered to authors are: the same styles as Text Styles.
+    pub const CHOICES: [PlaceholderKind; 4] = [PlaceholderKind::Heading2, PlaceholderKind::Heading3, PlaceholderKind::Heading4, PlaceholderKind::Text];
+
+    /// The text style a placeholder of this kind gives its text. (The older kinds keep the look they were saved with.)
+    pub fn role(self) -> crate::TextRole {
+        match self {
+            PlaceholderKind::Heading2 => crate::TextRole::H2,
+            PlaceholderKind::Heading3 => crate::TextRole::H3,
+            PlaceholderKind::Heading4 => crate::TextRole::H4,
+            _ => crate::TextRole::Normal,
+        }
+    }
+
     /// The prompt shown in an empty placeholder while editing.
     pub fn prompt(self) -> &'static str {
         match self {
+            PlaceholderKind::Heading2 | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 => "Click to add heading",
+            PlaceholderKind::Text => "Click to add text",
             PlaceholderKind::Title => "Click to add title",
             PlaceholderKind::Subtitle => "Click to add subtitle",
             PlaceholderKind::Body => "Click to add text",
@@ -160,7 +185,12 @@ pub fn placeholder_object(id: &str, kind: PlaceholderKind, theme: &Theme, x: f32
     o.placeholder = Some(kind);
     o.text = kind.prompt().into();
     o.margins = [12.0, 8.0, 12.0, 8.0];
+    o.role = kind.role();
     o.style = match kind {
+        PlaceholderKind::Heading2 | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 | PlaceholderKind::Text => {
+            let (size, heading) = kind.role().look();
+            TextStyle { font_family: if heading { theme.heading_font.clone() } else { theme.body_font.clone() }, size, bold: false, italic: false, underline: false, color: theme.text(), align: Align::Left, valign: VAlign::Top }
+        }
         PlaceholderKind::Title => TextStyle { font_family: theme.heading_font.clone(), size: 72.0, bold: true, italic: false, underline: false, color: theme.text(), align: Align::Left, valign: VAlign::Middle },
         PlaceholderKind::Subtitle => TextStyle { font_family: theme.body_font.clone(), size: 40.0, bold: false, italic: false, underline: false, color: theme.color(9), align: Align::Left, valign: VAlign::Top },
         PlaceholderKind::Body => TextStyle { font_family: theme.body_font.clone(), size: 40.0, bold: false, italic: false, underline: false, color: theme.text(), align: Align::Left, valign: VAlign::Top },
@@ -263,6 +293,7 @@ impl Project {
                     let o = &mut base.objects[i];
                     (o.x, o.y, o.w, o.h) = (lo.x, lo.y, lo.w, lo.h);
                     o.style = lo.style.clone();
+                    o.role = lo.role;
                     o.margins = lo.margins;
                     o.fill = lo.fill;
                     o.stroke = lo.stroke;
@@ -403,6 +434,27 @@ mod tests {
             let back: Background = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
             assert_eq!(back, b);
         }
+    }
+
+    #[test]
+    fn placeholders_offer_the_text_styles_and_give_their_text_that_style() {
+        let t = Theme::default();
+        let labels: Vec<&str> = PlaceholderKind::CHOICES.iter().map(|k| k.label()).collect();
+        assert_eq!(labels, ["Heading 2", "Heading 3", "Heading 4", "Normal Text"]);
+        for k in PlaceholderKind::CHOICES {
+            let o = placeholder_object("p", k, &t, 0.0, 0.0, 100.0, 50.0);
+            assert_eq!(o.role, k.role());
+            assert_eq!(o.style.size, k.role().look().0, "{k:?} has the size its text style has");
+        }
+        assert_eq!(placeholder_object("p", PlaceholderKind::Heading3, &t, 0.0, 0.0, 1.0, 1.0).role, TextRole::H3);
+        // A slide following a layout takes the layout's heading level.
+        let mut p = project();
+        let mut l = SlideLayout::new("lay", "L");
+        l.objects.push(placeholder_object("lp", PlaceholderKind::Heading4, &p.theme, 0.0, 0.0, 100.0, 50.0));
+        p.layouts.push(l);
+        p.apply_layout(0, "lay", &mut || "new".to_string());
+        let o = p.slides[0].layers[0].objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Heading4)).unwrap();
+        assert_eq!(o.role, TextRole::H4);
     }
 
     #[test]

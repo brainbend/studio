@@ -154,7 +154,7 @@ impl App {
             _ => {
                 let mut s = Slide::new("", "Custom Layout", w, h);
                 let m = w * 0.06;
-                s.layers[0].objects = vec![brainbend_doc::master::placeholder_object(&tid, PlaceholderKind::Title, &p.theme, m, h * 0.06, w - 2.0 * m, h * 0.16)];
+                s.layers[0].objects = vec![brainbend_doc::master::placeholder_object(&tid, PlaceholderKind::Heading2, &p.theme, m, h * 0.06, w - 2.0 * m, h * 0.16)];
                 s
             }
         };

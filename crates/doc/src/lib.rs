@@ -72,6 +72,16 @@ pub enum TextRole {
 impl TextRole {
     pub const ALL: [TextRole; 5] = [TextRole::Normal, TextRole::H1, TextRole::H2, TextRole::H3, TextRole::H4];
 
+    /// What authors can pick. Heading 1 is the project's name (the player publishes it as the page's one `h1`), so it is
+    /// not offered; text saved as Heading 1 by an older version becomes Heading 2 when the project loads.
+    pub const CHOICES: [TextRole; 4] = [TextRole::Normal, TextRole::H2, TextRole::H3, TextRole::H4];
+
+    /// What the style looks like when applied: size in px and whether it uses the theme's heading font. The point is
+    /// the element the text is published as; the look is a starting point the author can change.
+    pub fn look(self) -> (f32, bool) {
+        match self { TextRole::Normal => (36.0, false), TextRole::H1 => (64.0, true), TextRole::H2 => (52.0, true), TextRole::H3 => (44.0, true), TextRole::H4 => (38.0, true) }
+    }
+
     /// The name authors see.
     pub fn label(self) -> &'static str {
         match self { TextRole::Normal => "Normal Text", TextRole::H1 => "Heading 1", TextRole::H2 => "Heading 2", TextRole::H3 => "Heading 3", TextRole::H4 => "Heading 4" }
@@ -1926,12 +1936,21 @@ impl Project {
         (0..self.slides.len()).filter(|&i| self.slides[i].scene == sc.id).collect()
     }
 
+    /// Heading 1 belongs to the project's name, so text an older version saved as Heading 1 becomes Heading 2.
+    fn retire_heading_one(&mut self) {
+        let fix = |objs: &mut Vec<Object>| for o in objs.iter_mut() { if o.role == TextRole::H1 { o.role = TextRole::H2; } };
+        for s in self.slides.iter_mut() { for l in s.layers.iter_mut() { fix(&mut l.objects); } }
+        for l in self.layouts.iter_mut() { fix(&mut l.objects); }
+        fix(&mut self.master.objects);
+    }
+
     pub fn sanitize(&mut self) {
         if self.slides.is_empty() {
             self.slides.push(Slide::new("slide-1", "Slide 1", 1920.0, 1080.0));
         }
         self.normalize_scenes();
         self.ensure_layouts();
+        self.retire_heading_one();
         for s in self.slides.iter_mut() {
             if s.layers.is_empty() {
                 s.layers.push(Layer { id: format!("{}-base", s.id), name: "Base layer".into(), objects: vec![], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] });
@@ -2053,6 +2072,25 @@ mod tests {
         let used = p.fonts_used();
         for f in ["Lora", "Poppins", "Oswald"] { assert!(used.contains(f), "{f}"); }
         assert!(!used.contains("Nothing"));
+    }
+
+    #[test]
+    fn heading_one_is_not_offered_and_old_heading_ones_become_heading_two_on_load() {
+        assert_eq!(TextRole::CHOICES, [TextRole::Normal, TextRole::H2, TextRole::H3, TextRole::H4]);
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s1", "S1", 1920.0, 1080.0));
+        p.sanitize();
+        let mut h = Object::new("h", "Head", Kind::Text, 0.0, 0.0, 10.0, 10.0);
+        h.role = TextRole::H1;
+        p.slides[0].layers[0].objects.push(h.clone());
+        p.master.objects.push(h.clone());
+        p.layouts[0].objects.push(h);
+        let mut back = Project::from_json(&p.to_json().unwrap()).unwrap();
+        assert_eq!(back.slides[0].layers[0].objects[0].role, TextRole::H1, "reading a file does not change it by itself");
+        back.sanitize();
+        assert_eq!(back.slides[0].layers[0].objects[0].role, TextRole::H2);
+        assert_eq!(back.master.objects[0].role, TextRole::H2);
+        assert_eq!(back.layouts[0].objects[0].role, TextRole::H2);
     }
 
     #[test]

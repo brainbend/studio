@@ -315,23 +315,16 @@ fn caret_job(ui: &egui::Ui, text: &str, icon: Option<char>) -> egui::text::Layou
     job
 }
 
-/// What Heading 1 to 4 and Normal Text look like when applied: size in px and whether they use the theme's heading
-/// font. The point is the element the text is published as; the look is a
-/// starting point the author can change.
-fn role_look(role: TextRole) -> (f32, bool) {
-    match role { TextRole::Normal => (36.0, false), TextRole::H1 => (64.0, true), TextRole::H2 => (52.0, true), TextRole::H3 => (44.0, true), TextRole::H4 => (38.0, true) }
-}
-
 impl App {
-    /// Text Styles: Normal Text and Heading 1 to 4. The button names the style of the selected object.
+    /// Text Styles: Normal Text and Heading 2 to 4. The button names the style of the selected object.
     fn text_styles_menu(&mut self, ui: &mut egui::Ui) {
         let theme = self.project.as_ref().map(|p| p.theme.clone()).unwrap_or_default();
         let current = self.selected_object().map(|o| o.role).unwrap_or_default();
         let mut pick = None;
         let btn = big_menu(ui, TEXT_AA, current.label(), "Text styles: set whether the text is a heading (published as <h1> to <h4>) or normal text", |ui| {
             ui.set_min_width(250.0);
-            for role in TextRole::ALL {
-                let (size, heading) = role_look(role);
+            for role in TextRole::CHOICES {
+                let (size, heading) = role.look();
                 let font = if heading { &theme.heading_font } else { &theme.body_font };
                 let mut job = egui::text::LayoutJob::default();
                 job.append(role.label(), 0.0, egui::text::TextFormat {
@@ -369,7 +362,7 @@ impl App {
     /// theme's font and text colour). Character formatting is cleared (links stay). One undo step.
     pub(super) fn apply_text_style(&mut self, role: TextRole) {
         let theme = self.project.as_ref().map(|p| p.theme.clone()).unwrap_or_default();
-        let (size, heading) = role_look(role);
+        let (size, heading) = role.look();
         let family = if heading { theme.heading_font.clone() } else { theme.body_font.clone() };
         let col = theme.colors.first().copied().unwrap_or(Rgba(34, 34, 34, 255));
         self.edit_text_range(move |o, _, _, _| {
@@ -2413,8 +2406,8 @@ impl App {
         let cur = self.slide.min(n.saturating_sub(1));
         let is_layout = cur > 0 && cur < n;
         group(ui, "Placeholders", |ui| {
-            big_menu(ui, TEXTBOX, "Placeholder", "Add a title or text placeholder", |ui| {
-                for k in [PlaceholderKind::Title, PlaceholderKind::Subtitle, PlaceholderKind::Body] {
+            big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder", |ui| {
+                for k in PlaceholderKind::CHOICES {
                     if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
                 }
             });

@@ -31,7 +31,7 @@
 
   // ---- accessibility plumbing: a heading naming the slide, a spoken announcement on each change, and
   // a note of when the learner last used the keyboard or pointer (so focus only moves for their actions)
-  var titleEl = el('div', 'sr-only'); titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '1'); titleEl.id = 'slide-title'; titleEl.tabIndex = -1; stage.appendChild(titleEl);
+  var titleEl = el('div', 'sr-only'); titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '2'); titleEl.id = 'slide-title'; titleEl.tabIndex = -1; stage.appendChild(titleEl);
   var announcer = el('div', 'sr-only'); announcer.id = 'announce';
   announcer.setAttribute('role', 'status'); announcer.setAttribute('aria-live', 'polite'); document.body.appendChild(announcer);
   var lastInput = 0;
@@ -1899,7 +1899,7 @@
       topbar.appendChild(sideToggle);
     }
     if (logoUrl) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
-    if (PL.show_title) { var tt = el('span', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
+    if (PL.show_title) { var tt = el('h1', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
     if (showResources) {
       var rb = el('button', 'tb-resources', 'Resources'); rb.type = 'button'; rb.setAttribute('aria-expanded', 'false'); rb.setAttribute('aria-controls', 'resources');
       var rp = el('div'); rp.id = 'resources'; rp.hidden = true; rp.setAttribute('role', 'dialog'); rp.setAttribute('aria-label', 'Resources');
@@ -1916,6 +1916,8 @@
     }
     document.body.appendChild(topbar);
   }
+  // Whether or not it is shown, the project's name is the page's one Heading 1.
+  if (!PL.show_title) { var h1 = el('h1', 'sr-only', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); document.body.insertBefore(h1, document.body.firstChild); }
   if ((nav && P.show_menu) || sidebarOn) {
     menu = el('nav'); menu.id = 'menu'; menu.setAttribute('aria-label', sidebarOn ? 'Sidebar' : 'Slides');
     var list = el('ol');
@@ -2219,10 +2221,8 @@
     updateNav();
     var name = slide.name || ('Slide ' + (posOf[i] + 1));
     titleEl.textContent = name;
-    // A slide has one top-level heading: the visually hidden slide title, unless the author made a Heading 1.
-    if (slide.layers.some(function (l) { return l.objects.some(function (o) { return o.role === 'H1'; }); })) {
-      titleEl.setAttribute('role', 'group'); titleEl.removeAttribute('aria-level'); titleEl.setAttribute('aria-label', name);
-    } else { titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '1'); titleEl.removeAttribute('aria-label'); }
+    // The project's name is the page's one Heading 1; each slide's (visually hidden) title is a Heading 2 under it.
+    titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '2'); titleEl.removeAttribute('aria-label');
     announcer.textContent = name + ', slide ' + (posOf[i] + 1) + ' of ' + seq.length;
     if (heldInSlide) focusIt(titleEl);   // what had focus is no longer on screen
     if (lms) lms.set(lms.locationKey, i);

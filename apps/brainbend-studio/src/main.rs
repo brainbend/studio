@@ -6343,7 +6343,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label("Read as");
                     combo("text-role").selected_text(obj.role.label()).show_ui(ui, |ui| {
-                        for r in TextRole::ALL {
+                        for r in TextRole::CHOICES {
                             changed |= ui.selectable_value(&mut obj.role, r, r.label()).changed();
                         }
                     }).response.on_hover_text("What screen readers announce this text as: a heading (a Heading 1 is the page's main heading) or ordinary text");

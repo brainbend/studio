@@ -538,9 +538,9 @@ fn convert_shapes(list: Option<Node>, ctx: &mut Ctx, hidden: bool) -> Vec<Object
                 .or_else(|| (tag == "char").then(|| child(n, "illConfig").map(|c| ["characterName", "expression"].iter().filter_map(|a| c.attribute(*a)).filter(|a| !a.is_empty()).collect::<Vec<_>>().join(", ")).unwrap_or_default()))
                 .unwrap_or_default(),
             text_rotation: match n.attribute("textDir") { Some("rot270") => 270, Some("rot90") => 90, _ => 0 },
-            // A text style that is a heading level in the source app (`textStyleKey="H1"`) is a heading here too.
+            // A text style that is a heading level in the source app (`textStyleKey="H1"`) is a heading here too (the source's H1 becomes Heading 2: here Heading 1 is the project's name).
             role: match n.descendants().find(|d| d.has_tag_name("defaults")).and_then(|d| d.attribute("textStyleKey")) {
-                Some("H1") => TextRole::H1, Some("H2") => TextRole::H2, Some("H3") => TextRole::H3, Some("H4") => TextRole::H4,
+                Some("H1") | Some("H2") => TextRole::H2, Some("H3") => TextRole::H3, Some("H4") => TextRole::H4,
                 _ => TextRole::Normal,
             },
             marker: None, equation: None,

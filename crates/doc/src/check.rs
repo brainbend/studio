@@ -188,21 +188,19 @@ impl Project {
             };
             let double_click = owners_of(|e| matches!(e, Event::DoubleClick));
             let single_click = owners_of(|e| matches!(e, Event::Click));
-            // Headings give screen-reader users the outline of the slide: one Heading 1, no skipped levels. The slide's
-            // own (hidden) title counts as the first heading, so the first one an author adds may be a 1 or a 2.
-            let mut last_level = 1u8;
-            let mut seen_h1 = false;
+            // Headings give screen-reader users the outline of the slide. The project's name is the page's Heading 1 and
+            // the slide's own (hidden) title a Heading 2, so the first one an author adds may be a 2 or a 3.
+            let mut last_level = 2u8;
             for (li, layer) in slide.layers.iter().enumerate() {
                 for (oi, o) in layer.objects.iter().enumerate() {
                     let Some(level) = o.role.level().filter(|_| !o.hidden && !o.decorative) else { continue };
                     let at = Location { slide: si, object: Some((li, oi)) };
                     if level == 1 {
-                        if seen_h1 { out.push(Issue { severity: Severity::Warning, at: at.clone(), message: format!("\"{}\" is a second Heading 1 on this slide. Use Heading 2 or lower for subheadings.", o.name) }); }
-                        seen_h1 = true;
+                        out.push(Issue { severity: Severity::Warning, at: at.clone(), message: format!("\"{}\" is a Heading 1, which is the project's name. Use Heading 2 or lower.", o.name) });
                     } else if level > last_level + 1 {
                         out.push(Issue { severity: Severity::Warning, at: at.clone(), message: format!("\"{}\" is Heading {} but follows Heading {}. Headings should not skip a level.", o.name, level, last_level) });
                     }
-                    last_level = level;
+                    if level > 1 { last_level = level; }
                 }
             }
             for (li, layer) in slide.layers.iter().enumerate() {
@@ -446,14 +444,16 @@ mod tests {
     }
 
     #[test]
-    fn headings_need_one_heading_one_and_no_skipped_levels() {
+    fn heading_one_is_the_project_name_and_levels_may_not_be_skipped() {
         let mut p = project();
-        p.slides[0].layers[0].objects = vec![text(TextRole::H2, "Intro"), text(TextRole::H3, "Detail"), text(TextRole::H1, "Main"), text(TextRole::H1, "Again"), text(TextRole::Normal, "Body")];
+        p.slides[0].layers[0].objects = vec![text(TextRole::H2, "Intro"), text(TextRole::H3, "Detail"), text(TextRole::H4, "More"), text(TextRole::Normal, "Body")];
+        assert!(!msgs(&p).iter().any(|m| m.contains("Intro") || m.contains("Detail") || m.contains("More")), "a 2 or a 3 may follow the slide title: {:?}", msgs(&p));
+        p.slides[0].layers[0].objects = vec![text(TextRole::H3, "Starts at three"), text(TextRole::H1, "Main")];
         let m = msgs(&p);
-        assert!(m.iter().any(|m| m.contains("\"Again\" is a second Heading 1")), "{m:?}");
-        assert!(!m.iter().any(|m| m.contains("Intro") || m.contains("Detail") || m.contains("\"Main\"")), "a 2 may follow the slide title, and a 3 a 2: {m:?}");
-        p.slides[0].layers[0].objects = vec![text(TextRole::H1, "Main"), text(TextRole::H3, "Skips")];
-        assert!(msgs(&p).iter().any(|m| m.contains("\"Skips\" is Heading 3 but follows Heading 1")));
+        assert!(!m.iter().any(|m| m.contains("Starts at three")), "{m:?}");
+        assert!(m.iter().any(|m| m.contains("\"Main\" is a Heading 1, which is the project's name")), "{m:?}");
+        p.slides[0].layers[0].objects = vec![text(TextRole::H2, "Main"), text(TextRole::H4, "Skips")];
+        assert!(msgs(&p).iter().any(|m| m.contains("\"Skips\" is Heading 4 but follows Heading 2")));
         p.slides[0].layers[0].objects[1].decorative = true;
         assert!(!msgs(&p).iter().any(|m| m.contains("Skips")), "a decorative heading is not read");
     }

@@ -155,9 +155,9 @@ struct Part<'a> {
 
 fn ph_idx(kind: PlaceholderKind, n: u32) -> (Option<&'static str>, Option<u32>) {
     match kind {
-        PlaceholderKind::Title => (Some("title"), None),
-        PlaceholderKind::Subtitle => (Some("subTitle"), Some(20 + n)),
-        PlaceholderKind::Body => (Some("body"), Some(10 + n)),
+        PlaceholderKind::Title | PlaceholderKind::Heading2 => (Some("title"), None),
+        PlaceholderKind::Subtitle | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 => (Some("subTitle"), Some(20 + n)),
+        PlaceholderKind::Body | PlaceholderKind::Text => (Some("body"), Some(10 + n)),
     }
 }
 
@@ -390,7 +390,7 @@ impl Part<'_> {
         let cnv = self.cnv_pr(o);
         let ph = match o.placeholder {
             Some(k) => {
-                let slot = match k { PlaceholderKind::Title => 0, PlaceholderKind::Subtitle => 1, PlaceholderKind::Body => 2 };
+                let slot = match k { PlaceholderKind::Title | PlaceholderKind::Heading2 => 0, PlaceholderKind::Subtitle | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 => 1, PlaceholderKind::Body | PlaceholderKind::Text => 2 };
                 let n = self.ph_count[slot];
                 self.ph_count[slot] += 1;
                 let (ty, idx) = ph_idx(k, n);

@@ -185,7 +185,7 @@ pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, Stri
 #topbar{{position:fixed;left:0;right:0;top:0;height:44px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--p-panel);color:var(--p-fg);font:calc(16px*var(--p-scale)) var(--p-font);z-index:4;border-bottom:1px solid var(--p-line)}}
 #topbar .tb-toggle{{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}}
 #topbar .tb-toggle:hover{{background:var(--p-hover)}}
-#topbar .tb-title{{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+#topbar .tb-title{{margin:0;font-size:inherit;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 #topbar .logo{{height:28px;max-width:140px;object-fit:contain}}
 body.side-anim #topbar,body.side-anim #nav{{transition:left .22s ease,right .22s ease}}
 body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
@@ -445,6 +445,16 @@ mod tests {
         let html = String::from_utf8(files.iter().find(|(n, _)| n == "index.html").unwrap().1.clone()).unwrap();
         assert!(html.contains("\"kind\":\"Video\""));
         assert!(html.contains("assets/a1.mp4") || html.contains("assets/a0.mp4"));
+    }
+
+    #[test]
+    fn the_projects_name_is_the_one_heading_one_and_each_slide_title_is_a_heading_two() {
+        let mut p = tiny();
+        p.sanitize();
+        let files = build(&p, Lms::None).unwrap();
+        let html = String::from_utf8(files.iter().find(|(n, _)| n == "index.html").unwrap().1.clone()).unwrap();
+        assert!(html.contains("el('h1', 'sr-only'") && html.contains("el('h1', 'tb-title'"), "the name is an h1, hidden unless the title is shown");
+        assert!(html.contains("'aria-level', '2'") && !html.contains("'aria-level', '1'"), "slide titles are level 2");
     }
 
     #[test]
