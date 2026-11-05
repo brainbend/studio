@@ -406,6 +406,18 @@ impl Snap {
     }
 }
 
+/// The proportions (width over height) a picture or video has in its file: for a picture, the part that is not cropped away;
+/// for a video, its still picture. `None` for anything else, or when the file cannot be measured.
+fn natural_ratio(project: &Project, o: &Object) -> Option<f32> {
+    let key = match o.kind { Kind::Image => o.asset.as_ref()?, Kind::Video => o.poster.as_ref()?, _ => return None };
+    let asset = project.assets.get(key)?;
+    let (iw, ih) = image::ImageReader::new(std::io::Cursor::new(&asset.bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
+    let [l, t, r, b] = if matches!(o.kind, Kind::Image) { o.crop.unwrap_or([0.0; 4]) } else { [0.0; 4] };
+    let (vw, vh) = (iw as f32 * (1.0 - l - r), ih as f32 * (1.0 - t - b));
+    if vw <= 0.0 || vh <= 0.0 { return None; }
+    Some(vw / vh)
+}
+
 /// Holding Shift while dragging a handle keeps the shape of the `w` x `h` box. `(gx, gy)` is how much the width and height
 /// would grow (negative to shrink) with the handle `(hx, hy)`; this returns the growth that keeps the proportions, never
 /// shrinking either side below `min`. A corner follows whichever side the pointer moved further; a side handle sets the
@@ -2144,6 +2156,8 @@ impl App {
                 if ui.button("Send backward").clicked() { self.reorder_step(false); ui.close(); }
                 if ui.button("Send to back").clicked() { self.reorder_selected(false); ui.close(); }
             });
+            let can_restore = self.project.as_ref().is_some_and(|p| self.selection().iter().any(|&(li, oi)| p.slides.get(self.slide).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| natural_ratio(p, o).is_some())));
+            if can_restore && ui.button("Restore Aspect Ratio").on_hover_text("Put a stretched picture or video back to the proportions of its file").clicked() { self.restore_aspect_ratio(); ui.close(); }
             ui.menu_button(if n > 1 { "Align to each other" } else { "Align to the slide" }, |ui| {
                 for (label, axis, mode) in [("Left", 0u8, 0u8), ("Center", 0, 1), ("Right", 0, 2), ("Top", 1, 0), ("Middle", 1, 1), ("Bottom", 1, 2)] {
                     if ui.button(label).clicked() { self.align_selected_or_slide(axis, mode); ui.close(); }
@@ -3046,6 +3060,36 @@ impl App {
     }
 
     /// Every selected object (primary plus shift-selected), in stacking order, all on one layer.
+    /// Put each selected picture and video back to the proportions of its file, keeping its width (and, unless it is turned, its
+    /// top-left corner; a turned one keeps its centre).
+    fn restore_aspect_ratio(&mut self) {
+        let Some(proj) = self.project.as_ref() else { return };
+        let sel = self.selection();
+        let fixes: Vec<(usize, usize, f32)> = sel.iter().filter_map(|&(li, oi)| {
+            let o = proj.slides.get(self.slide)?.layers.get(li)?.objects.get(oi)?;
+            let ratio = natural_ratio(proj, o)?;
+            ((o.w / o.h - ratio).abs() > 0.0005 && o.w > 0.0).then_some((li, oi, ratio))
+        }).collect();
+        if fixes.is_empty() {
+            self.status = if sel.iter().any(|&(li, oi)| self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| matches!(o.kind, Kind::Image | Kind::Video))) { "Already the original proportions, or they cannot be measured".into() } else { "Select a picture or video".into() };
+            return;
+        }
+        self.snapshot();
+        let slide = self.slide;
+        let n = fixes.len();
+        if let Some(p) = self.project.as_mut() {
+            for (li, oi, ratio) in fixes {
+                if let Some(o) = p.slides[slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+                    let nh = (o.w / ratio).max(4.0);
+                    if o.rotation != 0.0 { o.y += (o.h - nh) / 2.0; }
+                    o.h = nh;
+                }
+            }
+        }
+        self.dirty = true;
+        self.status = format!("Restored the original proportions of {n} {}", if n == 1 { "object" } else { "objects" });
+    }
+
     fn selection(&self) -> Vec<(usize, usize)> {
         let Some((li, oi)) = self.selected else { return vec![] };
         let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)) else { return vec![] };
@@ -6069,6 +6113,7 @@ impl App {
         let mut want_equation: Option<(usize, usize)> = None;
         let mut want_pano: Option<(usize, usize)> = None;
         let mut want_thumb: Option<(usize, usize)> = None;
+        let mut restore_ratio = false;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
         egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
@@ -6387,6 +6432,11 @@ impl App {
                         changed |= ui.add(egui::DragValue::new(v).speed(1.0)).changed();
                         ui.end_row();
                     }
+                    if matches!(obj.kind, Kind::Image | Kind::Video) {
+                        ui.label("");
+                        if ui.button("Restore aspect ratio").on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { restore_ratio = true; }
+                        ui.end_row();
+                    }
                     ui.label("Rotation");
                     changed |= ui.add(egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
                     ui.end_row();
@@ -6444,6 +6494,7 @@ impl App {
         });
 
         if open_states { self.bottom_tab = 2; }
+        if restore_ratio { self.restore_aspect_ratio(); }
         if let Some((li, oi)) = want_thumb {
             if let Some((key, _, _, _)) = self.load_image_asset() {
                 self.snapshot();
@@ -12225,6 +12276,92 @@ mod tests {
         let (li, oi) = h.state().selected.unwrap();
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi];
         (o.x, o.y, o.w, o.h)
+    }
+
+    /// A project with a 400 x 200 PNG asset ("pic") for the aspect-ratio tests.
+    fn app_with_a_400_by_200_picture() -> App {
+        let mut a = app();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(400, 200, image::Rgba([200, 60, 60, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        a.project.as_mut().unwrap().assets.insert("pic".into(), Asset { name: "p.png".into(), mime: "image/png".into(), bytes: png.into_inner(), file: None });
+        a
+    }
+
+    fn add_stretched(a: &mut App, kind: Kind, id: &str) -> (usize, usize) {
+        let mut o = Object::new(id, id, kind.clone(), 100.0, 100.0, 600.0, 600.0);
+        if matches!(kind, Kind::Video) { o.poster = Some("pic".into()); } else { o.asset = Some("pic".into()); }
+        a.insert(o);
+        a.selected.unwrap()
+    }
+
+    #[test]
+    fn restore_aspect_ratio_keeps_the_width_and_the_corner_and_takes_one_undo_step() {
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        let (x0, y0) = { let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi]; (o.x, o.y) };
+        a.restore_aspect_ratio();
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert_eq!((o.x, o.y, o.w, o.h), (x0, y0, 600.0, 300.0), "twice as wide as tall, as the file is, and the top-left corner has not moved");
+        a.undo();
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert_eq!((o.w, o.h), (600.0, 600.0), "one undo puts the stretch back");
+    }
+
+    #[test]
+    fn the_properties_panel_has_a_restore_aspect_ratio_button_for_a_picture_but_not_a_shape() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("Size and position").click();
+        h.run_steps(3);
+        h.get_by_label("Restore aspect ratio").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].h, 300.0, "the button restores the proportions");
+        h.state_mut().insert_rect();
+        h.run_steps(4);
+        assert!(h.query_by_label("Restore aspect ratio").is_none(), "a shape has no original proportions");
+    }
+
+    #[test]
+    fn restore_aspect_ratio_uses_the_visible_part_of_a_cropped_picture_and_a_videos_still() {
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].crop = Some([0.25, 0.0, 0.25, 0.0]);
+        a.restore_aspect_ratio();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        assert_eq!((o.w, o.h), (600.0, 600.0), "half the width hidden leaves a square");
+        let (li, oi) = add_stretched(&mut a, Kind::Video, "clip");
+        a.restore_aspect_ratio();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        assert_eq!((o.w, o.h), (600.0, 300.0), "a video follows its still picture");
+    }
+
+    #[test]
+    fn restore_aspect_ratio_applies_to_every_picture_selected_keeps_a_turned_ones_centre_and_skips_other_objects() {
+        let mut a = app_with_a_400_by_200_picture();
+        let first = add_stretched(&mut a, Kind::Image, "one");
+        let second = add_stretched(&mut a, Kind::Image, "two");
+        a.project.as_mut().unwrap().slides[0].layers[second.0].objects[second.1].rotation = 30.0;
+        let centre_y = { let o = &a.project.as_ref().unwrap().slides[0].layers[second.0].objects[second.1]; o.y + o.h / 2.0 };
+        a.insert_rect();
+        let rect = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[rect.0].objects[rect.1].h = 77.0;
+        let ids: Vec<String> = [first, second].iter().map(|&(l, o)| a.project.as_ref().unwrap().slides[0].layers[l].objects[o].id.clone()).collect();
+        a.multi = ids;
+        a.restore_aspect_ratio();
+        let objs = &a.project.as_ref().unwrap().slides[0].layers[0].objects;
+        assert_eq!(objs[first.1].h, 300.0);
+        let t = &objs[second.1];
+        assert_eq!(t.h, 300.0);
+        assert!((t.y + t.h / 2.0 - centre_y).abs() < 0.01, "a turned picture keeps its centre: y {} h {}", t.y, t.h);
+        assert_eq!(objs[rect.1].h, 77.0, "other objects are left alone");
+        // With only a shape selected there is nothing to restore.
+        a.multi.clear();
+        a.selected = Some(rect);
+        a.restore_aspect_ratio();
+        assert_eq!(a.status, "Select a picture or video");
     }
 
     #[test]
