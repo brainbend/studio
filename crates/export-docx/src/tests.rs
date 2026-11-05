@@ -69,11 +69,10 @@ fn notes_alt_text_and_lines_appear_only_when_asked_for() {
     let p = lesson();
     let make = |o: HandoutOptions| document(&export(&p, &[0], &o, &BTreeMap::new()).unwrap());
     let off = make(HandoutOptions { slide_notes: false, alt_text: false, note_lines: false, ..Default::default() });
-    assert!(!off.contains("Say &lt;hello&gt; first") && !off.contains("A person in a helmet") && !off.contains("w:pBdr"));
+    assert!(!off.contains("Say &lt;hello&gt; first") && !off.contains("A person in a helmet"));
     assert!(make(HandoutOptions { slide_notes: true, ..Default::default() }).contains("Say &lt;hello&gt; first"));
     assert!(make(HandoutOptions { alt_text: true, ..Default::default() }).contains("Body: A person in a helmet"));
-    assert_eq!(make(HandoutOptions { note_lines: true, ..Default::default() }).matches("<w:pBdr>").count(), 6, "six lines on the page");
-    assert!(make(HandoutOptions { note_lines: true, ..Default::default() }).contains("<w:between "), "every line shows, not just the last");
+    assert!(!make(HandoutOptions { note_lines: true, ..Default::default() }).contains("w:pBdr"), "Word is for typing, so there are no lines to write on");
 }
 
 #[test]
@@ -149,16 +148,14 @@ fn one_or_two_slides_go_on_a_page_and_never_more() {
 }
 
 #[test]
-fn two_to_a_page_leave_out_the_notes_and_lines_and_lines_replace_notes() {
+fn two_to_a_page_leave_out_the_notes_and_alt_text_and_one_to_a_page_keeps_them() {
     let mut p = lesson();
     p.slides[0].layers[0].objects[0].alt = "alt for the body".into();
-    let all = |per_page, lines| HandoutOptions { per_page, slide_notes: true, alt_text: true, note_lines: lines, ..Default::default() };
-    let two = document(&export(&p, &[0, 1], &all(2, true), &BTreeMap::new()).unwrap());
-    assert!(!two.contains("Say &lt;hello&gt; first") && !two.contains("alt for the body") && !two.contains("<w:pBdr>"), "nothing extra beside two slides");
-    let one = document(&export(&p, &[0], &all(1, true), &BTreeMap::new()).unwrap());
-    assert!(one.contains("Say &lt;hello&gt; first") && one.contains("alt for the body") && !one.contains("<w:pBdr>"), "notes and alt text, or lines, not both");
-    let lines = document(&export(&p, &[0], &HandoutOptions { note_lines: true, ..Default::default() }, &BTreeMap::new()).unwrap());
-    assert!(lines.contains("<w:pBdr>") && !lines.contains("Say &lt;hello&gt; first"));
+    let all = |per_page| HandoutOptions { per_page, slide_notes: true, alt_text: true, note_lines: true, ..Default::default() };
+    let two = document(&export(&p, &[0, 1], &all(2), &BTreeMap::new()).unwrap());
+    assert!(!two.contains("Say &lt;hello&gt; first") && !two.contains("alt for the body"), "nothing extra beside two slides");
+    let one = document(&export(&p, &[0], &all(1), &BTreeMap::new()).unwrap());
+    assert!(one.contains("Say &lt;hello&gt; first") && one.contains("alt for the body") && !one.contains("w:pBdr"), "notes and alt text, and no lines");
 }
 
 #[test]

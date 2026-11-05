@@ -82,7 +82,7 @@ impl PublishPage {
             Self::Web => "Publish an HTML5 version of the project to a folder, ready to put on any web server or open from your computer.",
             Self::Pdf => "Save a PDF handout of the slides. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them. Video and audio show as a placeholder.",
             Self::Print => "Print the handout. It opens in your browser, which shows its print dialog: choose a printer, or \"Save as PDF\". It has the same choices as PDF. A Web Lesson prints from here too.",
-            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. The page is portrait, with one slide and its notes or lines to write on, or two slides to a page. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them.",
+            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. The page is portrait, with one slide and its notes, or two slides to a page. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them.",
             Self::PowerPoint => "Save the project as a PowerPoint (.pptx) file. Things PowerPoint cannot do, such as triggers and variables, are listed in a report afterwards.",
         }
     }
@@ -208,23 +208,19 @@ impl App {
                                 handout.note_lines = false; handout.slide_notes = false; handout.alt_text = false;
                                 ui.weak("Two slides to a page leave no room for notes, alt text or lines to write on.");
                             } else {
-                                // One slide to a page: its notes and alt text under it, or lines to write on, or neither.
-                                let mut mode = if handout.note_lines && !handout.slide_notes && !handout.alt_text { 2 } else if handout.slide_notes || handout.alt_text { 1 } else { 0 };
-                                let before = mode;
-                                ui.radio_value(&mut mode, 0, "Just the slides");
-                                ui.radio_value(&mut mode, 1, "Slide notes and alt text under each slide");
-                                // Its two choices sit right under it.
-                                if mode == 1 {
+                                // One slide to a page: with its notes and alt text under it, or just the slide. No lines to
+                                // write on: in Word the reader can type their own notes.
+                                handout.note_lines = false;
+                                let mut with_notes = handout.slide_notes || handout.alt_text;
+                                let before = with_notes;
+                                ui.radio_value(&mut with_notes, false, "Just the slides");
+                                ui.radio_value(&mut with_notes, true, "Slide notes and alt text under each slide");
+                                if with_notes != before { handout.slide_notes = with_notes; handout.alt_text = with_notes; }
+                                if with_notes {
                                     ui.indent("word-notes", |ui| {
                                         ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
                                         ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
                                     });
-                                }
-                                ui.radio_value(&mut mode, 2, "Lines to write notes on");
-                                if mode != before {
-                                    handout.note_lines = mode == 2;
-                                    handout.slide_notes = mode == 1;
-                                    handout.alt_text = mode == 1;
                                 }
                                 ui.weak("Long notes run on to the next page. In Word the slides stay editable around the pictures.");
                             }

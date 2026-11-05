@@ -11340,7 +11340,23 @@ mod tests {
     }
 
     #[test]
-    fn the_word_page_is_portrait_with_one_slide_and_notes_or_lines_or_two_slides_and_nothing_else() {
+    fn a_word_picture_gets_a_frame_the_same_on_all_four_sides() {
+        let src = word_export::plain_image([400, 225], egui::Color32::WHITE);
+        let png = word_export::crop_png(&src, egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 225.0)), 1.0).unwrap();
+        let framed = word_export::frame_png(&png).unwrap();
+        let img = image::load_from_memory(&framed).unwrap().to_rgba8();
+        let (w, h) = img.dimensions();
+        let grey = image::Rgba([102, 102, 102, 255]);
+        for (x, y) in [(w / 2, 0), (w / 2, h - 1), (0, h / 2), (w - 1, h / 2), (0, 0), (w - 1, h - 1)] { assert_eq!(*img.get_pixel(x, y), grey, "edge pixel {x},{y}"); }
+        assert_eq!(*img.get_pixel(w / 2, h / 2), image::Rgba([255, 255, 255, 255]), "the slide itself is untouched");
+        // The same depth on every side.
+        let depth = |f: &dyn Fn(u32) -> (u32, u32)| (0..20).take_while(|&i| { let (x, y) = f(i); *img.get_pixel(x, y) == grey }).count();
+        let d = [depth(&|i| (w / 2, i)), depth(&|i| (w / 2, h - 1 - i)), depth(&|i| (i, h / 2)), depth(&|i| (w - 1 - i, h / 2))];
+        assert!(d.iter().all(|&n| n == d[0] && n >= 2), "{d:?}");
+    }
+
+    #[test]
+    fn the_word_page_is_portrait_with_one_slide_and_its_notes_or_two_slides_and_nothing_else() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
@@ -11359,13 +11375,15 @@ mod tests {
         assert!(h.query_by_label("Correct answers").is_some());
         h.get_by_label("1 slide").click();
         h.run_steps(4);
-        for name in ["Just the slides", "Slide notes and alt text under each slide", "Lines to write notes on"] { assert!(h.query_by_label(name).is_some(), "{name}"); }
-        h.get_by_label("Lines to write notes on").click();
-        h.run_steps(3);
-        assert!(h.state().handout.note_lines && !h.state().handout.slide_notes && !h.state().handout.alt_text);
+        for name in ["Just the slides", "Slide notes and alt text under each slide"] { assert!(h.query_by_label(name).is_some(), "{name}"); }
+        assert!(h.query_by_label("Lines to write notes on").is_none() && h.query_by_label("Space for notes").is_none(), "Word is for typing, so it has no lines to write on");
+        assert!(!h.state().handout.note_lines, "and any lines PDF had asked for are off");
         h.get_by_label("Slide notes and alt text under each slide").click();
         h.run_steps(3);
-        assert!(!h.state().handout.note_lines && h.state().handout.slide_notes && h.state().handout.alt_text, "notes and alt text replace the lines");
+        assert!(h.state().handout.slide_notes && h.state().handout.alt_text, "notes and alt text are on");
+        h.get_by_label("Just the slides").click();
+        h.run_steps(3);
+        assert!(!h.state().handout.slide_notes && !h.state().handout.alt_text);
         assert!(publish_dialog::PublishPage::Word.available());
     }
 

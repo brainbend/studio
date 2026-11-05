@@ -63,6 +63,24 @@ pub fn crop_png(image: &egui::ColorImage, rect: egui::Rect, pixels_per_point: f3
     Some(out.into_inner())
 }
 
+/// `png` with a grey frame drawn just inside its edge, the same on all four sides. The frame is part of the picture because
+/// Word draws a picture's outline unevenly (the top comes out thin and pale).
+pub fn frame_png(png: &[u8]) -> Option<Vec<u8>> {
+    let mut img = image::load_from_memory(png).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    // About a point and a half on the page, whatever size the picture was taken at.
+    let t = (w / 320).max(2).min(w / 2).min(h / 2);
+    let c = image::Rgba([102, 102, 102, 255]);
+    for y in 0..h {
+        for x in 0..w {
+            if x < t || y < t || x >= w - t || y >= h - t { img.put_pixel(x, y, c); }
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
+}
+
 impl Capture {
     /// Whether a screenshot has been asked for and not come back yet.
     #[cfg(test)]
@@ -105,7 +123,10 @@ impl App {
         let Some(c) = self.word_capture.take() else { return };
         let Some(p) = &self.project else { return };
         let made = match c.format {
-            Handout::Word => brainbend_export_docx::export(p, &c.slides, &self.handout, &c.pictures),
+            Handout::Word => {
+                let framed: BTreeMap<usize, Vec<u8>> = c.pictures.iter().map(|(i, b)| (*i, frame_png(b).unwrap_or_else(|| b.clone()))).collect();
+                brainbend_export_docx::export(p, &c.slides, &self.handout, &framed)
+            }
             Handout::Pdf => brainbend_export_pdf::export(p, &c.slides, &self.handout, &c.pictures),
         };
         let name = c.format.name();

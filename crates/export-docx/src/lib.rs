@@ -40,8 +40,6 @@ struct Para {
     style: Option<&'static str>,
     keep_next: bool,
     page_break_before: bool,
-    /// A line to write on: a rule along the bottom.
-    ruled: bool,
     indent: i64,
     spacing_after: Option<i64>,
 }
@@ -66,7 +64,6 @@ impl Para {
         if let Some(s) = self.style { let _ = write!(ppr, "<w:pStyle w:val=\"{s}\"/>"); }
         if self.keep_next { ppr.push_str("<w:keepNext/>"); }
         if self.page_break_before { ppr.push_str("<w:pageBreakBefore/>"); }
-        if self.ruled { ppr.push_str("<w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"999999\"/><w:between w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"999999\"/></w:pBdr>"); }
         if let Some(a) = self.spacing_after { let _ = write!(ppr, "<w:spacing w:after=\"{a}\"/>"); }
         if self.indent > 0 { let _ = write!(ppr, "<w:ind w:left=\"{}\"/>", self.indent); }
         let ppr = if ppr.is_empty() { String::new() } else { format!("<w:pPr>{ppr}</w:pPr>") };
@@ -90,7 +87,7 @@ fn picture_para(p: &Picture, keep_next: bool) -> String {
 <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
 <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{descr}\"/><pic:cNvPicPr/></pic:nvPicPr>\
 <pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
-<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"666666\"/></a:solidFill></a:ln></pic:spPr></pic:pic>\
+<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>\
 </a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
         if keep_next { "<w:keepNext/>" } else { "" },
         w = p.w_emu, h = p.h_emu, id = p.id, name = esc(&p.name), descr = esc(&p.descr), rid = p.rid
@@ -146,17 +143,17 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
     let mut title = Para::styled("Title");
     title.push(&p.name, false, false, false);
     body.push_str(&title.xml());
-    // Word handouts are portrait: one slide to a page, with its notes and alt text or lines to write on, or two to a page with nothing else.
+    // Word handouts are portrait: one slide to a page, with its notes and alt text under it if wanted, or two to a page with nothing else.
+    // There are no lines to write on: Word is for typing, so the reader can type their own notes.
     // (Word cannot fit content to a page the way PDF can, so the other combinations are not offered.)
     let mut chosen = options.clone();
     chosen.orientation = HandoutOrientation::Portrait;
     chosen.per_page = chosen.per_page.clamp(1, 2);
-    if chosen.per_page == 2 { chosen.slide_notes = false; chosen.alt_text = false; chosen.note_lines = false; }
-    else if chosen.note_lines && (chosen.slide_notes || chosen.alt_text) { chosen.note_lines = false; }
+    chosen.note_lines = false;
+    if chosen.per_page == 2 { chosen.slide_notes = false; chosen.alt_text = false; }
     let options = &chosen;
     let per_page = options.per_page as usize;
-    let lines = 6;
-    // How tall the notes, alt text and writing lines of a slide come out in a column `w` twips wide (about 125 twips a character, 300 a line).
+    // How tall the notes and alt text of a slide come out in a column `w` twips wide (about 125 twips a character, 300 a line).
     let tail_h = |slide: &Slide| -> i64 {
         let cpl = (text_w / 125).max(8) as usize;
         let rows = |chars: usize, cpl: usize| -> i64 { chars.div_ceil(cpl.max(1)).max(1) as i64 };
@@ -168,7 +165,6 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
             let items = alt_items(slide);
             if !items.is_empty() { h += 300 + items.iter().map(|t| rows(t.chars().count() + 2, cpl.saturating_sub(3)) * 300).sum::<i64>(); }
         }
-        if options.note_lines { h += 300 + lines as i64 * 540; }
         h
     };
     for (k, &i) in slides.iter().enumerate() {
@@ -177,7 +173,7 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
         let mut h = Para::styled("Heading2");
         h.keep_next = true;
         // A slide with a picture or room to write on starts a page when a new one is due; plain text flows on.
-        h.page_break_before = !first && k % per_page == 0 && (png.is_some() || options.note_lines);
+        h.page_break_before = !first && k % per_page == 0 && png.is_some();
         h.push(&format!("{}. {}", i + 1, slide.name), false, false, false);
         body.push_str(&h.xml());
         first = false;
@@ -225,10 +221,6 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
                 body.push_str(&Para::new().text("Alt text", true, false).xml());
                 for it in items { let mut para = Para::new(); para.indent = 360; para.push(&format!("\u{2022} {it}"), false, false, false); body.push_str(&para.xml()); }
             }
-        }
-        if options.note_lines {
-            body.push_str(&Para::new().text("Notes", true, false).xml());
-            for _ in 0..lines { let mut line = Para::new(); line.ruled = true; line.spacing_after = Some(240); line.push(" ", false, false, false); body.push_str(&line.xml()); }
         }
     }
     let sect = format!(
