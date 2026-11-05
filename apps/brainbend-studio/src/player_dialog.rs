@@ -19,7 +19,7 @@ fn color_row(ui: &mut egui::Ui, label: &str, c: &mut Rgba, enabled: bool) -> boo
 }
 
 impl App {
-    /// The Player Properties window (opened from the Design tab).
+    /// The Player Properties window (opened from Player Settings on the Review tab).
     pub(super) fn player_window(&mut self, ctx: &egui::Context) {
         if !self.player_open { return; }
         let Some(proj) = self.project.as_mut() else { self.player_open = false; return };

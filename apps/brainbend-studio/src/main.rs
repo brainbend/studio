@@ -2144,7 +2144,7 @@ impl App {
         if !has_sel {
             // On empty canvas: put something on the slide.
             ui.separator();
-            ui.menu_button("Insert", |ui| {
+            ui.menu_button("Objects", |ui| {
                 if ui.button("Text box").clicked() { self.insert_text(); ui.close(); }
                 if ui.button("Rectangle").clicked() { self.insert_rect(); ui.close(); }
                 if ui.button("Ellipse").clicked() { self.insert_ellipse(); ui.close(); }
@@ -7556,7 +7556,7 @@ mod tests {
         a.new_project();
         let mut h = harness(a);
         h.run_steps(4);
-        for tab in [ribbon::HOME_TAB, 2, 3, 4, 5, ribbon::HELP_TAB] {
+        for tab in [ribbon::HOME_TAB, ribbon::THEME_TAB, ribbon::SLIDES_TAB, ribbon::OBJECTS_TAB, ribbon::ANIMATIONS_TAB, ribbon::REVIEW_TAB, ribbon::HELP_TAB] {
             h.state_mut().ribbon_tab = tab;
             h.run_steps(3);
             for label in ["Try It", "Preview", "Publish"] {
@@ -8030,7 +8030,7 @@ mod tests {
         h.ctx.set_theme(egui::ThemePreference::Light);
         h.run_steps(3);
         shot(&mut h, "5j-light-home.png");
-        h.state_mut().ribbon_tab = 2;
+        h.state_mut().ribbon_tab = ribbon::OBJECTS_TAB;
         shot(&mut h, "5k-light-insert.png");
         h.state_mut().ribbon_tab = 1;
         h.ctx.set_theme(egui::ThemePreference::Dark);
@@ -8397,7 +8397,7 @@ mod tests {
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("icons-on-slide.png")).unwrap();
-            h.state_mut().ribbon_tab = 2;
+            h.state_mut().ribbon_tab = ribbon::OBJECTS_TAB;
             h.run_steps(2);
             { use egui_kittest::kittest::Queryable; h.get_by_label("Icons").click(); }
             h.run_steps(4);
@@ -8459,7 +8459,7 @@ mod tests {
         for style in [DialStyle::Teardrop, DialStyle::Dot, DialStyle::Needle] { a.insert_dial(style); }
         for (i, o) in a.project.as_mut().unwrap().slides[0].layers[0].objects.iter_mut().enumerate() { o.x = 120.0 + (i / 2) as f32 * 420.0; o.y = 260.0; }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("dials-on-slide.png")).unwrap();
@@ -8550,7 +8550,7 @@ mod tests {
             for (i, o) in objs.iter_mut().enumerate().skip(1) { o.x = 60.0 + ((i - 1) % 4) as f32 * 180.0; o.y = 60.0 + ((i - 1) / 4) as f32 * 170.0; }
         }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("markers-on-slide.png")).unwrap();
@@ -8595,7 +8595,7 @@ mod tests {
                 for (i, o) in objs.iter_mut().enumerate() { o.w = 400.0; o.h = 240.0; o.x = 40.0 + (i % 4) as f32 * 450.0; o.y = 40.0 + (i / 4) as f32 * 300.0; o.margins[3] = if i % 2 == 0 { 12.0 + 0.26 * 240.0 } else { 12.0 }; }
             }
             a.selected = None;
-            a.ribbon_tab = 2;
+            a.ribbon_tab = ribbon::OBJECTS_TAB;
             let mut h = harness(a);
             h.run_steps(4);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("captions-on-slide.png")).unwrap();
@@ -8621,7 +8621,7 @@ mod tests {
             for (i, o) in objs.iter_mut().enumerate() { o.x = 100.0; o.y = 100.0 + i as f32 * 150.0; if i == 2 { o.initial_state = "Selected".into(); } if i == 0 { o.initial_state = "Selected".into(); } }
         }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("inputs-on-slide.png")).unwrap();
@@ -8859,7 +8859,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("equation-window.png")).unwrap();
         }
-        // The ribbon has an Insert tab of the same name; the window's button is the last one.
+        // The ribbon has other buttons of the same name; the window's button is the last one.
         h.get_all_by_label("Insert").last().unwrap().click();
         h.run_steps(3);
         assert!(h.state().eq_dialog.is_none(), "the window closes");
@@ -8920,7 +8920,7 @@ mod tests {
         h.state_mut().slide = 1;
         h.state_mut().selected = Some((0, 0));
         h.run_steps(3);
-        h.state_mut().ribbon_tab = 3;
+        h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.run_steps(2);
         { let sel = h.state().slide_selection(); h.state_mut().pending_delete = Some(sel); }
         h.run_steps(4);
@@ -10087,7 +10087,7 @@ mod tests {
             (lo, hi)
         };
         let home = span(&mut h);
-        h.state_mut().ribbon_tab = 3;
+        h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.step();
         let mid = span(&mut h);
         h.run_steps(30);
@@ -10159,24 +10159,24 @@ mod tests {
     #[test]
     fn inserting_an_object_switches_to_home_and_leaves_you_free_to_leave() {
         let mut a = app();
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.insert_table(2, 2);
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "inserting a table opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.insert_rect();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "adding an object opens Home");
         assert!(a.selected.is_some(), "and keeps it selected");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.duplicate_selected();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "duplicating opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.copy_selected();
         a.paste();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "pasting opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
-        assert_eq!(h.state().ribbon_tab, 2, "clicking away from Home sticks while the object stays selected");
+        assert_eq!(h.state().ribbon_tab, ribbon::OBJECTS_TAB, "clicking away from Home sticks while the object stays selected");
     }
 
     #[test]
@@ -10791,7 +10791,7 @@ mod tests {
             let id = p.layouts[1].id.clone();
             p.slides[0].layout = Some(id);
         }
-        a.ribbon_tab = 4;
+        a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let theme = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().theme.clone();
@@ -10841,13 +10841,13 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
-        a.ribbon_tab = 4;
+        a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let proj = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().clone();
         assert!(proj(&h).palette.is_empty() && proj(&h).recent_colors.is_empty(), "nothing is preset");
         // The Brand Colors window: add a colour, change it.
-        h.get_by_label_contains("Brand").click();
+        h.get_by_label_contains("Colors").click();
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
         h.get_by_label("+ Add colour").click();
@@ -10892,7 +10892,7 @@ mod tests {
     fn gui_ribbon_dropdowns_open_and_add_slides() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
-        a.ribbon_tab = 3;
+        a.ribbon_tab = ribbon::SLIDES_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let before = h.state().project.as_ref().unwrap().slides.len();
@@ -11114,13 +11114,48 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// The ribbon follows the order an author works in: Home, Theme, Slides, Objects, Animations, Review, Help.
+    #[test]
+    fn the_tabs_follow_the_authors_workflow_and_the_theme_and_review_tabs_hold_their_groups() {
+        use egui_kittest::kittest::Queryable;
+        assert_eq!(ribbon::TABS, ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Slide Master", "Review", "Help"]);
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let x = |h: &egui_kittest::Harness<'static, App>, name: &str| h.query_all_by_label(name).next().map(|n| { use egui_kittest::kittest::NodeT; n.accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) });
+        let xs: Vec<f64> = ["Home", "Theme", "Slides", "Objects", "Animations", "Review", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in that order: {xs:?}");
+        assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Slide Master").is_none(), "the old names are gone, and Slide Master is not a tab here");
+        h.state_mut().ribbon_tab = ribbon::THEME_TAB;
+        h.run_steps(3);
+        for name in ["Fonts", "Slide Master", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
+        assert!(h.query_all_by_label_contains("Colors").next().is_some(), "Brand Colors is on Theme");
+        let gx: Vec<f64> = ["Slide Master", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Slide Master, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
+        for gone in ["Themes", "Player", "Spelling", "Focus Order"] { assert!(h.query_all_by_label_contains(gone).next().is_none(), "{gone} is not on Theme"); }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-theme.png")).unwrap(); }
+        h.state_mut().ribbon_tab = ribbon::REVIEW_TAB;
+        h.run_steps(3);
+        for name in ["Spelling", "Focus Order"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Review"); }
+        assert!(h.query_all_by_label_contains("Player").next().is_some() && h.query_all_by_label_contains("Settings").next().is_some(), "Player Settings is on Review");
+        assert!(h.query_all_by_label_contains("Accessibility").next().is_some(), "the Accessibility Checker is on Review");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-review.png")).unwrap(); }
+        // Inside the master view the bar is Home, Objects, Slide Master, Help.
+        h.state_mut().enter_master_view();
+        h.run_steps(4);
+        let xs: Vec<f64> = ["Home", "Objects", "Slide Master", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
+        assert!(h.query_all_by_label("Theme").next().is_none() && h.query_all_by_label("Review").next().is_none(), "the other tabs wait outside the master view");
+    }
+
     /// The Fonts button on the Design tab opens a window with two font drop-downs; opening one used to close the menu it was in.
     #[test]
     fn the_theme_fonts_window_keeps_its_drop_downs_open_and_a_pick_changes_the_theme_font() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
-        a.ribbon_tab = 4;
+        a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.get_by_label("Fonts").click();
@@ -11577,7 +11612,7 @@ mod tests {
             h.state_mut().insert_text();
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("7b-ribbon-text-selected.png")).unwrap();
-            h.state_mut().ribbon_tab = 5;
+            h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
             h.state_mut().selected = None;
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("7c-animations-no-selection.png")).unwrap();
@@ -11993,7 +12028,7 @@ mod tests {
         o.emphasis = Some(Emphasis { kind: EmphasisKind::Pulse, delay_ms: 0, duration_ms: 800, repeat: 1 });
         a.insert(o);
         let mut h = harness(a);
-        h.state_mut().ribbon_tab = 5;
+        h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("9n-motion-path.png")).unwrap();

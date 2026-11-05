@@ -479,10 +479,16 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-pub const HELP_TAB: usize = 7;
-pub const TABS: [&str; 8] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master", "Help"];
-pub const MASTER_TAB: usize = 6;
+/// The tabs, left to right, in the order an author works through them. Slide Master shows only inside the master view.
+pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Slide Master", "Review", "Help"];
 pub const HOME_TAB: usize = 1;
+pub const THEME_TAB: usize = 2;
+pub const SLIDES_TAB: usize = 3;
+pub const OBJECTS_TAB: usize = 4;
+pub const ANIMATIONS_TAB: usize = 5;
+pub const MASTER_TAB: usize = 6;
+pub const REVIEW_TAB: usize = 7;
+pub const HELP_TAB: usize = 8;
 const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
@@ -1043,7 +1049,7 @@ impl App {
                 let master = self.in_master_view();
                 for (i, name) in TABS.into_iter().enumerate() {
                     // The master view has its own short tab list; the Slide Master tab exists only there.
-                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2, HELP_TAB].contains(&i)) { continue; }
+                    if master != (i == MASTER_TAB) && i != 0 && !(master && [HOME_TAB, OBJECTS_TAB, HELP_TAB].contains(&i)) { continue; }
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
@@ -1098,14 +1104,15 @@ impl App {
                             ui.add_enabled_ui(!self.try_mode, |ui| {
                             match self.ribbon_tab {
                                 HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
-                                2 => self.insert_tab(ui, normal),
-                                3 => self.slides_tab(ui, ctx),
-                                4 => self.design_tab(ui, ctx),
-                                5 => {
+                                OBJECTS_TAB => self.insert_tab(ui, normal),
+                                SLIDES_TAB => self.slides_tab(ui, ctx),
+                                THEME_TAB => self.design_tab(ui, ctx),
+                                ANIMATIONS_TAB => {
                                     self.transition_groups(ui, ctx);
                                     self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
                                 }
                                 MASTER_TAB => self.master_tab(ui, ctx),
+                                REVIEW_TAB => self.review_tab(ui, ctx),
                                 HELP_TAB => self.help_tab(ui),
                                 _ => self.design_tab(ui, ctx),
                             }
@@ -2366,34 +2373,6 @@ impl App {
             });
             if changed { self.commit_project_edit(ctx, before); }
         });
-        group(ui, "Theme", |ui| {
-            let Some(proj) = self.project.as_mut() else { return };
-            let before = Snap::of(proj);
-            let mut changed = false;
-            big_menu(ui, SHAPES, "Theme", "Colours and fonts for new content", |ui| {
-                for t in Theme::presets() {
-                    ui.horizontal(|ui| {
-                        for c in t.colors.iter().skip(2).take(6) {
-                            let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 16.0), egui::Sense::hover());
-                            ui.painter().rect_filled(r, 2.0, color(*c));
-                        }
-                        if ui.selectable_label(proj.theme.name == t.name, format!("{}  ({} / {})", t.name, t.heading_font, t.body_font)).clicked() {
-                            // Placeholders in the master and layouts pick up the theme's fonts and colours.
-                            for s in proj.slides.iter_mut() {
-                                for o in s.layers[0].objects.iter_mut().filter(|o| o.placeholder.is_some()) {
-                                    o.style.font_family = if o.placeholder == Some(PlaceholderKind::Title) { t.heading_font.clone() } else { t.body_font.clone() };
-                                    o.style.color = if o.placeholder == Some(PlaceholderKind::Subtitle) { t.color(9) } else { t.text() };
-                                }
-                            }
-                            proj.theme = t.clone();
-                            changed = true;
-                            ui.close();
-                        }
-                    });
-                }
-            });
-            if changed { self.commit_project_edit(ctx, before); }
-        });
         group(ui, "Close", |ui| {
             if big_button(ui, CHECK, "Close Master View", "Return to the slides").clicked() { self.leave_master_view(); }
         });
@@ -2406,40 +2385,38 @@ impl App {
         }
     }
 
+    /// What an author checks once the project is built: the player's settings, the accessibility report, spelling and focus order.
+    fn review_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        if self.project.is_none() { return; }
+        group(ui, "Player", |ui| {
+            if big_button(ui, PLAY, "Player\nSettings", "Colours, font, sidebar, title, logo and controls of the published player").clicked() { self.player_open = true; }
+        });
+                group(ui, "Check", |ui| {
+            ui.horizontal(|ui| {
+                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
+                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
+                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
+                ui.vertical(|ui| {
+                    rows(ui);
+                    ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
+                });
+            });
+        });
+    }
+
     fn design_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let slide_idx = self.slide;
         let Some(proj) = self.project.as_mut() else { return };
         let before = Snap::of(proj);
         let mut changed = false;
         let mut open_master = false;
-        let mut open_player = false;
         let mut layout_pick: Option<Option<String>> = None;
         let mut open_theme_colors = false;
         let mut open_theme_fonts = false;
-        group(ui, "Theme", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, SHAPES, "Themes", "Colours and fonts for the master, layouts and new content", |ui| {
-                    for t in Theme::presets() {
-                        ui.horizontal(|ui| {
-                            for c in t.colors.iter().skip(2).take(6) {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 16.0), egui::Sense::hover());
-                                ui.painter().rect_filled(r, 2.0, color(*c));
-                            }
-                            if ui.selectable_label(proj.theme.name == t.name, format!("{}  ({} / {})", t.name, t.heading_font, t.body_font)).clicked() {
-                                proj.set_theme(t.clone());
-                                changed = true;
-                                ui.close();
-                            }
-                        });
-                    }
-                });
-                if big_button(ui, DROP, "Brand\nColors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
-                if big_button(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts").clicked() { open_theme_fonts = true; }
-            });
-        });
+        let mut want_picture = false;
         group(ui, "Master", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, STACK, "Slide Master", "Edit the master, layouts and theme").clicked() { open_master = true; }
+                if big_button(ui, STACK, "Slide Master", "Edit the master and layouts").clicked() { open_master = true; }
                 big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
                     let current = proj.slides[slide_idx].layout.clone();
                     for l in proj.layouts.clone() {
@@ -2448,24 +2425,23 @@ impl App {
                     ui.separator();
                     if ui.selectable_label(current.is_none(), "No layout").clicked() { layout_pick = Some(None); ui.close(); }
                 });
-            });
-        });
-        group(ui, "Slide Size", |ui| {
-            let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
-            big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
-                for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
-                    if ui.selectable_label(cur == (w, h), label).clicked() {
-                        for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
-                        changed = true;
+                let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
+                big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
+                    for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
+                        if ui.selectable_label(cur == (w, h), label).clicked() {
+                            for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
+                            changed = true;
+                        }
                     }
-                }
+                });
             });
         });
-        let mut want_picture = false;
-        group(ui, "Background", |ui| {
+        group(ui, "Brand", |ui| {
             let inherits = proj.slides[slide_idx].layout.is_some();
             let theme = proj.theme.clone();
             ui.horizontal(|ui| {
+                if big_button(ui, DROP, "Colors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
+                if big_button(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts").clicked() { open_theme_fonts = true; }
                 big_menu(ui, BUCKET, "Background", "Colour, gradient or picture behind this slide", |ui| {
                     changed |= background_editor(ui, &mut proj.slides[slide_idx].background, &theme, inherits, &mut want_picture);
                 });
@@ -2477,27 +2453,10 @@ impl App {
                 });
             });
         });
-        group(ui, "Player", |ui| {
-            if big_button(ui, PLAY, "Player", "Colours, font, sidebar, title, logo and controls of the published player").clicked() { open_player = true; }
-        });
-        let mut open_checker = false;
-        group(ui, "Check", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { open_checker = true; }
-                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
-                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
-                });
-            });
-        });
         if changed { self.commit_project_edit(ctx, before); }
         if open_master { self.enter_master_view(); }
-        if open_player { self.player_open = true; }
         if open_theme_colors { self.theme_colors_open = true; }
         if open_theme_fonts { self.theme_fonts_open = !self.theme_fonts_open; }
-        if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
         if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
         if want_picture {
             if let Some((key, ..)) = self.load_image_asset() {

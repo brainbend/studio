@@ -45,7 +45,7 @@ Every change is built and tested on macOS, Windows and Linux. Releases are on th
 
 ## What you can add
 
-**Objects** (Insert tab)
+**Objects** (Objects tab)
 
 | Group | Objects |
 |---|---|
