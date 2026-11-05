@@ -2445,12 +2445,6 @@ impl App {
                 big_menu(ui, BUCKET, "Background", "Colour, gradient or picture behind this slide", |ui| {
                     changed |= background_editor(ui, &mut proj.slides[slide_idx].background, &theme, inherits, &mut want_picture);
                 });
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.add_enabled_ui(inherits, |ui| {
-                        changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide (needs a layout)").changed();
-                    });
-                });
             });
         });
         if changed { self.commit_project_edit(ctx, before); }

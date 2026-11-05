@@ -6119,6 +6119,10 @@ impl App {
                     ui.label("Name");
                     changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
                 });
+                // The master's and layout's shapes only exist for a slide that uses a layout.
+                if proj.slides[slide_idx].layout.is_some() {
+                    changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
+                }
                 let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
                 match &mut proj.slides[slide_idx].kind {
                     SlideKind::Question(q) => {
@@ -10834,6 +10838,23 @@ mod tests {
         h.run_steps(2);
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
+    }
+
+    /// Hide Background Graphics is a setting of the slide, so it is in the slide's Properties, and only for a slide with a layout.
+    #[test]
+    fn hide_background_graphics_is_in_the_slide_properties_and_only_for_a_slide_with_a_layout() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::THEME_TAB;
+        let layout = a.project.as_ref().unwrap().layouts.first().map(|l| l.id.clone());
+        a.project.as_mut().unwrap().slides[0].layout = layout;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert_eq!(h.query_all_by_label("Hide Background Graphics").count(), 1, "once, in the Properties, and not in the ribbon");
+        h.state_mut().project.as_mut().unwrap().slides[0].layout = None;
+        h.run_steps(3);
+        assert!(h.query_by_label("Hide Background Graphics").is_none(), "no layout, no graphics to hide");
     }
 
     #[test]
