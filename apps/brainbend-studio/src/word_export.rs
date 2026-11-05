@@ -3,7 +3,7 @@
 //! Word cannot draw our slides, and the app is the only thing that can: it paints them with egui. So the handout is made
 //! in steps (the PDF handout works the same way). While a "Preparing" page covers the window, each slide is painted large in turn, the window is captured (egui's
 //! screenshot) and the slide's part of it is kept as a PNG. When every slide has one, the .docx is written.
-//! Question and Results slides are listed as text in the document, so they are not drawn.
+//! Question and Results slides are drawn the way the player shows them.
 use super::*;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -67,6 +67,8 @@ impl Capture {
     /// Whether a screenshot has been asked for and not come back yet.
     #[cfg(test)]
     pub(super) fn waiting(&self) -> bool { self.waiting }
+    #[cfg(test)]
+    pub(super) fn todo_is_empty(&self) -> bool { self.todo.is_empty() }
 }
 
 impl App {
@@ -93,7 +95,7 @@ impl App {
     /// Start making the handout for `slides`, to be saved at `path`.
     pub(super) fn begin_word_export(&mut self, format: Handout, slides: Vec<usize>, path: PathBuf) {
         let Some(p) = &self.project else { return };
-        let todo: Vec<usize> = slides.iter().copied().filter(|&i| p.slides.get(i).is_some_and(|s| matches!(s.kind, SlideKind::Normal))).collect();
+        let todo: Vec<usize> = slides.iter().copied().filter(|&i| i < p.slides.len()).collect();
         self.word_capture = Some(Capture { format, slides, todo, done: 0, pictures: BTreeMap::new(), path, shown: 0, waiting: false, rect: None });
         if self.word_capture.as_ref().is_some_and(|c| c.todo.is_empty()) { self.finish_word_export(); }
     }
@@ -139,6 +141,7 @@ impl App {
         let scale = (avail.x / slide.width).min(avail.y / slide.height).max(0.01);
         let size = egui::vec2(slide.width, slide.height) * scale;
         let rect = egui::Rect::from_min_size(egui::pos2(screen.center().x - size.x / 2.0, screen.top() + HEADING), size);
+        let answers = self.handout.correct_answers;
         let mut cancel = false;
         egui::Area::new(egui::Id::new("word-export-page")).order(egui::Order::Tooltip).fixed_pos(screen.min).show(ctx, |ui| {
             let fill = ui.visuals().panel_fill;
@@ -148,9 +151,15 @@ impl App {
             let button = egui::Rect::from_min_size(egui::pos2(screen.right() - MARGIN - 90.0, screen.top() + 14.0), egui::vec2(90.0, 30.0));
             if ui.put(button, egui::Button::new("Cancel")).clicked() { cancel = true; }
             let painter = ui.painter().with_clip_rect(rect);
-            self.paint_backdrop(ctx, &painter, rect.min, scale, &slide);
-            let layers = start_layers(&slide);
-            self.paint_slide(ctx, &painter, rect.min, scale, &slide, &layers, None);
+            if matches!(slide.kind, SlideKind::Normal) {
+                self.paint_backdrop(ctx, &painter, rect.min, scale, &slide);
+                let layers = start_layers(&slide);
+                self.paint_slide(ctx, &painter, rect.min, scale, &slide, &layers, None);
+            } else {
+                // Question and Results slides look as the player lays them out; the answers show only on a handout that has them.
+                painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(244, 246, 249));
+                self.paint_player_slide(ctx, &painter, rect.min, scale, &slide, false, answers);
+            }
         });
         if cancel { self.word_capture = None; self.status = "Export cancelled".into(); return; }
         let Some(c) = self.word_capture.as_mut() else { return };

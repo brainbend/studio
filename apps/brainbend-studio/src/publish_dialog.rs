@@ -80,9 +80,9 @@ impl PublishPage {
             Self::OtherLms => "Make a SCORM package for any learning management system. Upload the .zip file to your LMS.",
             Self::Video => "Turn the lesson into a video file that plays anywhere. This needs a video encoder that is not part of BrainBend Studio yet.",
             Self::Web => "Publish an HTML5 version of the project to a folder, ready to put on any web server or open from your computer.",
-            Self::Pdf => "Save a PDF handout of the slides. Question slides list the question and its answers (correct ones ticked). Video and audio show as a placeholder.",
+            Self::Pdf => "Save a PDF handout of the slides. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them. Video and audio show as a placeholder.",
             Self::Print => "Print the handout. It opens in your browser, which shows its print dialog: choose a printer, or \"Save as PDF\". It has the same choices as PDF. A Web Lesson prints from here too.",
-            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. It has the same choices as PDF, except slides per page. Question slides list the question and its answers (correct ones ticked).",
+            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. The page is portrait, with one slide and its notes or lines to write on, or two slides to a page. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them.",
             Self::PowerPoint => "Save the project as a PowerPoint (.pptx) file. Things PowerPoint cannot do, such as triggers and variables, are listed in a report afterwards.",
         }
     }
@@ -170,13 +170,25 @@ impl App {
                         }
                         if matches!(page, PublishPage::Pdf | PublishPage::Print | PublishPage::Word) {
                             ui.label(egui::RichText::new("Page").strong());
-                            ui.horizontal(|ui| {
-                                for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
-                            });
-                            if page != PublishPage::Word { ui.horizontal(|ui| {
-                                ui.label("Slides per page");
-                                for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
-                            }); }
+                            if page == PublishPage::Word {
+                                // Word cannot fit content to a page the way PDF can, so it offers a page that is always portrait,
+                                // with one slide and its notes, or two slides and nothing else.
+                                handout.orientation = HandoutOrientation::Portrait;
+                                handout.per_page = handout.per_page.clamp(1, 2);
+                                ui.horizontal(|ui| {
+                                    ui.label("Slides per page");
+                                    for n in [1u8, 2] { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
+                                });
+                                ui.weak("Portrait.");
+                            } else {
+                                ui.horizontal(|ui| {
+                                    for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Slides per page");
+                                    for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
+                                });
+                            }
                             ui.add_space(8.0);
                             if !is_web {
                                 ui.label(egui::RichText::new("Slides to include").strong());
@@ -187,10 +199,35 @@ impl App {
                             }
                             ui.label(egui::RichText::new("Include").strong());
                             ui.checkbox(&mut handout.correct_answers, "Correct answers").on_hover_text("Off prints question slides as a blank worksheet");
-                            ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
-                            ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
-                            ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
-                            ui.weak(if page != PublishPage::Word { "Slide sizes, borders and spacing are chosen for you to fit the page." } else { "Each slide follows the one before. Word's own page setup applies once you open the file." });
+                            if page != PublishPage::Word {
+                                ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
+                                ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                                ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                                ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
+                            } else if handout.per_page == 2 {
+                                handout.note_lines = false; handout.slide_notes = false; handout.alt_text = false;
+                                ui.weak("Two slides to a page leave no room for notes, alt text or lines to write on.");
+                            } else {
+                                // One slide to a page: its notes and alt text under it, or lines to write on, or neither.
+                                let mut mode = if handout.note_lines && !handout.slide_notes && !handout.alt_text { 2 } else if handout.slide_notes || handout.alt_text { 1 } else { 0 };
+                                let before = mode;
+                                ui.radio_value(&mut mode, 0, "Just the slides");
+                                ui.radio_value(&mut mode, 1, "Slide notes and alt text under each slide");
+                                // Its two choices sit right under it.
+                                if mode == 1 {
+                                    ui.indent("word-notes", |ui| {
+                                        ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                                        ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                                    });
+                                }
+                                ui.radio_value(&mut mode, 2, "Lines to write notes on");
+                                if mode != before {
+                                    handout.note_lines = mode == 2;
+                                    handout.slide_notes = mode == 1;
+                                    handout.alt_text = mode == 1;
+                                }
+                                ui.weak("Long notes run on to the next page. In Word the slides stay editable around the pictures.");
+                            }
                             ui.add_space(12.0);
                         }
                         ui.weak(page.next_step());

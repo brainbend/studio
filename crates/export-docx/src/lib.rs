@@ -66,7 +66,7 @@ impl Para {
         if let Some(s) = self.style { let _ = write!(ppr, "<w:pStyle w:val=\"{s}\"/>"); }
         if self.keep_next { ppr.push_str("<w:keepNext/>"); }
         if self.page_break_before { ppr.push_str("<w:pageBreakBefore/>"); }
-        if self.ruled { ppr.push_str("<w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"1\" w:color=\"AAAAAA\"/></w:pBdr>"); }
+        if self.ruled { ppr.push_str("<w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"999999\"/><w:between w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"999999\"/></w:pBdr>"); }
         if let Some(a) = self.spacing_after { let _ = write!(ppr, "<w:spacing w:after=\"{a}\"/>"); }
         if self.indent > 0 { let _ = write!(ppr, "<w:ind w:left=\"{}\"/>", self.indent); }
         let ppr = if ppr.is_empty() { String::new() } else { format!("<w:pPr>{ppr}</w:pPr>") };
@@ -78,13 +78,19 @@ use std::fmt::Write as _;
 /// A picture to place in the document.
 struct Picture { rid: String, w_emu: i64, h_emu: i64, name: String, descr: String, id: usize }
 
+/// What each picture or shape on the slide is described as, for the alt text list.
+fn alt_items(slide: &Slide) -> Vec<String> {
+    let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
+    objects.iter().filter(|o| !o.decorative && !o.alt.trim().is_empty()).map(|o| format!("{}: {}", o.name, o.alt.trim())).collect()
+}
+
 fn picture_para(p: &Picture, keep_next: bool) -> String {
     format!(
-        "<w:p><w:pPr>{}</w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{w}\" cy=\"{h}\"/><wp:docPr id=\"{id}\" name=\"{name}\" descr=\"{descr}\"/>\
+        "<w:p><w:pPr>{}<w:spacing w:before=\"60\" w:after=\"60\"/></w:pPr><w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{w}\" cy=\"{h}\"/><wp:docPr id=\"{id}\" name=\"{name}\" descr=\"{descr}\"/>\
 <a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">\
 <pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{id}\" name=\"{name}\" descr=\"{descr}\"/><pic:cNvPicPr/></pic:nvPicPr>\
 <pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
-<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:ln w=\"9525\"><a:solidFill><a:srgbClr val=\"888888\"/></a:solidFill></a:ln></pic:spPr></pic:pic>\
+<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{w}\" cy=\"{h}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:ln w=\"19050\"><a:solidFill><a:srgbClr val=\"666666\"/></a:solidFill></a:ln></pic:spPr></pic:pic>\
 </a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
         if keep_next { "<w:keepNext/>" } else { "" },
         w = p.w_emu, h = p.h_emu, id = p.id, name = esc(&p.name), descr = esc(&p.descr), rid = p.rid
@@ -128,11 +134,9 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
     let p = &flat;
     let slides: Vec<usize> = slides.iter().copied().filter(|&i| i < p.slides.len()).collect();
     if slides.is_empty() { return Err("there are no slides to put in the document".into()); }
-    let portrait = options.orientation == HandoutOrientation::Portrait;
-    let (page_w, page_h) = if portrait { A4 } else { (A4.1, A4.0) };
+    let (page_w, page_h) = A4;
     let text_w = twips(page_w - 2.0 * MARGIN_MM);
     let text_h = twips(page_h - 2.0 * MARGIN_MM);
-    let has_extras = options.note_lines || options.slide_notes || options.alt_text;
 
     let mut body = String::new();
     let mut media: Vec<(String, Vec<u8>)> = vec![];
@@ -142,20 +146,47 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
     let mut title = Para::styled("Title");
     title.push(&p.name, false, false, false);
     body.push_str(&title.xml());
-    for &i in &slides {
+    // Word handouts are portrait: one slide to a page, with its notes and alt text or lines to write on, or two to a page with nothing else.
+    // (Word cannot fit content to a page the way PDF can, so the other combinations are not offered.)
+    let mut chosen = options.clone();
+    chosen.orientation = HandoutOrientation::Portrait;
+    chosen.per_page = chosen.per_page.clamp(1, 2);
+    if chosen.per_page == 2 { chosen.slide_notes = false; chosen.alt_text = false; chosen.note_lines = false; }
+    else if chosen.note_lines && (chosen.slide_notes || chosen.alt_text) { chosen.note_lines = false; }
+    let options = &chosen;
+    let per_page = options.per_page as usize;
+    let lines = 6;
+    // How tall the notes, alt text and writing lines of a slide come out in a column `w` twips wide (about 125 twips a character, 300 a line).
+    let tail_h = |slide: &Slide| -> i64 {
+        let cpl = (text_w / 125).max(8) as usize;
+        let rows = |chars: usize, cpl: usize| -> i64 { chars.div_ceil(cpl.max(1)).max(1) as i64 };
+        let mut h = 0;
+        if options.slide_notes && !slide.notes.trim().is_empty() {
+            h += slide.notes.trim().lines().enumerate().map(|(n, l)| rows(l.chars().count() + if n == 0 { 7 } else { 0 }, cpl) * 300).sum::<i64>() + 120;
+        }
+        if options.alt_text {
+            let items = alt_items(slide);
+            if !items.is_empty() { h += 300 + items.iter().map(|t| rows(t.chars().count() + 2, cpl.saturating_sub(3)) * 300).sum::<i64>(); }
+        }
+        if options.note_lines { h += 300 + lines as i64 * 540; }
+        h
+    };
+    for (k, &i) in slides.iter().enumerate() {
         let slide = &p.slides[i];
-        let png = pictures.get(&i).and_then(|b| png_size(b).map(|d| (b, d))).filter(|_| matches!(slide.kind, SlideKind::Normal));
+        let png = pictures.get(&i).and_then(|b| png_size(b).map(|d| (b, d)));
         let mut h = Para::styled("Heading2");
         h.keep_next = true;
-        // A slide with a picture or room to write on gets a page of its own; plain text flows on.
-        h.page_break_before = !first && (png.is_some() || options.note_lines);
+        // A slide with a picture or room to write on starts a page when a new one is due; plain text flows on.
+        h.page_break_before = !first && k % per_page == 0 && (png.is_some() || options.note_lines);
         h.push(&format!("{}. {}", i + 1, slide.name), false, false, false);
         body.push_str(&h.xml());
         first = false;
         match (&slide.kind, png) {
-            (SlideKind::Normal, Some((bytes, (w, ht)))) => {
-                // As wide as the page allows, and short enough to leave room for what goes with it.
-                let max_h = text_h - if has_extras { text_h * 45 / 100 } else { 0 } - twips(14.0);
+            (_, Some((bytes, (w, ht)))) => {
+                // As wide as the page allows, and short enough to leave room for what goes with it (the notes run on to the next page if they are long).
+                let share = text_h / per_page as i64;
+                let under = tail_h(slide).min(share * 45 / 100);
+                let max_h = (share - 500 - under - 250).max(share * 3 / 10);
                 let (mut cx, mut cy) = (text_w * EMU_PER_TWIP, text_w * EMU_PER_TWIP * ht as i64 / w as i64);
                 if cy > max_h * EMU_PER_TWIP { cx = cx * max_h * EMU_PER_TWIP / cy; cy = max_h * EMU_PER_TWIP; }
                 let n = media.len() + 1;
@@ -189,8 +220,7 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
             body.push_str(&para.xml());
         }
         if options.alt_text {
-            let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
-            let items: Vec<String> = objects.iter().filter(|o| !o.decorative && !o.alt.trim().is_empty()).map(|o| format!("{}: {}", o.name, o.alt.trim())).collect();
+            let items = alt_items(slide);
             if !items.is_empty() {
                 body.push_str(&Para::new().text("Alt text", true, false).xml());
                 for it in items { let mut para = Para::new(); para.indent = 360; para.push(&format!("\u{2022} {it}"), false, false, false); body.push_str(&para.xml()); }
@@ -198,12 +228,12 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
         }
         if options.note_lines {
             body.push_str(&Para::new().text("Notes", true, false).xml());
-            for _ in 0..6 { let mut line = Para::new(); line.ruled = true; line.spacing_after = Some(240); line.push(" ", false, false, false); body.push_str(&line.xml()); }
+            for _ in 0..lines { let mut line = Para::new(); line.ruled = true; line.spacing_after = Some(240); line.push(" ", false, false, false); body.push_str(&line.xml()); }
         }
     }
     let sect = format!(
         "<w:sectPr><w:pgSz w:w=\"{}\" w:h=\"{}\"{}/><w:pgMar w:top=\"{m}\" w:right=\"{m}\" w:bottom=\"{m}\" w:left=\"{m}\" w:header=\"400\" w:footer=\"400\" w:gutter=\"0\"/></w:sectPr>",
-        if portrait { A4_TWIPS.0 } else { A4_TWIPS.1 }, if portrait { A4_TWIPS.1 } else { A4_TWIPS.0 }, if portrait { "" } else { " w:orient=\"landscape\"" }, m = twips(MARGIN_MM)
+        A4_TWIPS.0, A4_TWIPS.1, "", m = twips(MARGIN_MM)
     );
     let document = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\"><w:body>{body}{sect}</w:body></w:document>"

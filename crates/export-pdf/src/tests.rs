@@ -149,3 +149,67 @@ fn text_the_font_cannot_show_is_swapped_for_plain_look_alikes() {
     assert!(wrap(&f.regular, "one two three four five six seven", 10.0, 60.0).len() > 1, "long text wraps");
     assert!(width(&f.bold, "Notes", 10.0) > width(&f.regular, "Notes", 10.0), "bold is wider");
 }
+
+fn long_notes_project(n: usize) -> Project {
+    let mut p = Project::new("Long notes");
+    for i in 0..n {
+        let mut s = Slide::new(&format!("s{i}"), &format!("Slide {}", i + 1), 1920.0, 1080.0);
+        s.notes = format!("START{i} ") + &"word ".repeat(1000) + &format!("END{i}");
+        s.layers[0].objects = (0..40).map(|j| { let mut o = Object::new(&format!("o{j}"), &format!("Pic{j}"), Kind::Text, 0.0, 0.0, 10.0, 10.0); o.alt = format!("alt{i}x{j} describes the picture in some detail"); o }).collect();
+        p.slides.push(s);
+    }
+    p
+}
+
+#[test]
+fn notes_too_long_for_their_place_continue_on_extra_pages_and_none_is_lost() {
+    let p = long_notes_project(3);
+    for (orientation, per_page) in [(HandoutOrientation::Portrait, 1u8), (HandoutOrientation::Portrait, 2), (HandoutOrientation::Portrait, 3), (HandoutOrientation::Landscape, 1), (HandoutOrientation::Landscape, 2), (HandoutOrientation::Landscape, 3)] {
+        let o = HandoutOptions { orientation, per_page, slide_notes: true, alt_text: true, note_lines: true, ..Default::default() };
+        let plain = HandoutOptions { slide_notes: false, alt_text: false, note_lines: false, ..o.clone() };
+        let bytes = export(&p, &[0, 1, 2], &o, &BTreeMap::new()).unwrap();
+        let base = pages(&export(&p, &[0, 1, 2], &plain, &BTreeMap::new()).unwrap());
+        assert!(pages(&bytes) > base, "{orientation:?} {per_page}: the notes needed more pages");
+    }
+}
+
+#[test]
+fn what_does_not_fit_is_handed_on_and_every_word_is_drawn_somewhere() {
+    let fonts = load_fonts().unwrap();
+    let slide = &long_notes_project(1).slides[0];
+    let o = HandoutOptions { slide_notes: true, alt_text: true, ..Default::default() };
+    let all = note_paras(slide, &o);
+    let want: Vec<String> = all.iter().filter(|p| !p.bold).flat_map(|p| p.text.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
+    // A small place, then page after page, as the export does.
+    let mut doc = Document::new();
+    let mut drawn = vec![];
+    let mut paras = all;
+    let (mut width, mut room) = (150.0, 120.0);
+    let mut rounds = 0;
+    while !paras.is_empty() {
+        rounds += 1;
+        assert!(rounds < 200, "it keeps making progress");
+        let mut page = doc.start_page_with(PageSettings::from_wh(595.0, 842.0).unwrap());
+        let mut surface = page.surface();
+        let mut w = Writer { s: &mut surface, fonts: &fonts, drawn: vec![] };
+        let (_, left) = fit(&mut w, paras, 10.0, 10.0, width, room);
+        drawn.extend(w.drawn.clone());
+        surface.finish();
+        page.finish();
+        paras = left;
+        (width, room) = (500.0, 800.0);
+    }
+    assert!(rounds >= 3, "it needed several pages");
+    let got: Vec<String> = drawn.iter().flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).filter(|w| w != "Notes" && w != "Alt" && w != "text").collect();
+    let want: Vec<String> = want.into_iter().map(|w| w.trim_start_matches('-').to_string()).filter(|w| !w.is_empty()).collect();
+    let got: Vec<String> = got.into_iter().map(|w| w.trim_start_matches('-').to_string()).filter(|w| !w.is_empty()).collect();
+    assert_eq!(got, want, "the same words in the same order");
+}
+
+#[test]
+fn short_notes_stay_on_the_slides_page() {
+    let p = five_slides();
+    let o = HandoutOptions { orientation: HandoutOrientation::Portrait, per_page: 2, slide_notes: true, alt_text: true, note_lines: true, ..Default::default() };
+    let bytes = export(&p, &[0, 1, 2, 3, 4], &o, &BTreeMap::new()).unwrap();
+    assert_eq!(pages(&bytes), 3, "five slides, two to a page, no continuation pages");
+}

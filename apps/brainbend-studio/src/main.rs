@@ -3940,6 +3940,142 @@ impl App {
         self.reset_visibility_keep();
     }
 
+    /// Draw a question or results slide the way the player lays it out (the editor canvas and the handouts both use this).
+    /// Returns where the picture of a Hotspot or Label question was drawn, so the editor can let the author draw areas on it.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_player_slide(&mut self, ctx: &egui::Context, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide: &Slide, label: bool, answers: bool) -> Option<egui::Rect> {
+        let size = egui::vec2(slide.width, slide.height) * scale;
+        let mut hot: Option<egui::Rect> = None;
+        let rect = egui::Rect::from_min_size(origin, size);
+        let qarea = match &slide.kind { SlideKind::Question(q) => q.area, _ => None };
+        if qarea.is_none() { painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(244, 246, 249)); }
+        // With its own area the question is laid out at the player's scaled size, from the area's top-left.
+        let qk = qarea.map(|a| (a.w / 1560.0).min(a.h / 860.0).clamp(0.3, 1.0)).unwrap_or(1.0);
+        let (origin, scale) = match qarea {
+            Some(a) => (origin + egui::vec2(a.x + 30.0, a.y + 24.0) * scale - egui::vec2(180.0, 110.0) * scale * qk, scale * qk),
+            None => (origin, scale),
+        };
+        let at = |x: f32, y: f32| origin + egui::vec2(x, y) * scale;
+        let txt = |painter: &egui::Painter, x: f32, y: f32, text: String, px: f32, weight: f32, col: egui::Color32, width: f32| -> f32 {
+            let fmt = egui::text::TextFormat {
+                font_id: egui::FontId::new((px * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())),
+                color: col,
+                coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
+                ..Default::default()
+            };
+            let mut job = egui::text::LayoutJob::single_section(text, fmt);
+            job.wrap.max_width = (width * scale).max(1.0);
+            let g = painter.layout_job(job);
+            let h = g.size().y / scale;
+            painter.galley(at(x, y), g, col);
+            h
+        };
+        let ink = egui::Color32::from_rgb(27, 42, 58);
+        let blue = egui::Color32::from_rgb(3, 83, 158);
+        let content_w = match qarea { Some(a) => (a.w - 60.0) / qk, None => slide.width - 360.0 };
+        match &slide.kind {
+            SlideKind::Question(q) => {
+                txt(&painter, 180.0, 110.0, "QUESTION 1 OF 1".into(), 30.0, 400.0, egui::Color32::from_rgb(91, 107, 126), content_w);
+                let ph = txt(&painter, 180.0, 164.0, q.prompt.clone(), 58.0, 700.0, ink, content_w);
+                let mut y = 164.0 + ph + 48.0;
+                // Non-choice styles: one row per input, in the player's look.
+                let rows: Vec<String> = match &q.style {
+                    QuestionStyle::TextEntry { .. } => vec!["Type your answer here".to_string()],
+                    QuestionStyle::Matching { pairs } => pairs.iter().map(|(l, _)| format!("{l}      [ Choose… ]")).collect(),
+                    QuestionStyle::Sequence { items } => { let mut shown: Vec<&String> = items.iter().collect(); if !answers { let by = 1.min(shown.len()); shown.rotate_left(by); } shown.iter().enumerate().map(|(i, t)| format!("{}.  {}", i + 1, t)).collect() }
+                    QuestionStyle::FillBlanks { text, .. } => vec![brainbend_doc::passage::with_gaps(text)],
+                    QuestionStyle::DragWords { text, distractors } => {
+                        let mut bank: Vec<String> = brainbend_doc::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
+                        bank.extend(distractors.iter().cloned());
+                        vec![brainbend_doc::passage::with_gaps(text), format!("Word bank:  {}", bank.join("   "))]
+                    }
+                    QuestionStyle::MarkWords { text } => vec![if answers { brainbend_doc::passage::answered(text) } else { brainbend_doc::passage::with_gaps(text) }],
+                    QuestionStyle::Numeric { .. } => vec!["Type a number".to_string()],
+                    QuestionStyle::Categorize { categories } => if answers { categories.iter().map(|(n, items)| format!("{n}:  {}", items.join(",  "))).collect() } else { let mut v: Vec<String> = categories.iter().map(|(n, _)| format!("{n}:")).collect(); v.push(format!("Items:  {}", categories.iter().flat_map(|(_, items)| items.iter().cloned()).collect::<Vec<_>>().join(",  "))); v },
+                    QuestionStyle::Hotspot { .. } | QuestionStyle::LabelPicture { .. } => vec![],
+                    QuestionStyle::Likert { statements, scale, .. } => statements.iter().map(|t| format!("{t}      {}", scale.iter().map(|_| "( )").collect::<Vec<_>>().join("  "))).collect(),
+                    QuestionStyle::Reflection { .. } => vec!["Type your answer here".to_string()],
+                    QuestionStyle::Dictation { .. } => vec!["[ play audio ]".to_string(), "Type what you hear".to_string()],
+                    QuestionStyle::Dropdowns { text } => vec![brainbend_doc::passage::parse(text).into_iter().map(|p| match p { brainbend_doc::passage::Part::Text(t) => t, brainbend_doc::passage::Part::Blank(_) => "[ Choose… ]".to_string() }).collect::<String>()],
+                    QuestionStyle::Choice => vec![],
+                };
+                for r in &rows {
+                    let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
+                    painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
+                    painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), egui::Color32::from_rgb(184, 196, 214)), egui::StrokeKind::Inside);
+                    txt(&painter, 180.0 + 34.0, y + 26.0, r.clone(), 40.0, 400.0, ink, content_w - 80.0);
+                    y += 122.0;
+                }
+                for c in &q.choices {
+                    let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
+                    painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
+                    let edge = if c.correct && answers { egui::Color32::from_rgb(30, 142, 62) } else { egui::Color32::from_rgb(184, 196, 214) };
+                    painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), edge), egui::StrokeKind::Inside);
+                    let mark = at(180.0 + 34.0 + 20.0, y + 50.0);
+                    if q.multiple {
+                        painter.rect_stroke(egui::Rect::from_center_size(mark, egui::Vec2::splat(40.0 * scale)), 6.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue), egui::StrokeKind::Inside);
+                    } else {
+                        painter.circle_stroke(mark, 20.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue));
+                    }
+                    if c.correct && answers {
+                        painter.circle_filled(mark, 9.0 * scale, egui::Color32::from_rgb(30, 142, 62));
+                    }
+                    txt(&painter, 180.0 + 34.0 + 40.0 + 28.0, y + 26.0, c.text.clone(), 40.0, 400.0, ink, content_w - 140.0);
+                    y += 122.0;
+                }
+                let picture: Option<(&Option<String>, Vec<(HotRegion, String)>)> = match &q.style {
+                    QuestionStyle::Hotspot { asset, regions, .. } => Some((asset, regions.iter().map(|r| (*r, String::new())).collect())),
+                    QuestionStyle::LabelPicture { asset, zones, .. } => Some((asset, zones.iter().map(|z| (z.region, z.label.clone())).collect())),
+                    _ => None,
+                };
+                if let Some((asset, regions)) = picture {
+                    // The picture, with its correct areas; dragging on it draws a new area.
+                    let tex = asset.as_ref().and_then(|k| self.texture(ctx, k));
+                    let room = egui::vec2(content_w, (slide.height - y - 190.0).clamp(160.0, 560.0));
+                    let img = match &tex {
+                        Some(t) => { let sz = t.size_vec2(); let k = (room.x / sz.x).min(room.y / sz.y); sz * k }
+                        None => egui::vec2(room.x.min(900.0), room.y.min(420.0)),
+                    };
+                    let rect = egui::Rect::from_min_size(at(180.0, y), img * scale);
+                    hot = Some(rect);
+                    match &tex {
+                        Some(t) => { painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); }
+                        None => {
+                            painter.rect_filled(rect, 8.0 * scale, egui::Color32::from_gray(225));
+                            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Choose a picture in the panel on the right", egui::FontId::proportional((30.0 * scale).max(10.0)), egui::Color32::from_gray(90));
+                        }
+                    }
+                    let green = egui::Color32::from_rgb(30, 142, 62);
+                    let to_rect = |r: &HotRegion| egui::Rect::from_min_size(rect.min + egui::vec2(r.x, r.y) * rect.size(), egui::vec2(r.w, r.h) * rect.size());
+                    for (r, label) in regions.iter().filter(|_| answers) {
+                        let rr = to_rect(r);
+                        if !label.is_empty() { painter.text(rr.left_top() + egui::vec2(4.0, 2.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional((26.0 * scale).max(9.0)), green); }
+                        if r.ellipse {
+                            painter.add(egui::epaint::EllipseShape { center: rr.center(), radius: rr.size() / 2.0, fill: green.gamma_multiply(0.25), stroke: egui::Stroke::new(2.0, green), angle: 0.0 });
+                        } else {
+                            painter.rect(rr, 0.0, green.gamma_multiply(0.25), egui::Stroke::new(2.0, green), egui::StrokeKind::Inside);
+                        }
+                    }
+                    y += img.y + 24.0;
+                }
+                let b = egui::Rect::from_min_size(at(180.0, y + 8.0), egui::vec2(300.0, 90.0) * scale);
+                painter.rect_filled(b, 14.0 * scale, blue);
+                painter.text(b.center(), egui::Align2::CENTER_CENTER, "Submit", egui::FontId::new((38.0 * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())), egui::Color32::WHITE);
+            }
+            _ => {
+                txt(&painter, 180.0, 110.0, "Results".into(), 58.0, 700.0, ink, content_w);
+                txt(&painter, 180.0, 230.0, "86%".into(), 200.0, 800.0, blue, content_w);
+                txt(&painter, 180.0, 470.0, "6 of 7 points. Pass mark: 80%.".into(), 42.0, 400.0, ink, content_w);
+                txt(&painter, 180.0, 540.0, "You passed.".into(), 52.0, 700.0, egui::Color32::from_rgb(30, 142, 62), content_w);
+            }
+        }
+        if label {
+            painter.text(rect.right_bottom() - egui::vec2(12.0, 12.0), egui::Align2::RIGHT_BOTTOM,
+                "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
+        }
+        hot
+    }
+
     #[allow(clippy::too_many_arguments)]
     /// Paint the given layers of `slide` (the same drawing the canvas and the thumbnails use).
     fn paint_slide(&mut self, ctx: &egui::Context, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide: &Slide, shown: &[usize], selected: Option<(usize, usize)>) {
@@ -6318,155 +6454,35 @@ impl App {
 
             if !matches!(slide.kind, SlideKind::Normal) {
                 // Question and results slides are drawn by the player; this mirrors its layout.
-                let rect = egui::Rect::from_min_size(origin, size);
+                let hot = self.paint_player_slide(ctx, &painter, origin, scale, &slide, true, true);
                 let qarea = match &slide.kind { SlideKind::Question(q) => q.area, _ => None };
-                if qarea.is_none() { painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(244, 246, 249)); }
-                // With its own area the question is laid out at the player's scaled size, from the area's top-left.
-                let qk = qarea.map(|a| (a.w / 1560.0).min(a.h / 860.0).clamp(0.3, 1.0)).unwrap_or(1.0);
                 let area_screen = qarea.map(|a| egui::Rect::from_min_size(origin + egui::vec2(a.x, a.y) * scale, egui::vec2(a.w, a.h) * scale));
                 let slide_scale = scale;
-                let (origin, scale) = match qarea {
-                    Some(a) => (origin + egui::vec2(a.x + 30.0, a.y + 24.0) * scale - egui::vec2(180.0, 110.0) * scale * qk, scale * qk),
-                    None => (origin, scale),
-                };
-                let at = |x: f32, y: f32| origin + egui::vec2(x, y) * scale;
-                let txt = |painter: &egui::Painter, x: f32, y: f32, text: String, px: f32, weight: f32, col: egui::Color32, width: f32| -> f32 {
-                    let fmt = egui::text::TextFormat {
-                        font_id: egui::FontId::new((px * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())),
-                        color: col,
-                        coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
-                        ..Default::default()
-                    };
-                    let mut job = egui::text::LayoutJob::single_section(text, fmt);
-                    job.wrap.max_width = (width * scale).max(1.0);
-                    let g = painter.layout_job(job);
-                    let h = g.size().y / scale;
-                    painter.galley(at(x, y), g, col);
-                    h
-                };
-                let ink = egui::Color32::from_rgb(27, 42, 58);
-                let blue = egui::Color32::from_rgb(3, 83, 158);
-                let content_w = match qarea { Some(a) => (a.w - 60.0) / qk, None => slide.width - 360.0 };
-                match &slide.kind {
-                    SlideKind::Question(q) => {
-                        txt(&painter, 180.0, 110.0, "QUESTION 1 OF 1".into(), 30.0, 400.0, egui::Color32::from_rgb(91, 107, 126), content_w);
-                        let ph = txt(&painter, 180.0, 164.0, q.prompt.clone(), 58.0, 700.0, ink, content_w);
-                        let mut y = 164.0 + ph + 48.0;
-                        // Non-choice styles: one row per input, in the player's look.
-                        let rows: Vec<String> = match &q.style {
-                            QuestionStyle::TextEntry { .. } => vec!["Type your answer here".to_string()],
-                            QuestionStyle::Matching { pairs } => pairs.iter().map(|(l, _)| format!("{l}      [ Choose… ]")).collect(),
-                            QuestionStyle::Sequence { items } => items.iter().enumerate().map(|(i, t)| format!("{}.  {}", i + 1, t)).collect(),
-                            QuestionStyle::FillBlanks { text, .. } => vec![brainbend_doc::passage::with_gaps(text)],
-                            QuestionStyle::DragWords { text, distractors } => {
-                                let mut bank: Vec<String> = brainbend_doc::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
-                                bank.extend(distractors.iter().cloned());
-                                vec![brainbend_doc::passage::with_gaps(text), format!("Word bank:  {}", bank.join("   "))]
-                            }
-                            QuestionStyle::MarkWords { text } => vec![brainbend_doc::passage::answered(text)],
-                            QuestionStyle::Numeric { .. } => vec!["Type a number".to_string()],
-                            QuestionStyle::Categorize { categories } => categories.iter().map(|(n, items)| format!("{n}:  {}", items.join(",  "))).collect(),
-                            QuestionStyle::Hotspot { .. } | QuestionStyle::LabelPicture { .. } => vec![],
-                            QuestionStyle::Likert { statements, scale, .. } => statements.iter().map(|t| format!("{t}      {}", scale.iter().map(|_| "( )").collect::<Vec<_>>().join("  "))).collect(),
-                            QuestionStyle::Reflection { .. } => vec!["Type your answer here".to_string()],
-                            QuestionStyle::Dictation { .. } => vec!["[ play audio ]".to_string(), "Type what you hear".to_string()],
-                            QuestionStyle::Dropdowns { text } => vec![brainbend_doc::passage::parse(text).into_iter().map(|p| match p { brainbend_doc::passage::Part::Text(t) => t, brainbend_doc::passage::Part::Blank(_) => "[ Choose… ]".to_string() }).collect::<String>()],
-                            QuestionStyle::Choice => vec![],
-                        };
-                        for r in &rows {
-                            let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
-                            painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
-                            painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), egui::Color32::from_rgb(184, 196, 214)), egui::StrokeKind::Inside);
-                            txt(&painter, 180.0 + 34.0, y + 26.0, r.clone(), 40.0, 400.0, ink, content_w - 80.0);
-                            y += 122.0;
+                if let Some(rect) = hot {
+                        let frac = |pos: egui::Pos2| { let d = (pos - rect.min) / rect.size(); (d.x.clamp(0.0, 1.0), d.y.clamp(0.0, 1.0)) };
+                        if resp.drag_started() {
+                            if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.hot_drag = Some((frac(pos), frac(pos))); }
                         }
-                        for c in &q.choices {
-                            let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
-                            painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
-                            let edge = if c.correct { egui::Color32::from_rgb(30, 142, 62) } else { egui::Color32::from_rgb(184, 196, 214) };
-                            painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), edge), egui::StrokeKind::Inside);
-                            let mark = at(180.0 + 34.0 + 20.0, y + 50.0);
-                            if q.multiple {
-                                painter.rect_stroke(egui::Rect::from_center_size(mark, egui::Vec2::splat(40.0 * scale)), 6.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue), egui::StrokeKind::Inside);
-                            } else {
-                                painter.circle_stroke(mark, 20.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue));
-                            }
-                            if c.correct {
-                                painter.circle_filled(mark, 9.0 * scale, egui::Color32::from_rgb(30, 142, 62));
-                            }
-                            txt(&painter, 180.0 + 34.0 + 40.0 + 28.0, y + 26.0, c.text.clone(), 40.0, 400.0, ink, content_w - 140.0);
-                            y += 122.0;
-                        }
-                        let picture: Option<(&Option<String>, Vec<(HotRegion, String)>)> = match &q.style {
-                            QuestionStyle::Hotspot { asset, regions, .. } => Some((asset, regions.iter().map(|r| (*r, String::new())).collect())),
-                            QuestionStyle::LabelPicture { asset, zones, .. } => Some((asset, zones.iter().map(|z| (z.region, z.label.clone())).collect())),
-                            _ => None,
-                        };
-                        if let Some((asset, regions)) = picture {
-                            // The picture, with its correct areas; dragging on it draws a new area.
-                            let tex = asset.as_ref().and_then(|k| self.texture(ctx, k));
-                            let room = egui::vec2(content_w, (slide.height - y - 190.0).clamp(160.0, 560.0));
-                            let img = match &tex {
-                                Some(t) => { let sz = t.size_vec2(); let k = (room.x / sz.x).min(room.y / sz.y); sz * k }
-                                None => egui::vec2(room.x.min(900.0), room.y.min(420.0)),
-                            };
-                            let rect = egui::Rect::from_min_size(at(180.0, y), img * scale);
-                            match &tex {
-                                Some(t) => { painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); }
-                                None => {
-                                    painter.rect_filled(rect, 8.0 * scale, egui::Color32::from_gray(225));
-                                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Choose a picture in the panel on the right", egui::FontId::proportional((30.0 * scale).max(10.0)), egui::Color32::from_gray(90));
-                                }
-                            }
-                            let green = egui::Color32::from_rgb(30, 142, 62);
-                            let to_rect = |r: &HotRegion| egui::Rect::from_min_size(rect.min + egui::vec2(r.x, r.y) * rect.size(), egui::vec2(r.w, r.h) * rect.size());
-                            for (r, label) in &regions {
-                                let rr = to_rect(r);
-                                if !label.is_empty() { painter.text(rr.left_top() + egui::vec2(4.0, 2.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional((26.0 * scale).max(9.0)), green); }
-                                if r.ellipse {
-                                    painter.add(egui::epaint::EllipseShape { center: rr.center(), radius: rr.size() / 2.0, fill: green.gamma_multiply(0.25), stroke: egui::Stroke::new(2.0, green), angle: 0.0 });
-                                } else {
-                                    painter.rect(rr, 0.0, green.gamma_multiply(0.25), egui::Stroke::new(2.0, green), egui::StrokeKind::Inside);
-                                }
-                            }
-                            let frac = |pos: egui::Pos2| { let d = (pos - rect.min) / rect.size(); (d.x.clamp(0.0, 1.0), d.y.clamp(0.0, 1.0)) };
-                            if resp.drag_started() {
-                                if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.hot_drag = Some((frac(pos), frac(pos))); }
-                            }
-                            if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
-                            if let Some((a, b)) = self.hot_drag {
-                                let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
-                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
-                                if resp.drag_stopped() || !resp.dragged() {
-                                    self.hot_drag = None;
-                                    let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
-                                    if x1 - x0 >= 0.02 && y1 - y0 >= 0.02 {
-                                        self.snapshot();
-                                        let region = HotRegion { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ellipse: false };
-                                        match self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) {
-                                            Some(SlideKind::Question(Question { style: QuestionStyle::Hotspot { regions, .. }, .. })) => regions.push(region),
-                                            Some(SlideKind::Question(Question { style: QuestionStyle::LabelPicture { zones, .. }, .. })) => { let n = zones.len() + 1; zones.push(LabelZone { region, label: format!("Label {n}") }); }
-                                            _ => {}
-                                        }
-                                        self.dirty = true;
+                        if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
+                        if let Some((a, b)) = self.hot_drag {
+                            let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
+                            painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
+                            if resp.drag_stopped() || !resp.dragged() {
+                                self.hot_drag = None;
+                                let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
+                                if x1 - x0 >= 0.02 && y1 - y0 >= 0.02 {
+                                    self.snapshot();
+                                    let region = HotRegion { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ellipse: false };
+                                    match self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) {
+                                        Some(SlideKind::Question(Question { style: QuestionStyle::Hotspot { regions, .. }, .. })) => regions.push(region),
+                                        Some(SlideKind::Question(Question { style: QuestionStyle::LabelPicture { zones, .. }, .. })) => { let n = zones.len() + 1; zones.push(LabelZone { region, label: format!("Label {n}") }); }
+                                        _ => {}
                                     }
+                                    self.dirty = true;
                                 }
                             }
-                            y += img.y + 24.0;
                         }
-                        let b = egui::Rect::from_min_size(at(180.0, y + 8.0), egui::vec2(300.0, 90.0) * scale);
-                        painter.rect_filled(b, 14.0 * scale, blue);
-                        painter.text(b.center(), egui::Align2::CENTER_CENTER, "Submit", egui::FontId::new((38.0 * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())), egui::Color32::WHITE);
-                    }
-                    _ => {
-                        txt(&painter, 180.0, 110.0, "Results".into(), 58.0, 700.0, ink, content_w);
-                        txt(&painter, 180.0, 230.0, "86%".into(), 200.0, 800.0, blue, content_w);
-                        txt(&painter, 180.0, 470.0, "6 of 7 points. Pass mark: 80%.".into(), 42.0, 400.0, ink, content_w);
-                        txt(&painter, 180.0, 540.0, "You passed.".into(), 52.0, 700.0, egui::Color32::from_rgb(30, 142, 62), content_w);
-                    }
                 }
-                painter.text(rect.right_bottom() - egui::vec2(12.0, 12.0), egui::Align2::RIGHT_BOTTOM,
-                    "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
                 // The question's own area: a frame with a grip to move it and handles on its edges and corners to resize it.
                 if let (Some(sr), false) = (area_screen, self.try_mode) {
                     let accent = ribbon::ACCENT;
@@ -10985,10 +11001,10 @@ mod tests {
             }
         }
         assert!(h.state().word_capture.is_none(), "the handout is finished");
-        assert_eq!(shots, 2, "the question slide is listed as text, so only two slides are drawn");
+        assert_eq!(shots, 3, "the question slide is drawn as it looks in the lesson, like the others");
         let bytes = std::fs::read(&path).expect("the file was written");
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("word/media/image1.png") && text.contains("word/media/image2.png") && !text.contains("image3.png"));
+        assert!(text.contains("word/media/image1.png") && text.contains("word/media/image2.png") && text.contains("word/media/image3.png"));
         assert!(h.state().status.contains("Exported Word handout"), "{}", h.state().status);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { std::fs::copy(&path, std::path::PathBuf::from(dir).join("handout.docx")).unwrap(); }
         let _ = std::fs::remove_file(&path);
@@ -11020,7 +11036,7 @@ mod tests {
     }
 
     #[test]
-    fn a_handout_of_only_question_slides_needs_no_pictures_and_is_written_at_once() {
+    fn a_handout_of_only_question_slides_still_draws_each_one() {
         let mut a = app();
         {
             let p = a.project.as_mut().unwrap();
@@ -11032,7 +11048,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("brainbend-word-test-q-{}.docx", std::process::id()));
         let _ = std::fs::remove_file(&path);
         a.begin_word_export(word_export::Handout::Word, vec![0], path.clone());
-        assert!(a.word_capture.is_none() && path.exists());
+        assert!(a.word_capture.as_ref().is_some_and(|c| !c.todo_is_empty()) && !path.exists(), "the question slide is drawn, so the file waits for its picture");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -11053,18 +11069,32 @@ mod tests {
     }
 
     #[test]
-    fn the_word_page_offers_the_pdf_choices_except_slides_per_page() {
+    fn the_word_page_is_portrait_with_one_slide_and_notes_or_lines_or_two_slides_and_nothing_else() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
         a.publish_open = true;
         a.publish_page = publish_dialog::PublishPage::Word;
+        a.handout.orientation = brainbend_publish_html::HandoutOrientation::Landscape;
+        a.handout.per_page = 3;
+        a.handout.note_lines = true;
+        a.handout.slide_notes = true;
         let mut h = harness(a);
         h.run_steps(4);
-        for name in ["Landscape", "Portrait", "Correct answers", "Space for notes", "Slide notes", "Alt text"] {
-            assert!(h.query_by_label(name).is_some(), "{name} is offered for Word");
-        }
-        assert!(h.query_by_label("Slides per page").is_none(), "slides per page is a PDF choice");
+        assert!(h.query_by_label("Landscape").is_none() && h.query_by_label("Portrait").is_none(), "the page is always portrait, so there is nothing to choose");
+        assert!(h.query_by_label("3 slides").is_none() && h.query_by_label("2 slides").is_some() && h.query_by_label("1 slide").is_some());
+        assert_eq!((h.state().handout.orientation, h.state().handout.per_page), (brainbend_publish_html::HandoutOrientation::Portrait, 2), "what PDF had chosen is brought within what Word does");
+        assert!(h.state().handout.note_lines == false && !h.state().handout.slide_notes && !h.state().handout.alt_text, "two to a page have nothing else");
+        assert!(h.query_by_label("Correct answers").is_some());
+        h.get_by_label("1 slide").click();
+        h.run_steps(4);
+        for name in ["Just the slides", "Slide notes and alt text under each slide", "Lines to write notes on"] { assert!(h.query_by_label(name).is_some(), "{name}"); }
+        h.get_by_label("Lines to write notes on").click();
+        h.run_steps(3);
+        assert!(h.state().handout.note_lines && !h.state().handout.slide_notes && !h.state().handout.alt_text);
+        h.get_by_label("Slide notes and alt text under each slide").click();
+        h.run_steps(3);
+        assert!(!h.state().handout.note_lines && h.state().handout.slide_notes && h.state().handout.alt_text, "notes and alt text replace the lines");
         assert!(publish_dialog::PublishPage::Word.available());
     }
 

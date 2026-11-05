@@ -120,7 +120,8 @@ fn rect_path(x: f32, y: f32, w: f32, h: f32) -> Option<krilla::geom::Path> {
 }
 
 /// Draws text, a line at a time, down from `y`. Returns where the next line would start.
-struct Writer<'a, 'b> { s: &'a mut Surface<'b>, fonts: &'a Fonts }
+struct Writer<'a, 'b> { s: &'a mut Surface<'b>, fonts: &'a Fonts, /// Every line of text drawn, for the tests.
+    drawn: Vec<String> }
 
 impl Writer<'_, '_> {
     fn text(&mut self, face: fn(&Fonts) -> &Face, x: f32, baseline: f32, size: f32, text: &str, color: (u8, u8, u8)) {
@@ -128,6 +129,8 @@ impl Writer<'_, '_> {
         let clean = printable(&f.parsed(), text);
         self.s.set_fill(Some(fill(color.0, color.1, color.2)));
         self.s.draw_text(Point::from_xy(x, baseline), f.font.clone(), size, &clean, false, TextDirection::Auto);
+        #[cfg(test)]
+        self.drawn.push(clean);
     }
 
     /// A wrapped paragraph; returns the y after it. Stops (and returns) when it would pass `bottom`.
@@ -188,6 +191,58 @@ fn text_slide(w: &mut Writer, slide: &Slide, project: &Project, answers: bool, x
     w.s.pop();
 }
 
+/// A paragraph of the notes area: a label ("Notes", "Alt text") or text, with the gap after it.
+#[derive(Clone, PartialEq, Debug)]
+struct NotePara { text: String, bold: bool, indent: f32, after: f32 }
+
+/// The notes area's content for a slide, as the options ask.
+fn note_paras(slide: &Slide, options: &HandoutOptions) -> Vec<NotePara> {
+    let mut out = vec![];
+    if options.slide_notes && !slide.notes.trim().is_empty() {
+        out.push(NotePara { text: "Notes".into(), bold: true, indent: 0.0, after: 0.0 });
+        out.push(NotePara { text: slide.notes.trim().to_string(), bold: false, indent: 0.0, after: 4.0 });
+    }
+    if options.alt_text {
+        let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
+        let items: Vec<String> = objects.iter().filter(|o| !o.decorative && !o.alt.trim().is_empty()).map(|o| format!("{}: {}", o.name, o.alt.trim())).collect();
+        if !items.is_empty() {
+            out.push(NotePara { text: "Alt text".into(), bold: true, indent: 0.0, after: 0.0 });
+            let last = items.len() - 1;
+            for (n, it) in items.into_iter().enumerate() { out.push(NotePara { text: format!("- {it}"), bold: false, indent: 8.0, after: if n == last { 4.0 } else { 0.0 } }); }
+        }
+    }
+    out
+}
+
+/// Draw `paras` down from `y` inside `bottom`. Returns where the next would start, and what did not fit: whole paragraphs,
+/// and the rest of one that was cut part way (a label is never left alone at the bottom).
+fn fit(w: &mut Writer, paras: Vec<NotePara>, x: f32, y: f32, width: f32, bottom: f32) -> (f32, Vec<NotePara>) {
+    let (size, leading) = (10.0, 10.0 * 1.35);
+    let mut y = y;
+    let mut i = 0;
+    while i < paras.len() {
+        let para = &paras[i];
+        if para.bold {
+            // The label needs room for itself and a line of what it labels.
+            if y + 14.0 + leading > bottom { break; }
+            w.text(bold, x, y + 10.0, size, &para.text, INK);
+            y += 14.0;
+        } else {
+            let lines = wrap(&w.fonts.regular, &para.text, size, width - para.indent);
+            let room = (((bottom - y) / leading).floor().max(0.0) as usize).min(lines.len());
+            for l in &lines[..room] { w.text(regular, x + para.indent, y + size, size, l, INK); y += leading; }
+            if room < lines.len() {
+                let mut rest = paras[i + 1..].to_vec();
+                rest.insert(0, NotePara { text: lines[room..].join(" "), ..para.clone() });
+                return (y, rest);
+            }
+            y += para.after;
+        }
+        i += 1;
+    }
+    (y, paras[i..].to_vec())
+}
+
 /// Make the PDF for `slides` (indices into `project.slides`). `pictures` holds a PNG of a slide, by its index, for the
 /// slides the caller could draw. Returns the file's bytes.
 pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pictures: &BTreeMap<usize, Vec<u8>>) -> Result<Vec<u8>, String> {
@@ -210,6 +265,7 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
     let mut doc = Document::new();
     doc.set_metadata(krilla::metadata::Metadata::new().title(p.name.clone()));
     for group in slides.chunks(per_page) {
+        let mut overflow: Vec<(usize, Vec<NotePara>)> = vec![];
         let mut page = doc.start_page_with(PageSettings::from_wh(page_w, page_h).ok_or("bad page size")?);
         let mut surface = page.surface();
         for (k, &i) in group.iter().enumerate() {
@@ -217,15 +273,16 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
             let (col, row) = if portrait { (0, k) } else { (k, 0) };
             let (cx, cy) = (MARGIN + col as f32 * (cell_w + GAP), MARGIN + row as f32 * (cell_h + GAP));
             let aspect = slide.height / slide.width;
-            let below = if has_notes_area { NOTES_BELOW } else { 0.0 };
+            // Room under the slide for its notes: a third of the cell at least, so notes, alt text and lines have somewhere to go.
+            let below = if has_notes_area { NOTES_BELOW.max(cell_h * 0.34) } else { 0.0 };
             let fw = if beside { (cell_w * 0.58).min((cell_h - CAPTION) / aspect) } else { cell_w.min((cell_h - CAPTION - below) / aspect) };
             let fh = fw * aspect;
             let fx = if alone { cx + (cell_w - fw) / 2.0 } else { cx };
             let fy = cy + CAPTION;
-            let mut w = Writer { s: &mut surface, fonts: &fonts };
+            let mut w = Writer { s: &mut surface, fonts: &fonts, drawn: vec![] };
             w.text(regular, fx + 1.0, cy + CAPTION - 4.0, 9.0, &format!("{}. {}", i + 1, slide.name), GREY);
             // The slide: its picture if it has one, else its text.
-            let picture = pictures.get(&i).filter(|_| matches!(slide.kind, SlideKind::Normal)).and_then(|b| Image::from_png(b.clone().into(), true).ok());
+            let picture = pictures.get(&i).and_then(|b| Image::from_png(b.clone().into(), true).ok());
             match picture {
                 Some(img) => {
                     let (iw, ih) = img.size();
@@ -241,26 +298,14 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
                 }
             }
             if let Some(frame) = rect_path(fx, fy, fw, fh) { w.s.set_fill(None); w.s.set_stroke(Some(stroke(136, 136, 136, 0.75))); w.s.draw_path(&frame); w.s.set_stroke(None); }
-            // The notes area: beside the slide, or under it.
+            // The notes area: beside the slide, or under it. What does not fit goes on pages after this one.
             if has_notes_area {
                 let (nx, ny, nw, nh) = if beside { (fx + fw + BESIDE_GAP, fy, cell_w - fw - BESIDE_GAP, fh) } else { (fx, fy + fh + GAP * 0.7, fw, cy + cell_h - (fy + fh + GAP * 0.7)) };
                 let bottom = ny + nh;
-                let mut y = ny;
-                if options.slide_notes && !slide.notes.trim().is_empty() {
-                    w.text(bold, nx, y + 10.0, 10.0, "Notes", INK);
-                    y = w.paragraph(regular, nx, y + 14.0, nw, bottom, 10.0, slide.notes.trim(), INK) + 4.0;
-                }
-                if options.alt_text {
-                    let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
-                    let items: Vec<String> = objects.iter().filter(|o| !o.decorative && !o.alt.trim().is_empty()).map(|o| format!("{}: {}", o.name, o.alt.trim())).collect();
-                    if !items.is_empty() {
-                        w.text(bold, nx, y + 10.0, 10.0, "Alt text", INK);
-                        y += 14.0;
-                        for it in items { y = w.paragraph(regular, nx + 8.0, y, nw - 8.0, bottom, 10.0, &format!("- {it}"), INK); }
-                        y += 4.0;
-                    }
-                }
-                if options.note_lines {
+                let (y, left) = fit(&mut w, note_paras(slide, options), nx, ny, nw, bottom);
+                if !left.is_empty() {
+                    overflow.push((i, left));
+                } else if options.note_lines {
                     let mut ly = y + RULE_STEP;
                     while ly <= bottom { w.rule(nx, ly, nw, 170); ly += RULE_STEP; }
                 }
@@ -268,6 +313,23 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
         }
         surface.finish();
         page.finish();
+        // Notes that did not fit beside or under their slide continue on pages of their own, in the full width of the page.
+        for (i, mut paras) in overflow {
+            let title = format!("{}. {} (notes continued)", i + 1, p.slides[i].name);
+            while !paras.is_empty() {
+                let mut page = doc.start_page_with(PageSettings::from_wh(page_w, page_h).ok_or("bad page size")?);
+                let mut surface = page.surface();
+                let mut w = Writer { s: &mut surface, fonts: &fonts, drawn: vec![] };
+                w.text(bold, MARGIN, MARGIN + 11.0, 11.0, &title, INK);
+                let before = paras.len();
+                let (_, left) = fit(&mut w, paras.clone(), MARGIN, MARGIN + 24.0, area_w, page_h - MARGIN);
+                surface.finish();
+                page.finish();
+                // A page that took nothing would repeat for ever.
+                if left.len() == before && left == paras { break; }
+                paras = left;
+            }
+        }
     }
     doc.finish().map_err(|e| format!("{e:?}"))
 }
