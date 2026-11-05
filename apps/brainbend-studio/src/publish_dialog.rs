@@ -65,7 +65,7 @@ impl PublishPage {
 
     /// Whether this version of BrainBend Studio can publish there.
     pub fn available(self) -> bool {
-        !matches!(self, Self::Review | Self::BrainBendLms | Self::Video | Self::Word)
+        !matches!(self, Self::Review | Self::BrainBendLms | Self::Video)
     }
 
     /// What the destination is for.
@@ -77,7 +77,7 @@ impl PublishPage {
             Self::Video => "Turn the lesson into a video file that plays anywhere. This needs a video encoder that is not part of BrainBend Studio yet.",
             Self::Web => "Publish an HTML5 version of the project to a folder, ready to put on any web server or open from your computer.",
             Self::Pdf => "Make a handout of the slides. It opens in your browser, which shows its print dialog; choose a printer or \"Save as PDF\" there. Question slides print the question and its answers (correct ones ticked). Video and audio print as a placeholder.",
-            Self::Word => "Make a Word (.docx) handout with the same layout options as PDF, for people who want to edit or add to it.",
+            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. It has the same choices as PDF, except slides per page. Question slides list the question and its answers (correct ones ticked).",
             Self::PowerPoint => "Save the project as a PowerPoint (.pptx) file. Things PowerPoint cannot do, such as triggers and variables, are listed in a report afterwards.",
         }
     }
@@ -88,7 +88,7 @@ impl PublishPage {
             Self::Web => "You choose an empty folder when you press Publish.",
             Self::OtherLms => "You choose where to save the .zip file when you press Publish.",
             Self::Pdf => "The handout opens in your browser when you press Publish.",
-            Self::PowerPoint => "You choose where to save the file when you press Publish.",
+            Self::PowerPoint | Self::Word => "You choose where to save the file when you press Publish.",
             _ => "",
         }
     }
@@ -162,15 +162,15 @@ impl App {
                             ui.radio_value(&mut lms, Lms::Scorm2004, "SCORM 2004 4th Edition");
                             ui.add_space(12.0);
                         }
-                        if page == PublishPage::Pdf {
+                        if matches!(page, PublishPage::Pdf | PublishPage::Word) {
                             ui.label(egui::RichText::new("Page").strong());
                             ui.horizontal(|ui| {
                                 for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
                             });
-                            ui.horizontal(|ui| {
+                            if page == PublishPage::Pdf { ui.horizontal(|ui| {
                                 ui.label("Slides per page");
                                 for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
-                            });
+                            }); }
                             ui.add_space(8.0);
                             if !is_web {
                                 ui.label(egui::RichText::new("Slides to include").strong());
@@ -184,7 +184,7 @@ impl App {
                             ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
                             ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
                             ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
-                            ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
+                            ui.weak(if page == PublishPage::Pdf { "Slide sizes, borders and spacing are chosen for you to fit the page." } else { "Each slide follows the one before. Word's own page setup applies once you open the file." });
                             ui.add_space(12.0);
                         }
                         ui.weak(page.next_step());
@@ -237,7 +237,8 @@ impl App {
                 PublishPage::OtherLms => self.export_scorm(lms),
                 PublishPage::Pdf => self.print(),
                 PublishPage::PowerPoint => self.export_pptx(),
-                PublishPage::Review | PublishPage::BrainBendLms | PublishPage::Video | PublishPage::Word => {}
+                PublishPage::Word => self.export_word(),
+                PublishPage::Review | PublishPage::BrainBendLms | PublishPage::Video => {}
             }
         }
     }

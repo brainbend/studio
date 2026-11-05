@@ -20,6 +20,7 @@ brainbend-fonts = { path = "../../crates/fonts" }
 brainbend-import-legacy = { path = "../../crates/import-legacy" }
 brainbend-import-pptx = { path = "../../crates/import-pptx" }
 brainbend-export-pptx = { path = "../../crates/export-pptx" }
+brainbend-export-docx = { path = "../../crates/export-docx" }
 brainbend-publish-html = { path = "../../crates/publish-html" }
 brainbend-spell = { path = "../../crates/spell" }
 ureq = "3"

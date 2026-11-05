@@ -506,6 +506,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "brainbend-export-docx"
+version = "0.1.0"
+dependencies = [
+ "brainbend-doc",
+ "brainbend-publish-html",
+ "roxmltree",
+ "zip",
+]
+
+[[package]]
 name = "brainbend-export-pptx"
 version = "0.1.0"
 dependencies = [
@@ -573,6 +583,7 @@ name = "brainbend-studio"
 version = "0.1.0"
 dependencies = [
  "brainbend-doc",
+ "brainbend-export-docx",
  "brainbend-export-pptx",
  "brainbend-fonts",
  "brainbend-import-legacy",

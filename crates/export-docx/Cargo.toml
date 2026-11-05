@@ -1,0 +1,15 @@
+[package]
+name = "brainbend-export-docx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+brainbend-doc = { path = "../doc" }
+brainbend-publish-html = { path = "../publish-html" }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+roxmltree = "0.20"
