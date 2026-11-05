@@ -8909,7 +8909,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("pano-edit.png")).unwrap();
         }
-        h.get_by_label("Save & Close").click();
+        h.get_by_label("Close").click();
         h.run_steps(3);
         assert!(h.state().pano.edit.is_none(), "the mode closes");
         let p = pano(&h);
@@ -11290,12 +11290,42 @@ mod tests {
         assert!(h.query_all_by_label_contains("Player").next().is_some() && h.query_all_by_label_contains("Settings").next().is_some(), "Player Settings is on Review");
         assert!(h.query_all_by_label_contains("Accessibility").next().is_some(), "the Accessibility Checker is on Review");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-review.png")).unwrap(); }
-        // Inside the master view the bar is Home, Objects, Layout Builder, Help.
+        // Inside the Layout Builder the bar is Layout Builder first, then Home, Objects, Animations, Help.
         h.state_mut().enter_master_view();
         h.run_steps(4);
-        let xs: Vec<f64> = ["Home", "Objects", "Layout Builder", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        let xs: Vec<f64> = ["Layout Builder", "Home", "Objects", "Animations", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
         assert!(h.query_all_by_label("Theme").next().is_none() && h.query_all_by_label("Review").next().is_none(), "the other tabs wait outside the master view");
+    }
+
+    /// While the Layout Builder is open its Close button leads the ribbon, on every tab.
+    #[test]
+    fn the_layout_builder_close_button_is_on_every_tab_and_not_outside() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_all_by_label("Close").next().is_none(), "not shown outside the Layout Builder");
+        assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Try It").is_some(), "shown outside the Layout Builder");
+        h.state_mut().enter_master_view();
+        for tab in [ribbon::MASTER_TAB, ribbon::HOME_TAB, ribbon::OBJECTS_TAB, ribbon::ANIMATIONS_TAB, ribbon::HELP_TAB] {
+            h.state_mut().ribbon_tab = tab;
+            h.run_steps(3);
+            assert_eq!(h.query_all_by_label("Close").count(), 1, "one Close button on tab {tab}");
+            assert!(h.query_by_label("Publish").is_none() && h.query_by_label("Try It").is_none(), "Try It, Preview and Publish are not shown in the Layout Builder (tab {tab})");
+        }
+        let x = |h: &egui_kittest::Harness<'_, App>, l: &str| h.query_all_by_label_contains(l).next().unwrap().rect().min.x;
+        h.state_mut().ribbon_tab = ribbon::MASTER_TAB;
+        h.run_steps(3);
+        assert!(x(&h, "Close") < x(&h, "Insert Layout"), "Close comes before the tab's own groups");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("layout-builder-ribbon.png")).unwrap(); }
+        h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("Transition").next().is_none(), "a layout has no slide transitions");
+        h.query_all_by_label("Close").next().unwrap().click();
+        h.run_steps(3);
+        assert!(!h.state().in_master_view());
     }
 
     /// The Fonts button on the Design tab opens a window with two font drop-downs; opening one used to close the menu it was in.
@@ -12319,7 +12349,7 @@ mod tests {
     }
 
     #[test]
-    fn the_publish_button_darkens_when_hovered_and_more_while_its_window_is_open() {
+    fn the_publish_outline_button_tints_when_hovered_and_more_while_its_window_is_open() {
         use egui_kittest::kittest::{NodeT, Queryable};
         let mut a = app();
         a.file_view = false;
@@ -12329,16 +12359,22 @@ mod tests {
         // A point on the button's padding, clear of its icon and its name.
         let (px, py) = ((b.x0 + 5.0) as u32, ((b.y0 + b.y1) / 2.0) as u32);
         let sample = |h: &mut egui_kittest::Harness<'static, App>| { let img = h.render().expect("renderer"); let p = img.get_pixel(px, py); p.0[0] as u32 + p.0[1] as u32 + p.0[2] as u32 };
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("publish-button.png")).unwrap(); }
         let rest = sample(&mut h);
         h.event(egui::Event::PointerMoved(egui::pos2(px as f32 + 6.0, py as f32)));
         h.run_steps(3);
         let hovered = sample(&mut h);
-        assert!(hovered + 20 < rest, "hovering darkens it: {rest} -> {hovered}");
+        let d = |a: u32, b: u32| a.abs_diff(b);
+        assert!(d(hovered, rest) > 20, "hovering tints the inside: {rest} -> {hovered}");
         h.event(egui::Event::PointerMoved(egui::pos2(5.0, 400.0)));
         h.state_mut().publish_open = true;
         h.run_steps(3);
         let open = sample(&mut h);
-        assert!(open + 20 < rest && open < hovered + 1, "it stays dark while the Publish window is open: {rest} / {hovered} / {open}");
+        // The window dims everything behind it, so compare with a plain bit of ribbon next to the button, dimmed the same.
+        let img = h.render().expect("renderer");
+        let q = img.get_pixel((b.x0 - 3.0) as u32, py);
+        let plain = q.0[0] as u32 + q.0[1] as u32 + q.0[2] as u32;
+        assert!(d(open, plain) > 15, "it stays tinted while the Publish window is open: ribbon {plain}, button {open}");
     }
 
     #[test]

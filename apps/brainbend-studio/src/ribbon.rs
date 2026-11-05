@@ -59,6 +59,7 @@ pub const EXPORT: char = '\u{eaf0}';
 pub const EYE_OFF: char = '\u{e224}';
 pub const TIMER: char = '\u{e492}';
 pub const CHECK: char = '\u{e186}';
+pub const X: char = '\u{e4f6}';
 pub const QUESTION: char = '\u{e3e8}';
 pub const FRONT: char = '\u{e462}';
 pub const BACK: char = '\u{e468}';
@@ -200,13 +201,18 @@ fn label_lines(ui: &egui::Ui, label: &str) -> Vec<String> {
 /// Large flat button: coloured icon on top, up to two lines of label under it, optional dropdown caret.
 /// Icon and text sit at fixed positions so neighbouring buttons align regardless of label length.
 fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
+    big_widget_min(ui, icon, label, caret, selected, 0.0)
+}
+
+/// `big_widget`, at least `min_w` wide.
+fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, min_w: f32) -> egui::Response {
     let lines = label_lines(ui, label);
     let font = egui::FontId::proportional(11.5);
     let widest = lines.iter().enumerate().map(|(i, l)| {
         let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
         if caret && i + 1 == lines.len() { w + 14.0 } else { w }
     }).fold(0.0f32, f32::max);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2((widest + 6.0).max(36.0), BIG_H), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2((widest + 6.0).max(36.0).max(min_w), BIG_H), egui::Sense::click());
     let plain = label.replace('\n', " ");
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), plain.clone()));
     if ui.is_rect_visible(rect) {
@@ -582,6 +588,58 @@ fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
     let line = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
     ui.painter().line_segment([r.center_top() + egui::vec2(0.0, 6.0), r.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, line));
     ui.add_space(1.0);
+}
+
+/// Extra width an outlined button gets, so its label does not touch the border.
+const OUTLINE_PAD: f32 = 16.0;
+
+/// For a main-action button drawn as an outline: its text and icon take the main-action colour, and the button's
+/// own hover fill is left off (the outline shape paints the states).
+fn outlined_look(ui: &mut egui::Ui) {
+    let p = primary(ui);
+    let v = ui.visuals_mut();
+    v.override_text_color = Some(p);
+    for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
+}
+
+/// The outline and inside of a main-action button: a border in the main-action colour, with an opaque tint inside
+/// and a darker border when the pointer is over it (`hot`), and more of both while pressed (`down`).
+fn outline_shape(ui: &egui::Ui, rect: egui::Rect, hot: bool, down: bool) -> egui::Shape {
+    let p = primary(ui);
+    let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+    let mix = |t: f32| { let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8; egui::Color32::from_rgb(m(card.r(), p.r()), m(card.g(), p.g()), m(card.b(), p.b())) };
+    let (fill, line) = if down { (mix(0.30), shade(p, 0.24)) } else if hot { (mix(0.15), shade(p, 0.12)) } else { (egui::Color32::TRANSPARENT, p) };
+    egui::Shape::Vec(vec![
+        egui::Shape::rect_filled(rect, RIBBON_RADIUS, fill),
+        egui::Shape::rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(2.0, line), egui::StrokeKind::Inside),
+    ])
+}
+
+/// How wide the leading "way out" button of a mode is, divider included.
+fn lead_width(ui: &egui::Ui, label: &str, caption: &str) -> f32 { big_width(ui, label, false).max(caption_width(ui, caption)) + 12.0 }
+
+/// How wide a group's small caption is.
+fn caption_width(ui: &egui::Ui, caption: &str) -> f32 {
+    ui.fonts_mut(|f| f.layout_no_wrap(caption.to_string(), egui::FontId::proportional(10.5), egui::Color32::WHITE).size().x)
+}
+
+/// The button that leaves a mode, at the very start of the ribbon in the main-action colour (so it is never
+/// scrolled away or missed), with a divider after it. True when clicked.
+fn lead_button(ui: &mut egui::Ui, at: egui::Rect, icon: char, label: &str, caption: &str, tip: &str) -> bool {
+    let mut clicked = false;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
+        let cw = caption_width(ui, caption).max(big_width(ui, label, false));
+        group(ui, caption, |ui| {
+            // The group is exactly as wide as its caption or button, whichever is wider, with the button centred over it.
+            ui.allocate_ui_with_layout(egui::vec2(cw, BIG_H), egui::Layout::top_down(egui::Align::Center), |ui| {
+            let backing = ui.painter().add(egui::Shape::Noop);
+            let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, icon, label, false, false, cw).on_hover_text(tip) }).inner;
+            ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), resp.is_pointer_button_down_on()));
+            clicked = resp.clicked();
+            });
+        });
+    });
+    clicked
 }
 
 fn rgba(c: egui::Color32) -> Rgba {
@@ -1053,9 +1111,10 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
-                for (i, name) in TABS.into_iter().enumerate() {
-                    // The master view has its own short tab list; the Layout Builder tab exists only there.
-                    if master != (i == MASTER_TAB) && i != 0 && !(master && [HOME_TAB, OBJECTS_TAB, HELP_TAB].contains(&i)) { continue; }
+                // The Layout Builder has its own short tab list, with its own tab first; that tab exists only there.
+                let order: Vec<usize> = if master { vec![0, MASTER_TAB, HOME_TAB, OBJECTS_TAB, ANIMATIONS_TAB, HELP_TAB] } else { (0..TABS.len()).filter(|&i| i != MASTER_TAB).collect() };
+                for i in order {
+                    let name = TABS[i];
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
@@ -1097,10 +1156,14 @@ impl App {
                 let mut edited = primary.clone();
                 let mut edit_changed = false;
                 // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
-                let pin_w = if self.project.is_some() { self.pinned_width(ui) } else { 0.0 };
+                // Try It, Preview and Publish are for the finished lesson, so the Layout Builder does not show them.
+                let pin_w = if self.project.is_some() && !self.in_master_view() { self.pinned_width(ui) } else { 0.0 };
                 let full = ui.available_rect_before_wrap();
                 let h = BIG_H + CAP_H + 8.0;
-                let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w - 8.0).max(80.0), h));
+                // In the Layout Builder the way out comes first, in the main-action colour, and does not scroll away.
+                let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
+                if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
+                let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - pin_w - 8.0 - lead_w).max(80.0), h));
                 let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
                     egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
@@ -1114,7 +1177,8 @@ impl App {
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
                                 THEME_TAB => self.design_tab(ui, ctx),
                                 ANIMATIONS_TAB => {
-                                    self.transition_groups(ui, ctx);
+                                    // A layout has no transitions of its own: only the shapes on it animate.
+                                    if !self.in_master_view() { self.transition_groups(ui, ctx); }
                                     self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
                                 }
                                 MASTER_TAB => self.master_tab(ui, ctx),
@@ -1157,9 +1221,18 @@ impl App {
             let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
             egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
                 flat(ui);
-                egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                    ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
+                // Close leads the ribbon and stays put; the groups scroll beside it.
+                let full = ui.available_rect_before_wrap();
+                let h = BIG_H + CAP_H + 8.0;
+                let lead_w = lead_width(ui, "Close", "360° Image");
+                if lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "360° Image", "Go back to the slide. Your changes are kept") { self.pano_cmd(panos::Cmd::Close); }
+                let rest = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w).max(80.0), h));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+                    egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
+                        ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
+                    });
                 });
+                ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
             });
         });
         self.pano_tabs(root);
@@ -1237,9 +1310,6 @@ impl App {
         });
         group(ui, "View", |ui| {
             if big_button(ui, FRAME, "Initial\nView", "The learner starts by looking at what is on the canvas now").clicked() { cmd = Some(Cmd::SetInitialView); }
-        });
-        group(ui, "Close", |ui| {
-            if big_button(ui, SAVE, "Save &\nClose", "Go back to the slide").clicked() { cmd = Some(Cmd::Close); }
         });
         if set != p { self.pano_set(set); }
         if let Some(c) = cmd { self.pano_cmd(c); }
@@ -2174,7 +2244,7 @@ impl App {
 
     /// How wide the pinned group is, so the ribbon can leave room for it at the right.
     fn pinned_width(&self, ui: &egui::Ui) -> f32 {
-        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false)];
+        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false) + OUTLINE_PAD];
         if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
         widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
     }
@@ -2194,23 +2264,13 @@ impl App {
                     if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
                 }
                 big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
-                // Publish is the main action, so it takes the main-action colour.
-                // Darker when the pointer is over it, darker still while pressed or while the Publish window is open. (The
-                // shade must be opaque: a see-through one would show the button's own colour through it and look unchanged.)
-                let (fill, ink) = (primary(ui), on_primary(ui));
-                let (hover, pressed) = (shade(fill, 0.12), shade(fill, 0.24));
+                // Publish is the main action, so it is outlined in the main-action colour; the outline darkens and the
+                // inside tints while the pointer is over it, and more while pressed or while the Publish window is open.
                 let backing = ui.painter().add(egui::Shape::Noop);
                 let publishing = self.publish_open;
-                let resp = ui.scope(|ui| {
-                    let v = ui.visuals_mut();
-                    v.override_text_color = Some(ink);
-                    v.widgets.hovered.weak_bg_fill = hover;
-                    v.widgets.active.weak_bg_fill = pressed;
-                    v.widgets.open.weak_bg_fill = pressed;
-                    big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
-                }).inner;
+                let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, EXPORT, "Publish", false, false, big_width(ui, "Publish", false) + OUTLINE_PAD).on_hover_text("Publish the project: to the web, an LMS, PDF and more") }).inner;
                 if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, if publishing { pressed } else { fill }));
+                ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), publishing || resp.is_pointer_button_down_on()));
             });
         });
     }
@@ -2385,9 +2445,6 @@ impl App {
                 changed |= background_editor(ui, &mut proj.slides[cur].background, &theme, inherits, &mut want_picture);
             });
             if changed { self.commit_project_edit(ctx, before); }
-        });
-        group(ui, "Close", |ui| {
-            if big_button(ui, CHECK, "Close Layout Builder", "Return to the slides").clicked() { self.leave_master_view(); }
         });
         if want_picture {
             if let Some((key, ..)) = self.load_image_asset() {
