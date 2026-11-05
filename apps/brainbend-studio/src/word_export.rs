@@ -1,7 +1,7 @@
-//! Putting pictures of the slides in a Word handout.
+//! Putting pictures of the slides in a Word or PDF handout.
 //!
 //! Word cannot draw our slides, and the app is the only thing that can: it paints them with egui. So the handout is made
-//! in steps. While a "Preparing" page covers the window, each slide is painted large in turn, the window is captured (egui's
+//! in steps (the PDF handout works the same way). While a "Preparing" page covers the window, each slide is painted large in turn, the window is captured (egui's
 //! screenshot) and the slide's part of it is kept as a PNG. When every slide has one, the .docx is written.
 //! Question and Results slides are listed as text in the document, so they are not drawn.
 use super::*;
@@ -14,8 +14,17 @@ const HEADING: f32 = 64.0;
 /// Frames to show a slide before capturing it, so the pictures and fonts it needs have been loaded.
 const SETTLE_FRAMES: u8 = 3;
 
+/// What the pictures are for.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Handout { Word, Pdf }
+
+impl Handout {
+    fn name(self) -> &'static str { match self { Handout::Word => "Word", Handout::Pdf => "PDF" } }
+}
+
 /// A handout being made: the slides still to draw and the pictures taken so far.
 pub struct Capture {
+    format: Handout,
     /// The slides to put in the document (indices into the project's slides).
     slides: Vec<usize>,
     /// The ones to draw, in order: the slides that are Normal.
@@ -62,20 +71,29 @@ impl Capture {
 
 impl App {
     /// Ask where to save a Word handout, then make it. Slides that can be drawn are drawn first.
-    pub(super) fn export_word(&mut self) {
+    pub(super) fn export_word(&mut self) { self.export_handout(Handout::Word); }
+
+    /// Ask where to save a PDF handout, then make it. A Web Lesson has no slides to draw, so it keeps the browser's print view.
+    pub(super) fn export_pdf(&mut self) {
+        if self.project.as_ref().is_some_and(|p| p.is_web()) { self.print(); return; }
+        self.export_handout(Handout::Pdf);
+    }
+
+    fn export_handout(&mut self, format: Handout) {
         self.end_state_swap();
         self.leave_master_view();
         let Some(p) = &self.project else { return };
         let slides = if p.is_web() { vec![] } else { self.handout_slides() };
-        let Some(path) = rfd::FileDialog::new().add_filter("Word document", &["docx"]).set_file_name(format!("{}.docx", file_safe_name(&p.name))).save_file() else { return };
-        self.begin_word_export(slides, path);
+        let (label, ext) = match format { Handout::Word => ("Word document", "docx"), Handout::Pdf => ("PDF document", "pdf") };
+        let Some(path) = rfd::FileDialog::new().add_filter(label, &[ext]).set_file_name(format!("{}.{ext}", file_safe_name(&p.name))).save_file() else { return };
+        self.begin_word_export(format, slides, path);
     }
 
     /// Start making the handout for `slides`, to be saved at `path`.
-    pub(super) fn begin_word_export(&mut self, slides: Vec<usize>, path: PathBuf) {
+    pub(super) fn begin_word_export(&mut self, format: Handout, slides: Vec<usize>, path: PathBuf) {
         let Some(p) = &self.project else { return };
         let todo: Vec<usize> = slides.iter().copied().filter(|&i| p.slides.get(i).is_some_and(|s| matches!(s.kind, SlideKind::Normal))).collect();
-        self.word_capture = Some(Capture { slides, todo, done: 0, pictures: BTreeMap::new(), path, shown: 0, waiting: false, rect: None });
+        self.word_capture = Some(Capture { format, slides, todo, done: 0, pictures: BTreeMap::new(), path, shown: 0, waiting: false, rect: None });
         if self.word_capture.as_ref().is_some_and(|c| c.todo.is_empty()) { self.finish_word_export(); }
     }
 
@@ -83,12 +101,17 @@ impl App {
     fn finish_word_export(&mut self) {
         let Some(c) = self.word_capture.take() else { return };
         let Some(p) = &self.project else { return };
-        self.status = match brainbend_export_docx::export(p, &c.slides, &self.handout, &c.pictures) {
+        let made = match c.format {
+            Handout::Word => brainbend_export_docx::export(p, &c.slides, &self.handout, &c.pictures),
+            Handout::Pdf => brainbend_export_pdf::export(p, &c.slides, &self.handout, &c.pictures),
+        };
+        let name = c.format.name();
+        self.status = match made {
             Ok(bytes) => match std::fs::write(&c.path, bytes) {
-                Ok(()) => format!("Exported Word handout to {}", c.path.display()),
+                Ok(()) => format!("Exported {name} handout to {}", c.path.display()),
                 Err(e) => format!("Could not write {}: {e}", c.path.display()),
             },
-            Err(e) => format!("Word export failed: {e}"),
+            Err(e) => format!("{name} export failed: {e}"),
         };
     }
 
@@ -108,7 +131,7 @@ impl App {
         }
         let Some(c) = self.word_capture.as_ref() else { return };
         let index = c.todo[c.done];
-        let (done, total) = (c.done, c.todo.len());
+        let (done, total, c_name) = (c.done, c.todo.len(), c.format.name());
         let Some(slide) = self.project.as_ref().and_then(|p| p.slides.get(index)).cloned() else { self.word_capture = None; return };
         let screen = ctx.content_rect();
         let avail = egui::vec2(screen.width() - 2.0 * MARGIN, screen.height() - HEADING - MARGIN);
@@ -120,7 +143,7 @@ impl App {
             let fill = ui.visuals().panel_fill;
             ui.painter().rect_filled(screen, 0.0, fill);
             ui.allocate_rect(screen, egui::Sense::click_and_drag());
-            ui.painter().text(egui::pos2(screen.left() + MARGIN, screen.top() + 20.0), egui::Align2::LEFT_TOP, format!("Preparing the Word handout: slide {} of {}", done + 1, total), egui::FontId::proportional(18.0), ui.visuals().strong_text_color());
+            ui.painter().text(egui::pos2(screen.left() + MARGIN, screen.top() + 20.0), egui::Align2::LEFT_TOP, format!("Preparing the {} handout: slide {} of {}", c_name, done + 1, total), egui::FontId::proportional(18.0), ui.visuals().strong_text_color());
             let button = egui::Rect::from_min_size(egui::pos2(screen.right() - MARGIN - 90.0, screen.top() + 14.0), egui::vec2(90.0, 30.0));
             if ui.put(button, egui::Button::new("Cancel")).clicked() { cancel = true; }
             let painter = ui.painter().with_clip_rect(rect);
@@ -128,7 +151,7 @@ impl App {
             let layers = start_layers(&slide);
             self.paint_slide(ctx, &painter, rect.min, scale, &slide, &layers, None);
         });
-        if cancel { self.word_capture = None; self.status = "Word export cancelled".into(); return; }
+        if cancel { self.word_capture = None; self.status = "Export cancelled".into(); return; }
         let Some(c) = self.word_capture.as_mut() else { return };
         c.rect = Some(rect);
         if !c.waiting {

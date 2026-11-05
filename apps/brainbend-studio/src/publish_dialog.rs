@@ -76,7 +76,7 @@ impl PublishPage {
             Self::OtherLms => "Make a SCORM package for any learning management system. Upload the .zip file to your LMS.",
             Self::Video => "Turn the lesson into a video file that plays anywhere. This needs a video encoder that is not part of BrainBend Studio yet.",
             Self::Web => "Publish an HTML5 version of the project to a folder, ready to put on any web server or open from your computer.",
-            Self::Pdf => "Make a handout of the slides. It opens in your browser, which shows its print dialog; choose a printer or \"Save as PDF\" there. Question slides print the question and its answers (correct ones ticked). Video and audio print as a placeholder.",
+            Self::Pdf => "Save a PDF handout of the slides. Question slides list the question and its answers (correct ones ticked). Video and audio show as a placeholder.",
             Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. It has the same choices as PDF, except slides per page. Question slides list the question and its answers (correct ones ticked).",
             Self::PowerPoint => "Save the project as a PowerPoint (.pptx) file. Things PowerPoint cannot do, such as triggers and variables, are listed in a report afterwards.",
         }
@@ -87,7 +87,7 @@ impl PublishPage {
         match self {
             Self::Web => "You choose an empty folder when you press Publish.",
             Self::OtherLms => "You choose where to save the .zip file when you press Publish.",
-            Self::Pdf => "The handout opens in your browser when you press Publish.",
+            Self::Pdf => "You choose where to save the .pdf file when you press Publish.",
             Self::PowerPoint | Self::Word => "You choose where to save the file when you press Publish.",
             _ => "",
         }
@@ -129,7 +129,7 @@ impl App {
             Some(r) => r,
             None => { let r = brainbend_publish_html::fonts_report(p); ctx.data_mut(|d| d.insert_temp(fonts_id, r.clone())); r }
         };
-        let (mut go, mut cancel) = (false, false);
+        let (mut go, mut cancel, mut browser) = (false, false, false);
         let modal = egui::Modal::new(egui::Id::new("publish-dialog")).show(ctx, |ui| {
             // A fixed size: a dialog that resizes itself as its contents change moves under the pointer.
             ui.set_width(780.0);
@@ -185,6 +185,10 @@ impl App {
                             ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
                             ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
                             ui.weak(if page == PublishPage::Pdf { "Slide sizes, borders and spacing are chosen for you to fit the page." } else { "Each slide follows the one before. Word's own page setup applies once you open the file." });
+                            if page == PublishPage::Pdf && !is_web {
+                                ui.add_space(4.0);
+                                if ui.link("Open the print view in my browser instead").on_hover_text("The older way: the browser shows its print dialog").clicked() { browser = true; go = true; }
+                            }
                             ui.add_space(12.0);
                         }
                         ui.weak(page.next_step());
@@ -235,7 +239,7 @@ impl App {
             match page {
                 PublishPage::Web => self.export_html(),
                 PublishPage::OtherLms => self.export_scorm(lms),
-                PublishPage::Pdf => self.print(),
+                PublishPage::Pdf => if browser { self.print() } else { self.export_pdf() },
                 PublishPage::PowerPoint => self.export_pptx(),
                 PublishPage::Word => self.export_word(),
                 PublishPage::Review | PublishPage::BrainBendLms | PublishPage::Video => {}

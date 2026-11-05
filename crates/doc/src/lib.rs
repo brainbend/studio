@@ -5,6 +5,7 @@ pub mod lesson;
 pub mod master;
 pub mod pano;
 pub mod passage;
+pub mod handout_text;
 pub mod player;
 pub mod shapes;
 pub mod tables;

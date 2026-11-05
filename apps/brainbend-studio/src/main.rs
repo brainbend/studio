@@ -10966,7 +10966,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let mut h = harness(a);
         h.state_mut().file_view = false;
-        h.state_mut().begin_word_export(vec![0, 1, 2], path.clone());
+        h.state_mut().begin_word_export(word_export::Handout::Word, vec![0, 1, 2], path.clone());
         let mut shots = 0;
         for _ in 0..80 {
             h.step();
@@ -10994,6 +10994,31 @@ mod tests {
     }
 
     #[test]
+    fn a_pdf_handout_is_captured_the_same_way_and_written_as_a_pdf() {
+        let mut a = app();
+        a.project.as_mut().unwrap().slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
+        let path = std::env::temp_dir().join(format!("brainbend-pdf-test-{}.pdf", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        h.state_mut().begin_word_export(word_export::Handout::Pdf, vec![0, 1], path.clone());
+        let mut shots = 0;
+        for _ in 0..80 {
+            h.step();
+            if h.state().word_capture.is_none() { break; }
+            if h.state().word_capture.as_ref().is_some_and(|c| c.waiting()) {
+                shots += 1;
+                h.input_mut().events.push(egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::default(), image: word_export::plain_image([1500, 950], egui::Color32::from_rgb(200, 220, 240)) });
+            }
+        }
+        assert_eq!(shots, 2);
+        let bytes = std::fs::read(&path).expect("the file was written");
+        assert_eq!(&bytes[..5], b"%PDF-");
+        assert!(h.state().status.contains("Exported PDF handout"), "{}", h.state().status);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn a_handout_of_only_question_slides_needs_no_pictures_and_is_written_at_once() {
         let mut a = app();
         {
@@ -11005,7 +11030,7 @@ mod tests {
         }
         let path = std::env::temp_dir().join(format!("brainbend-word-test-q-{}.docx", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        a.begin_word_export(vec![0], path.clone());
+        a.begin_word_export(word_export::Handout::Word, vec![0], path.clone());
         assert!(a.word_capture.is_none() && path.exists());
         let _ = std::fs::remove_file(&path);
     }

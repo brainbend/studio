@@ -1,6 +1,6 @@
-//! A question slide as lines of text for the Word handout: the same content as the PDF handout's question page
-//! (correct answers ticked, or a blank worksheet), without the drawing.
-use brainbend_doc::*;
+//! A question slide as lines of text, for handouts that list it instead of drawing it (Word and PDF): the question and
+//! its answers (correct ones ticked, or a blank worksheet).
+use crate::*;
 
 pub struct Line {
     pub text: String,
@@ -18,7 +18,7 @@ fn sorted(mut items: Vec<String>) -> Vec<String> {
     items
 }
 
-pub fn lines(q: &Question, project: &Project, answers: bool) -> Vec<Line> {
+pub fn question_lines(q: &Question, project: &Project, answers: bool) -> Vec<Line> {
     let mut out = vec![Line { bold: true, ..line(&q.prompt) }];
     match &q.style {
         QuestionStyle::Choice => {
@@ -37,22 +37,22 @@ pub fn lines(q: &Question, project: &Project, answers: bool) -> Vec<Line> {
             else { out.push(line(format!("Put in order: {}", sorted(items.clone()).join(", ")))); }
         }
         QuestionStyle::FillBlanks { text, .. } => {
-            out.push(line(passage::with_gaps(text)));
-            if answers { out.push(note(format!("Answers: {}", passage::blanks(text).iter().map(|a| a.join(" / ")).collect::<Vec<_>>().join(", ")))); }
+            out.push(line(crate::passage::with_gaps(text)));
+            if answers { out.push(note(format!("Answers: {}", crate::passage::blanks(text).iter().map(|a| a.join(" / ")).collect::<Vec<_>>().join(", ")))); }
         }
         QuestionStyle::DragWords { text, distractors } => {
-            let mut bank: Vec<String> = passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
+            let mut bank: Vec<String> = crate::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
             bank.extend(distractors.iter().cloned());
             if !answers { bank = sorted(bank); }
-            out.push(line(passage::with_gaps(text)));
+            out.push(line(crate::passage::with_gaps(text)));
             out.push(note(format!("Word bank: {}", bank.join(", "))));
         }
         QuestionStyle::MarkWords { text } => {
             let mut t = String::new();
-            for part in passage::parse(text) {
+            for part in crate::passage::parse(text) {
                 match part {
-                    passage::Part::Text(x) => t.push_str(&x),
-                    passage::Part::Blank(a) => { if answers { t.push_str(&format!("[{}]", a[0])); } else { t.push_str(&a[0]); } }
+                    crate::passage::Part::Text(x) => t.push_str(&x),
+                    crate::passage::Part::Blank(a) => { if answers { t.push_str(&format!("[{}]", a[0])); } else { t.push_str(&a[0]); } }
                 }
             }
             out.push(line(t));
@@ -78,10 +78,10 @@ pub fn lines(q: &Question, project: &Project, answers: bool) -> Vec<Line> {
         }
         QuestionStyle::Dropdowns { text } => {
             let mut t = String::new();
-            for part in passage::parse(text) {
+            for part in crate::passage::parse(text) {
                 match part {
-                    passage::Part::Text(x) => t.push_str(&x),
-                    passage::Part::Blank(a) => {
+                    crate::passage::Part::Text(x) => t.push_str(&x),
+                    crate::passage::Part::Blank(a) => {
                         if answers { t.push_str(&format!("[{}{}]", a[0], a[1..].iter().map(|w| format!(" / {w}")).collect::<String>())); }
                         else { t.push_str(&format!("[{}]", sorted(a.clone()).join(" / "))); }
                     }
@@ -106,5 +106,24 @@ pub fn lines(q: &Question, project: &Project, answers: bool) -> Vec<Line> {
     }
     let _ = project;
     out.push(note(format!("Worth {} point(s). Correct: {} Incorrect: {}", q.points, q.feedback_correct, q.feedback_incorrect)));
+    out
+}
+
+/// A normal slide's visible text, top to bottom then left to right, one line per paragraph. For handouts that have no
+/// picture of the slide to show.
+pub fn slide_text_lines(slide: &Slide) -> Vec<Line> {
+    let mut objects: Vec<&Object> = slide.layers.first().map(|l| l.objects.iter().collect()).unwrap_or_default();
+    objects.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+    let mut out = vec![];
+    for o in objects {
+        if let Some(rich) = &o.rich {
+            for p in rich {
+                let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+                if !text.trim().is_empty() { out.push(Line { text, bold: false, italic: false, indent: p.indent }); }
+            }
+        } else {
+            for l in o.text.lines().filter(|l| !l.trim().is_empty()) { out.push(line(l)); }
+        }
+    }
     out
 }

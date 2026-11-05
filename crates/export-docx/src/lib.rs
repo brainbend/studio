@@ -9,8 +9,6 @@ use std::io::Write;
 use brainbend_doc::*;
 use brainbend_publish_html::{HandoutOptions, HandoutOrientation};
 
-mod questions;
-
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -171,7 +169,7 @@ pub fn export(project: &Project, slides: &[usize], options: &HandoutOptions, pic
                 for o in text_objects(slide) { for para in object_paragraphs(o) { body.push_str(&para.xml()); } }
             }
             (SlideKind::Question(q), _) => {
-                for line in questions::lines(q, p, options.correct_answers) {
+                for line in handout_text::question_lines(q, p, options.correct_answers) {
                     let mut para = Para::new();
                     para.spacing_after = Some(80);
                     para.indent = line.indent as i64 * 360;
