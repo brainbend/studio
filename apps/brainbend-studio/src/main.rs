@@ -1174,6 +1174,9 @@ impl App {
                         if ui.add(egui::Slider::new(&mut pct, 10.0..=800.0).logarithmic(true).show_value(false)).changed() { zoom_to = Some(pct / 100.0); }
                         if ui.add(egui::Button::new("−").frame(false)).on_hover_text("Zoom out").clicked() { zoom_to = Some(scale / 1.25); }
                         if ui.add(egui::Button::new(format!("{:.0}%", scale * 100.0)).frame(false)).on_hover_text("Actual size").clicked() { zoom_to = Some(1.0); }
+                        // A view setting, with the zoom: it only changes how the canvas draws, and is not saved with the project.
+                        ui.separator();
+                        ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
                     });
                 }
             });
@@ -10853,6 +10856,22 @@ mod tests {
         assert!(text < media && media < interactive, "Text ({text}), Media ({media}), Interactive Objects ({interactive})");
     }
 
+    #[test]
+    fn outline_hidden_objects_is_with_the_zoom_in_the_status_bar_not_on_the_review_tab_or_in_properties() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::REVIEW_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert_eq!(h.query_all_by_label("Outline hidden objects").count(), 1, "once, by the zoom, and not in the ribbon or the Properties");
+        assert!(!h.state().show_hidden);
+        h.get_by_label("Outline hidden objects").click();
+        h.run_steps(3);
+        assert!(h.state().show_hidden, "ticking it outlines the hidden objects on the canvas");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("status-outline.png")).unwrap(); }
+    }
+
     /// Hide Background Graphics is a setting of the slide, so it is in the slide's Properties, and only for a slide with a layout.
     #[test]
     fn hide_background_graphics_is_in_the_slide_properties_and_only_for_a_slide_with_a_layout() {
@@ -10864,7 +10883,7 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layout = layout;
         let mut h = harness(a);
         h.run_steps(4);
-        assert_eq!(h.query_all_by_label("Hide Background Graphics").count(), 1, "once, in the Properties, and not in the ribbon");
+        assert_eq!(h.query_all_by_label("Hide Background Graphics").count(), 1, "once, by the zoom, and not in the ribbon or the Properties");
         h.state_mut().project.as_mut().unwrap().slides[0].layout = None;
         h.run_steps(3);
         assert!(h.query_by_label("Hide Background Graphics").is_none(), "no layout, no graphics to hide");

@@ -2396,10 +2396,6 @@ impl App {
                 if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
                 if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
                 if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
-                });
             });
         });
     }
