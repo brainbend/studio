@@ -73,7 +73,8 @@ impl App {
     /// Ask where to save a Word handout, then make it. Slides that can be drawn are drawn first.
     pub(super) fn export_word(&mut self) { self.export_handout(Handout::Word); }
 
-    /// Ask where to save a PDF handout, then make it. A Web Lesson has no slides to draw, so it keeps the browser's print view.
+    /// Ask where to save a PDF handout, then make it. A Web Lesson has no slides to draw, so it uses the browser's print view
+    /// (the Print destination).
     pub(super) fn export_pdf(&mut self) {
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.print(); return; }
         self.export_handout(Handout::Pdf);

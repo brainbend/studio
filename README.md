@@ -76,6 +76,7 @@ Press **Publish** to choose how the project goes out:
 - **Web**: an HTML5 folder named for the project, ready for any web server.
 - **Other LMS**: a SCORM package (`.zip`) for SCORM 1.2 or SCORM 2004 4th Edition, reporting completion, score and pass/fail.
 - **PDF**: a PDF file saved directly (no print dialog): a handout in portrait or landscape, with 1, 2 or 3 slides per page, optional correct answers, space for notes, slide notes and alt text.
+- **Print**: the same handout in your browser's print dialog, for a printer or its own "Save as PDF".
 - **Word**: an editable .docx handout with a picture of each slide, and the same choices as PDF except slides per page.
 - **PowerPoint**: a `.pptx` file.
 

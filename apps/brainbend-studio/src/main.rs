@@ -10858,7 +10858,7 @@ mod tests {
         h.get_by_label("Publish").click();
         h.run_steps(4);
         assert!(h.state().publish_open, "Publish opens the dialog instead of a menu");
-        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video (coming soon)", "Web", "PDF", "Word", "PowerPoint"] {
+        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video (coming soon)", "Web", "PDF", "Print", "Word", "PowerPoint"] {
             assert!(h.get_all_by_label(name).count() >= 1, "{name} is listed");
         }
         assert!(h.state().publish_page == publish_dialog::PublishPage::Web, "it opens on Web, the first one that works");
@@ -10922,7 +10922,7 @@ mod tests {
     }
 
     #[test]
-    fn a_web_lesson_does_not_offer_powerpoint_and_the_unfinished_destinations_wait_for_later() {
+    fn a_web_lesson_offers_only_print_of_the_slide_handouts_and_the_unfinished_destinations_wait_for_later() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
@@ -10931,7 +10931,8 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("PowerPoint").is_none());
-        assert!(h.query_by_label("PDF").is_some());
+        assert!(h.query_by_label("PDF").is_none() && h.query_by_label("Word").is_none(), "they are made from slides");
+        assert!(h.query_by_label("Print").is_some(), "a Web Lesson can still be printed");
         let waiting: Vec<_> = publish_dialog::PublishPage::ALL.iter().filter(|p| !p.available()).map(|p| p.label()).collect();
         assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS", "Video"]);
     }
@@ -11033,6 +11034,22 @@ mod tests {
         a.begin_word_export(word_export::Handout::Word, vec![0], path.clone());
         assert!(a.word_capture.is_none() && path.exists());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_print_page_has_the_pdf_choices_and_says_it_uses_the_browser() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        a.publish_page = publish_dialog::PublishPage::Print;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for name in ["Landscape", "Portrait", "Slides per page", "Correct answers", "Space for notes", "Slide notes", "Alt text"] {
+            assert!(h.query_by_label(name).is_some(), "{name} is offered for Print");
+        }
+        assert!(h.query_by_label_contains("print dialog").is_some(), "it says what Publish does");
+        assert!(h.query_by_label_contains("Open the print view").is_none(), "the old link is gone");
     }
 
     #[test]
