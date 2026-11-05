@@ -1848,21 +1848,6 @@ impl App {
 
     fn insert_tab(&mut self, ui: &mut egui::Ui, normal: bool) {
         ui.add_enabled_ui(normal, |ui| {
-            group(ui, "Media", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
-                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
-                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
-                    });
-                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
-                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
-                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
-                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
-                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolour").clicked() { self.open_equation_dialog(None); }
-                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolour and resize", |ui| self.icon_gallery(ui));
-                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
-                });
-            });
             group(ui, "Text", |ui| {
                 ui.horizontal(|ui| {
                     if big_button(ui, TEXTBOX, "Text Box", "Insert a text box").clicked() { self.insert_text(); }
@@ -1914,6 +1899,21 @@ impl App {
                             });
                         });
                     }
+                });
+            });
+            group(ui, "Media", |ui| {
+                ui.horizontal(|ui| {
+                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
+                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
+                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
+                    });
+                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
+                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
+                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
+                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
+                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolour").clicked() { self.open_equation_dialog(None); }
+                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolour and resize", |ui| self.icon_gallery(ui));
+                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
                 });
             });
             group(ui, "Interactive Objects", |ui| {

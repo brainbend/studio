@@ -10840,6 +10840,19 @@ mod tests {
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
     }
 
+    #[test]
+    fn the_objects_tab_lists_text_then_media_then_interactive_objects() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let x = |h: &egui_kittest::Harness<'static, App>, name: &str| { use egui_kittest::kittest::NodeT; h.query_all_by_label(name).next().unwrap_or_else(|| panic!("{name}")).accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) };
+        let (text, media, interactive) = (x(&h, "Text Box"), x(&h, "Picture"), x(&h, "Button"));
+        assert!(text < media && media < interactive, "Text ({text}), Media ({media}), Interactive Objects ({interactive})");
+    }
+
     /// Hide Background Graphics is a setting of the slide, so it is in the slide's Properties, and only for a slide with a layout.
     #[test]
     fn hide_background_graphics_is_in_the_slide_properties_and_only_for_a_slide_with_a_layout() {
