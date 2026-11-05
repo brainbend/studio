@@ -1400,7 +1400,12 @@ impl App {
 
     fn load_image_asset_titled(&mut self, title: &str) -> Option<(String, String, f32, f32)> {
         let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg"]).pick_file()?;
-        let bytes = match std::fs::read(&path) {
+        self.load_image_file(&path)
+    }
+
+    /// Add the picture in `path` to the project; returns its asset key, name and size.
+    fn load_image_file(&mut self, path: &std::path::Path) -> Option<(String, String, f32, f32)> {
+        let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
         };
@@ -1429,11 +1434,56 @@ impl App {
     }
 
     fn insert_image(&mut self) {
-        let Some((key, name, w, h)) = self.load_image_asset() else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else { return };
+        self.insert_image_file(&path);
+    }
+
+    /// What dropping `files` on the window does. A project file opens (the first one). Pictures, video and audio are added
+    /// to the current slide, each as its own object, when a project is open and showing its slides.
+    fn handle_dropped(&mut self, files: Vec<PathBuf>) {
+        #[derive(PartialEq)]
+        enum Kind { Project, Image, Video, Audio, Other }
+        let kind = |p: &PathBuf| match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+            Some("story" | "brainbend" | "storyapp" | "pptx") => Kind::Project,
+            Some("png" | "jpg" | "jpeg") => Kind::Image,
+            Some("mp4" | "m4v" | "webm") => Kind::Video,
+            Some("mp3" | "m4a" | "ogg" | "wav") => Kind::Audio,
+            _ => Kind::Other,
+        };
+        if let Some(path) = files.iter().find(|p| kind(p) == Kind::Project) {
+            self.drop_path = Some(path.clone());
+            self.guard(Pending::OpenDropped);
+            return;
+        }
+        let editing = self.project.is_some() && !self.file_view;
+        let (mut added, mut failed, mut unsupported, mut no_project) = (0, 0, 0, false);
+        for path in &files {
+            let k = kind(path);
+            if !editing && matches!(k, Kind::Image | Kind::Video | Kind::Audio) { no_project = true; continue; }
+            let ok = match k {
+                Kind::Image => self.insert_image_file(path),
+                Kind::Video => self.insert_video_file(path),
+                Kind::Audio => self.insert_audio_file(path),
+                _ => { unsupported += 1; continue; }
+            };
+            if ok { added += 1 } else { failed += 1 }
+        }
+        // A file that could not be added leaves its own message (too large, not readable); say the rest only when all went well.
+        if failed > 0 { return; }
+        self.status = if added == 1 { "Added the dropped file to the slide".into() }
+            else if added > 1 { format!("Added {added} dropped files to the slide") }
+            else if no_project { "Open or start a project first, then drop the file onto a slide".into() }
+            else if unsupported > 0 { "Drop a picture (PNG or JPEG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
+            else { return };
+    }
+
+    fn insert_image_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name, w, h)) = self.load_image_file(path) else { return false };
         let fit = (900.0 / w).min(700.0 / h).min(1.0);
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Image, 0.0, 0.0, (w * fit).round(), (h * fit).round());
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
     fn add_slide(&mut self, kind: SlideKind) {
@@ -2208,6 +2258,12 @@ impl App {
     /// Add a media asset (video/audio/captions) from a file; returns its asset key.
     fn load_media(&mut self, filters: &[&str], label: &str) -> Option<(String, String)> {
         let path = rfd::FileDialog::new().add_filter(label, filters).pick_file()?;
+        self.load_media_file(&path)
+    }
+
+    /// Add the media file at `path` to the project; returns its asset key and name.
+    fn load_media_file(&mut self, path: &std::path::Path) -> Option<(String, String)> {
+        let path = path.to_path_buf();
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if size > MAX_MEDIA_BYTES {
             self.status = format!("{} is {}, which is too large to add (the limit is {}). Compress it first, for example with HandBrake, and add it again.", path.file_name().and_then(|n| n.to_str()).unwrap_or("That file"), megabytes(size), megabytes(MAX_MEDIA_BYTES));
@@ -2236,7 +2292,12 @@ impl App {
     }
 
     fn insert_video(&mut self) {
-        let Some((key, name)) = self.load_media(&["mp4", "m4v", "webm"], "Video") else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("Video", &["mp4", "m4v", "webm"]).pick_file() else { return };
+        self.insert_video_file(&path);
+    }
+
+    fn insert_video_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name)) = self.load_media_file(path) else { return false };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Video, 0.0, 0.0, 1280.0, 720.0);
         // A frame of the video to show before it plays (needs ffmpeg; without it there is none).
         let from_file = self.last_media_path.take().and_then(|p| brainbend_import_legacy::still_asset_from_file(&p));
@@ -2247,6 +2308,7 @@ impl App {
         }
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
     /// An icon from the gallery as a freeform vector shape in the theme's text colour, named and described for screen
@@ -2446,10 +2508,16 @@ impl App {
     }
 
     fn insert_audio(&mut self) {
-        let Some((key, name)) = self.load_media(&["mp3", "m4a", "ogg", "wav"], "Audio") else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("Audio", &["mp3", "m4a", "ogg", "wav"]).pick_file() else { return };
+        self.insert_audio_file(&path);
+    }
+
+    fn insert_audio_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name)) = self.load_media_file(path) else { return false };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Audio, 0.0, 0.0, 800.0, 90.0);
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
     /// Timeline of the active layer: one row per object, a bar from its start to its end.
@@ -5483,17 +5551,9 @@ impl App {
         self.theme_colors_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
-        // A .story/.brainbend dropped onto the window opens like File ▸ Open.
-        let dropped = ctx.input(|i| i.raw.dropped_files.iter().next().map(|f| f.path().to_path_buf()));
-        if let Some(path) = dropped {
-            let ok = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("story") || e.eq_ignore_ascii_case("brainbend") || e.eq_ignore_ascii_case("storyapp") || e.eq_ignore_ascii_case("pptx"));
-            if ok {
-                self.drop_path = Some(path);
-                self.guard(Pending::OpenDropped);
-            } else {
-                self.status = "Only .brainbend, .story and .pptx files can be opened".into();
-            }
-        }
+        // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        if !dropped.is_empty() { self.handle_dropped(dropped); }
 
         // Window title, close guard, autosave.
         {
@@ -11034,6 +11094,100 @@ mod tests {
         a.begin_word_export(word_export::Handout::Word, vec![0], path.clone());
         assert!(a.word_capture.is_none() && path.exists());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A file as the window system hands it over when something is dropped on the app.
+    #[derive(Debug)]
+    struct FakeDrop(std::path::PathBuf);
+    impl egui::DroppedFile for FakeDrop {
+        fn path(&self) -> &std::path::Path { &self.0 }
+        fn bytes(&self) -> Result<Vec<u8>, String> { std::fs::read(&self.0).map_err(|e| e.to_string()) }
+    }
+
+    fn drop_files(h: &mut egui_kittest::Harness<'static, App>, paths: &[std::path::PathBuf]) {
+        for p in paths { h.input_mut().dropped_files.push(std::sync::Arc::new(FakeDrop(p.clone()))); }
+        h.run_steps(3);
+    }
+
+    fn tiny_png(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("brainbend-drop-{}-{name}", std::process::id()));
+        let mut img = image::RgbaImage::new(40, 20);
+        for px in img.pixels_mut() { *px = image::Rgba([10, 120, 200, 255]); }
+        img.save_with_format(&path, image::ImageFormat::Png).unwrap();
+        path
+    }
+
+    #[test]
+    fn dropping_a_picture_onto_the_editor_adds_it_to_the_slide() {
+        let png = tiny_png("one.png");
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[png.clone()]);
+        let p = h.state().project.as_ref().unwrap();
+        let objects = &p.slides[0].layers[0].objects;
+        assert_eq!(objects.len(), before + 1, "one picture was added");
+        let o = objects.last().unwrap();
+        assert!(matches!(o.kind, Kind::Image) && o.asset.as_ref().is_some_and(|k| p.assets.contains_key(k)));
+        assert_eq!(h.state().selected.map(|(_, i)| i), Some(objects.len() - 1), "the new picture is selected");
+        assert!(h.state().status.contains("Added the dropped file"), "{}", h.state().status);
+        let _ = std::fs::remove_file(png);
+    }
+
+    #[test]
+    fn dropping_several_pictures_adds_each_and_dropping_other_files_says_what_is_accepted() {
+        let (a1, a2) = (tiny_png("a.png"), tiny_png("b.png"));
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[a1.clone(), a2.clone()]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 2);
+        assert!(h.state().status.contains("Added 2 dropped files"), "{}", h.state().status);
+        drop_files(&mut h, &[std::path::PathBuf::from("/tmp/notes.txt")]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 2, "nothing added");
+        assert!(h.state().status.contains("Drop a picture"), "{}", h.state().status);
+        let _ = (std::fs::remove_file(a1), std::fs::remove_file(a2));
+    }
+
+    #[test]
+    fn dropping_an_audio_file_adds_an_audio_object() {
+        let mp3 = std::env::temp_dir().join(format!("brainbend-drop-{}-clip.mp3", std::process::id()));
+        std::fs::write(&mp3, b"ID3 not real audio but the type is what counts").unwrap();
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        drop_files(&mut h, &[mp3.clone()]);
+        let p = h.state().project.as_ref().unwrap();
+        let o = p.slides[0].layers[0].objects.last().unwrap();
+        assert!(matches!(o.kind, Kind::Audio), "{:?}", o.name);
+        assert_eq!(p.assets[o.asset.as_ref().unwrap()].mime, "audio/mpeg");
+        let _ = std::fs::remove_file(mp3);
+    }
+
+    #[test]
+    fn dropping_a_picture_with_no_project_open_asks_for_a_project_first() {
+        let png = tiny_png("none.png");
+        let mut h = harness(App::default());
+        drop_files(&mut h, &[png.clone()]);
+        assert!(h.state().project.is_none());
+        assert!(h.state().status.contains("Open or start a project first"), "{}", h.state().status);
+        let _ = std::fs::remove_file(png);
+    }
+
+    #[test]
+    fn a_dropped_picture_that_is_not_a_picture_leaves_its_own_message() {
+        let bad = std::env::temp_dir().join(format!("brainbend-drop-{}-bad.png", std::process::id()));
+        std::fs::write(&bad, b"not really a png").unwrap();
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[bad.clone()]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before);
+        assert!(h.state().status.contains("Not a usable PNG/JPEG"), "{}", h.state().status);
+        let _ = std::fs::remove_file(bad);
     }
 
     #[test]
