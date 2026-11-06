@@ -170,7 +170,7 @@ pub fn tint(icon: char) -> egui::Color32 {
         VIDEO | TRASH => c(214, 74, 84),
         SPEAKER | STACK | FILM | SHAPES => c(135, 92, 205),
         RECT | CIRCLE | EXPORT | TIMER | QUESTION | SLIDERS => c(236, 112, 40),
-        LINE | RADIO | LIST_NUM | COPY => c(0, 150, 160),
+        LINE | RADIO | LIST_NUM | COPY | TABLE => c(0, 150, 160),
         MOON | SUN => c(240, 170, 20),
         _ => ACCENT,
     }
@@ -1473,19 +1473,7 @@ impl App {
             ui.horizontal(|ui| {
                 let checking = matches!(self.updater.state, update::State::Checking(_));
                 let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
-                if check.clicked() { self.updater.start(ui.ctx()); }
-                let mut open: Option<String> = None;
-                ui.vertical(|ui| {
-                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                    match &self.updater.state {
-                        update::State::Checking(_) => { ui.weak("Checking…"); }
-                        update::State::UpToDate => { ui.weak("You have the latest version."); }
-                        update::State::Failed(e) => { ui.weak(format!("Could not check: {e}")); }
-                        update::State::Idle => {}
-                        _ => { if let Some(r) = self.updater.available() { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the update window").clicked() { open = Some(r.tag.clone()); } } }
-                    }
-                });
-                if open.is_some() { self.updater.dialog_open = true; }
+                if check.clicked() { self.updater.check_now(ui.ctx()); }
             });
         });
     }
@@ -1920,7 +1908,7 @@ impl App {
             group(ui, "Text", |ui| {
                 ui.horizontal(|ui| {
                     if big_button(ui, TEXTBOX, "Text Box", "Insert a text box").clicked() { self.insert_text(); }
-                    big_menu(ui, LIST_NUM, "Table", "Insert a table", |ui| {
+                    big_menu(ui, TABLE, "Table", "Insert a table", |ui| {
                         ui.set_min_width(0.0);
                         if let Some((r, c)) = table_picker(ui) { self.insert_table(r, c); ui.close(); }
                     });
@@ -2250,7 +2238,7 @@ impl App {
         ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
         ui.add_space(5.0);
         let can_try = self.can_try();
-        pinned_group(ui, "Try, preview, publish", |ui| {
+        pinned_group(ui, "", |ui| {
             ui.horizontal(|ui| {
                 if can_try {
                     let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";

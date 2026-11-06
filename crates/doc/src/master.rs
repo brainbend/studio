@@ -4,7 +4,7 @@
 //! own, else the layout's, else the master's) and the decorative objects drawn behind the slide's
 //! content. Placeholders are different: they are real objects on the slide that remember which
 //! layout placeholder they came from, so the layout can restyle them without hiding the content.
-use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextRole, TextStyle, VAlign};
+use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextStyle, VAlign};
 use serde::{Deserialize, Serialize};
 
 /// What fills a slide's background.
@@ -438,6 +438,7 @@ mod tests {
 
     #[test]
     fn placeholders_offer_the_text_styles_and_give_their_text_that_style() {
+        use crate::TextRole;
         let t = Theme::default();
         let labels: Vec<&str> = PlaceholderKind::CHOICES.iter().map(|k| k.label()).collect();
         assert_eq!(labels, ["Heading 2", "Heading 3", "Heading 4", "Normal Text"]);

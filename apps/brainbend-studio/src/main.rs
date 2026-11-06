@@ -7788,6 +7788,48 @@ mod tests {
     }
 
     #[test]
+    fn check_for_updates_opens_a_window_with_what_it_found_but_the_launch_check_stays_quiet() {
+        use egui_kittest::kittest::Queryable;
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"New","assets":[]}"#).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The check at launch is not asked for, so a result opens nothing.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        tx.send(Ok(None)).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("You have the latest version.").is_none(), "no window after the check at launch");
+        // Asked for, and up to date.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Ok(None)).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("You have the latest version.").is_some(), "the window says so");
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("You have the latest version.").is_none(), "OK closes it");
+        // Asked for, and the check failed.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Err("no connection".into())).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("Could not check for updates").is_some());
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        // Asked for, and there is an update: the update window opens.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Ok(Some(release))).unwrap();
+        h.run_steps(3);
+        assert!(h.state().updater.dialog_open && !h.state().updater.notice_open, "the update window opens, not the notice");
+    }
+
+    #[test]
     fn the_update_window_walks_from_available_to_restart() {
         use egui_kittest::kittest::Queryable;
         let suffix = update::platform_suffix().unwrap();
