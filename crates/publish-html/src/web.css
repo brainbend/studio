@@ -1,6 +1,6 @@
 /* Web Lesson design language: a full-screen title page that lists the modules, and a full-screen
    page per module. Everything is driven by the theme variables set in :root (--accent is the
-   lesson's primary colour, --accent2 its secondary colour). */
+   lesson's primary color, --accent2 its secondary color). */
 *{box-sizing:border-box}
 :root{--col:800px;--wide:1040px;--top:60px;--radius:18px;
  --line:color-mix(in srgb,var(--text) 14%,transparent);

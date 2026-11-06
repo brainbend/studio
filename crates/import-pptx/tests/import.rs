@@ -31,7 +31,7 @@ fn master() -> String {
 }
 
 fn layout() -> String {
-    // Title moves and is recoloured; a decorative circle is added; the body is inherited as is.
+    // Title moves and is recolored; a decorative circle is added; the body is inherited as is.
     format!(r#"<p:sldLayout {NS}><p:cSld name="Title and Content"><p:spTree>
 <p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1219200" y="609600"/><a:ext cx="9144000" cy="914400"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr algn="ctr"><a:defRPr sz="3600"/></a:lvl1pPr></a:lstStyle><a:p><a:r><a:t>Title</a:t></a:r></a:p></p:txBody></p:sp>
 <p:sp><p:nvSpPr><p:cNvPr id="3" name="Body"/><p:cNvSpPr/><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Text</a:t></a:r></a:p></p:txBody></p:sp>
@@ -137,7 +137,7 @@ fn placeholders_inherit_position_and_text_style_through_layout_and_master() {
     let k = 1920.0 / 12192000.0;
     assert!((t.x - 1219200.0 * k).abs() < 0.6, "position from the layout, got {}", t.x);
     assert!((t.w - 9144000.0 * k).abs() < 0.6);
-    // Layout says 36pt centred; master says bold, colour tx2 and the major font.
+    // Layout says 36pt centred; master says bold, color tx2 and the major font.
     assert_eq!(t.style.size, (36.0_f32 * 12700.0 * k).round());
     assert_eq!(t.style.align, Align::Center);
     assert!(t.style.bold);

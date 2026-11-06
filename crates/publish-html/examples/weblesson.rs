@@ -14,7 +14,7 @@ fn main() {
     let mut q = Question::new_single();
     q.prompt = "Which is safe?".into();
     q.choices[0].text = "Wear a helmet".into();
-    // WL_THEME=<preset index> and WL_PRIMARY=<rrggbb> let the colour audit try other looks.
+    // WL_THEME=<preset index> and WL_PRIMARY=<rrggbb> let the color audit try other looks.
     if let Some(i) = std::env::var("WL_THEME").ok().and_then(|v| v.parse::<usize>().ok()) {
         p.theme = Theme::presets().remove(i);
     }

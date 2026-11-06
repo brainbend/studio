@@ -1,4 +1,4 @@
-//! Player Properties: how the published player looks (colours, font, buttons) and what it offers (title, sidebar, logo,
+//! Player Properties: how the published player looks (colors, font, buttons) and what it offers (title, sidebar, logo,
 //! controls), with a small preview that follows the settings.
 use super::*;
 use brainbend_doc::{ButtonStyle, GlossaryTerm, PlayerSettings, PlayerTheme, Resource, SidebarSide};

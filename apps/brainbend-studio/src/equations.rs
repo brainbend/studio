@@ -262,18 +262,18 @@ impl App {
         self.eq_dialog = Some(Dialog { target, latex, display: display || target.is_none(), cache: None });
     }
 
-    /// A new equation shape in the theme's text colour at the default size.
+    /// A new equation shape in the theme's text color at the default size.
     pub(super) fn insert_equation(&mut self, latex: &str, display: bool) -> Result<(), String> {
         let r = render(latex, display)?;
-        let colour = self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255));
+        let color = self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255));
         let mut o = blank_object(self.new_id("obj"), "Equation", Kind::Path(r.cmds), 0.0, 0.0, r.width_pt * DEFAULT_SCALE, r.height_pt * DEFAULT_SCALE);
-        o.fill = Some(colour);
+        o.fill = Some(color);
         o.equation = Some(EquationInfo { latex: latex.trim().to_string(), display, mathml: r.mathml, width_pt: r.width_pt });
         self.insert(o);
         Ok(())
     }
 
-    /// Typeset `latex` again into the equation `(li, oi)`, keeping its colour and its scale (so a resized equation stays
+    /// Typeset `latex` again into the equation `(li, oi)`, keeping its color and its scale (so a resized equation stays
     /// the size it was given).
     pub(super) fn update_equation(&mut self, (li, oi): (usize, usize), latex: &str, display: bool) -> Result<(), String> {
         let r = render(latex, display)?;

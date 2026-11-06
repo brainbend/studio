@@ -26,7 +26,7 @@ impl Source {
         Some(Self { w: rgb.width() as usize, h: rgb.height() as usize, rgb: rgb.into_raw() })
     }
 
-    /// Bilinear colour at picture coordinates `(u, v)` in 0..1; the picture wraps sideways.
+    /// Bilinear color at picture coordinates `(u, v)` in 0..1; the picture wraps sideways.
     fn sample(&self, u: f32, v: f32) -> [f32; 3] {
         let x = u * self.w as f32 - 0.5;
         let y = (v * self.h as f32 - 0.5).clamp(0.0, (self.h - 1) as f32);
@@ -180,7 +180,7 @@ fn draw_items(painter: &egui::Painter, rect: egui::Rect, view: (f32, f32, f32), 
     let painter = painter.with_clip_rect(rect);
     for (i, it) in p.pins.iter().enumerate().filter(|(_, it)| it.kind == PinKind::Hotspot) {
         let Some(pts) = corners_at(rect, view, it) else { continue };
-        let c = it.colour();
+        let c = it.color();
         fill_polygon(&painter, &pts, col(c, if p.reveal || selected == Some(i) { 92 } else { 22 }));
         let mut ring = pts.clone();
         ring.push(pts[0]);
@@ -188,7 +188,7 @@ fn draw_items(painter: &egui::Painter, rect: egui::Rect, view: (f32, f32, f32), 
     }
     for (i, it) in p.pins.iter().enumerate().filter(|(_, it)| it.kind == PinKind::Marker) {
         let Some(at) = marker_at(rect, view, it) else { continue };
-        let c = it.colour();
+        let c = it.color();
         if p.pulse { painter.circle_stroke(at, r * 1.45, egui::Stroke::new(r / 5.0, col(c, 90))); }
         let on = selected == Some(i);
         painter.circle(at, r, col(c, 255), egui::Stroke::new((r / 7.0).max(1.0), if on { egui::Color32::from_rgb(255, 214, 10) } else { egui::Color32::WHITE }));
@@ -582,7 +582,7 @@ impl App {
                     }
                     // The selected item's corners can be dragged.
                     if let Some(it) = select.and_then(|i| pano.pins.get(i)).filter(|it| it.kind == PinKind::Hotspot) {
-                        if let Some(pts) = corners_at(cv, e.view, it) { for p in pts { ui.painter().rect(egui::Rect::from_center_size(p, egui::vec2(9.0, 9.0)), 1.0, egui::Color32::WHITE, egui::Stroke::new(1.0, col(it.colour(), 255)), egui::StrokeKind::Middle); } }
+                        if let Some(pts) = corners_at(cv, e.view, it) { for p in pts { ui.painter().rect(egui::Rect::from_center_size(p, egui::vec2(9.0, 9.0)), 1.0, egui::Color32::WHITE, egui::Stroke::new(1.0, col(it.color(), 255)), egui::StrokeKind::Middle); } }
                     }
                 }
             }
@@ -640,7 +640,7 @@ fn inside(pts: &[egui::Pos2], at: egui::Pos2) -> bool {
 mod tests {
     use super::*;
 
-    /// A 4 x 2 panorama whose columns are different colours, to see which part a view shows.
+    /// A 4 x 2 panorama whose columns are different colors, to see which part a view shows.
     fn strip() -> Source {
         let cols = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
         let mut rgb = Vec::new();

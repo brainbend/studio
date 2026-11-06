@@ -109,7 +109,7 @@ pub fn disc_with_icon(icon: &Icon, inner: f32) -> Option<Vec<PathCmd>> {
 pub enum Face { Icon(&'static Icon), Number(usize) }
 
 impl App {
-    /// Insert a marker: a round button (the theme's accent colour, lighter on hover and darker pressed) with the icon
+    /// Insert a marker: a round button (the theme's accent color, lighter on hover and darker pressed) with the icon
     /// cut out of it, or the number written in it. Triggers are put on it like on any button.
     pub(super) fn insert_marker(&mut self, face: Face) {
         let accent = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255));

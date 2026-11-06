@@ -540,7 +540,7 @@ mod tests {
     }
 }
 
-/// `:root` custom properties for the player's colours, font and text size.
+/// `:root` custom properties for the player's colors, font and text size.
 fn player_vars(p: &brainbend_doc::PlayerSettings) -> String {
     // The two bundled faces come first in the stack so a font that is not installed falls back to them.
     let font = format!("\"{}\",\"Open Sans\",Montserrat,Arial,sans-serif", p.font.replace(['"', '\\', '<', '>', ';', '{', '}'], ""));

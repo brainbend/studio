@@ -219,7 +219,7 @@ pub struct WebLesson {
     pub show_menu: bool,
     #[serde(default)]
     pub cover: Option<Cover>,
-    /// Overrides the theme's primary (buttons, progress, highlights) and secondary colours.
+    /// Overrides the theme's primary (buttons, progress, highlights) and secondary colors.
     #[serde(default)]
     pub primary: Option<Rgba>,
     #[serde(default)]

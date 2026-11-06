@@ -184,7 +184,7 @@ struct TextCtx<'a> {
     family: &'static str,
     lph: Option<&'a PhInfo>,
     mph: Option<&'a PhInfo>,
-    /// Default text colour from the shape's style reference.
+    /// Default text color from the shape's style reference.
     font_ref: Option<Rgba>,
     /// Forced text defaults (table header cells).
     force_bold: bool,
@@ -386,7 +386,7 @@ fn shape_fill(cx: &Cx, sp_pr: Option<Node>, style: &Style, lph: Option<&PhInfo>,
     let (idx, clr) = style.fill_ref.clone()?;
     if idx == 0 { return None; }
     let spec = if idx >= 1001 { cx.ch.theme.bg_fills.get(idx - 1001) } else { cx.ch.theme.fills.get(idx - 1) }?.clone();
-    // A theme fill uses the referencing colour as its base.
+    // A theme fill uses the referencing color as its base.
     let ph = clr.map(|c| cx.ch.color(&c, None));
     Some(match spec {
         FillSpec::Solid(c) => FillSpec::Solid(ColorSpec { base: Base::Rgb(0, 0, 0), mods: vec![] }).with_resolved(cx, &c, ph),
@@ -787,7 +787,7 @@ fn convert_table(cx: &mut Cx, tbl: Node, xf: &Xfrm, tf: Tf, name: &str, out: &mu
     let first_row = pr.is_some_and(|p| p.attribute("firstRow") == Some("1"));
     let banded = pr.is_some_and(|p| p.attribute("bandRow") == Some("1"));
     let styled = !style_id.is_empty() && style_id != "{2D5ABB26-0587-4C30-8999-92F81FD0307C}" && style_id != "{5940675A-B579-460E-94D1-54222C63F5DA}";
-    if styled { cx.report.add("Table styles are approximated (header colour and banded rows)."); }
+    if styled { cx.report.add("Table styles are approximated (header color and banded rows)."); }
     // Cells stay an editable table; merged cells keep their span.
     let table_group = cx.next_id() + "-tbl";
     let accent = |tint: f32| ColorSpec { base: Base::Scheme("accent1".into()), mods: vec![("tint".into(), tint)] };

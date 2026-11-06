@@ -7,21 +7,154 @@
 use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextStyle, VAlign};
 use serde::{Deserialize, Serialize};
 
+/// The shape of a background gradient.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GradientKind {
+    /// Along a line at an angle.
+    #[default]
+    Linear,
+    /// Outwards from the centre.
+    Radial,
+    /// Linear, then back again: the colors mirror about the middle.
+    Reflected,
+    /// Around the centre, like a color wheel.
+    Angular,
+}
+
+impl GradientKind {
+    pub const ALL: [GradientKind; 4] = [GradientKind::Linear, GradientKind::Radial, GradientKind::Reflected, GradientKind::Angular];
+    pub fn is_linear(&self) -> bool { *self == GradientKind::Linear }
+    pub fn label(self) -> &'static str {
+        match self { GradientKind::Linear => "Linear", GradientKind::Radial => "Radial", GradientKind::Reflected => "Reflected", GradientKind::Angular => "Angular" }
+    }
+    /// Whether the angle means anything for this kind.
+    pub fn uses_angle(self) -> bool { self != GradientKind::Radial }
+}
+
+/// The stops of a reflected gradient as an ordinary linear one: the colors run out to the middle and back.
+pub fn reflect_stops(stops: &[(f32, Rgba)]) -> Vec<(f32, Rgba)> {
+    let mut v: Vec<(f32, Rgba)> = stops.iter().map(|(p, c)| (p / 2.0, *c)).collect();
+    v.extend(stops.iter().rev().map(|(p, c)| (1.0 - p / 2.0, *c)));
+    v
+}
+
+/// Where a gradient sits on the slide, as fractions of the slide's width and height.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GradientGeom {
+    /// The middle of a radial or angular gradient.
+    #[serde(default = "GradientGeom::middle")]
+    pub center: (f32, f32),
+    /// How far a radial gradient reaches, as a fraction of the slide's width across and height down. The default just
+    /// reaches the corners from the middle.
+    #[serde(default = "GradientGeom::reach")]
+    pub radius: f32,
+    /// Where a linear or reflected gradient starts and ends: `[x0, y0, x1, y1]`. Without it the gradient runs across the
+    /// whole slide at its angle.
+    #[serde(default)]
+    pub line: Option<[f32; 4]>,
+}
+
+impl Default for GradientGeom {
+    fn default() -> Self { GradientGeom { center: Self::middle(), radius: Self::reach(), line: None } }
+}
+
+impl GradientGeom {
+    fn middle() -> (f32, f32) { (0.5, 0.5) }
+    fn reach() -> f32 { std::f32::consts::FRAC_1_SQRT_2 }
+    pub fn is_default(&self) -> bool { *self == GradientGeom::default() }
+
+    /// The start and end of a linear gradient on a `w` x `h` slide, in the slide's own units.
+    pub fn line_px(&self, angle: f32, w: f32, h: f32) -> ((f32, f32), (f32, f32)) {
+        if let Some([x0, y0, x1, y1]) = self.line { return ((x0 * w, y0 * h), (x1 * w, y1 * h)); }
+        let a = angle.to_radians();
+        let (ux, uy) = (a.sin(), -a.cos());
+        let len = (w * a.sin()).abs() + (h * a.cos()).abs();
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        ((cx - ux * len / 2.0, cy - uy * len / 2.0), (cx + ux * len / 2.0, cy + uy * len / 2.0))
+    }
+
+    /// A line through the middle of a `w` x `h` slide at `angle`, from edge to edge: both ends are on the slide.
+    pub fn fitted_line(angle: f32, w: f32, h: f32) -> [f32; 4] {
+        let a = angle.to_radians();
+        let (ux, uy) = (a.sin(), -a.cos());
+        let half = [(ux.abs() > 1e-4).then(|| (w / 2.0) / ux.abs()), (uy.abs() > 1e-4).then(|| (h / 2.0) / uy.abs())].into_iter().flatten().fold(f32::MAX, f32::min);
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        [(cx - ux * half) / w, (cy - uy * half) / h, (cx + ux * half) / w, (cy + uy * half) / h]
+    }
+
+    /// Put the line between two points (slide units); returns the angle it now points at.
+    pub fn set_line_px(&mut self, a: (f32, f32), b: (f32, f32), w: f32, h: f32) -> f32 {
+        self.line = Some([a.0 / w, a.1 / h, b.0 / w, b.1 / h]);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        if dx.abs() + dy.abs() < 0.5 { return 0.0 }
+        dx.atan2(-dy).to_degrees().rem_euclid(360.0)
+    }
+
+    /// Turn the line (if it was moved) about its middle to point at `angle`, keeping its length.
+    pub fn turn_line(&mut self, angle: f32, w: f32, h: f32) {
+        let Some([x0, y0, x1, y1]) = self.line else { return };
+        let (p0, p1) = ((x0 * w, y0 * h), (x1 * w, y1 * h));
+        let (mx, my) = ((p0.0 + p1.0) / 2.0, (p0.1 + p1.1) / 2.0);
+        let mut half = ((p1.0 - p0.0).powi(2) + (p1.1 - p0.1).powi(2)).sqrt() / 2.0;
+        let r = angle.to_radians();
+        let (ux, uy) = (r.sin(), -r.cos());
+        // Turned about its middle, the ends must stay on the slide: shorten the line if they would not.
+        let room = |m: f32, u: f32, size: f32| if u.abs() < 1e-4 { f32::MAX } else if u > 0.0 { (size - m) / u } else { m / -u };
+        half = half.min(room(mx, ux, w)).min(room(mx, -ux, w)).min(room(my, uy, h)).min(room(my, -uy, h)).max(1.0);
+        self.line = Some([(mx - ux * half) / w, (my - uy * half) / h, (mx + ux * half) / w, (my + uy * half) / h]);
+    }
+}
+
+/// CSS `background` for a gradient background on a `w` x `h` slide.
+pub fn gradient_css(kind: GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &GradientGeom, w: f32, h: f32) -> String {
+    let list = |st: &[(f32, Rgba)]| st.iter().map(|(at, c)| format!("rgba({},{},{},{:.3}) {:.2}%", c.0, c.1, c.2, c.3 as f32 / 255.0, at * 100.0)).collect::<Vec<_>>().join(",");
+    let (cx, cy) = (geom.center.0 * 100.0, geom.center.1 * 100.0);
+    match kind {
+        GradientKind::Linear | GradientKind::Reflected => {
+            let st: Vec<(f32, Rgba)> = if kind == GradientKind::Reflected { reflect_stops(stops) } else { stops.to_vec() };
+            let Some(_) = geom.line else { return format!("linear-gradient({angle}deg,{})", list(&st)) };
+            // The CSS line runs corner to corner through the middle; stops are placed along it to fall where the chosen line does.
+            let (p0, p1) = geom.line_px(angle, w, h);
+            let (dx, dy) = (p1.0 - p0.0, p1.1 - p0.1);
+            let l = (dx * dx + dy * dy).sqrt().max(1.0);
+            let th = dx.atan2(-dy);
+            let (ux, uy) = (th.sin(), -th.cos());
+            let len = (w * th.sin()).abs() + (h * th.cos()).abs();
+            let offset = (p0.0 - w / 2.0) * ux + (p0.1 - h / 2.0) * uy + len / 2.0;
+            let moved: Vec<(f32, Rgba)> = st.iter().map(|(t, c)| ((offset + t * l) / len.max(1.0), *c)).collect();
+            format!("linear-gradient({:.2}deg,{})", th.to_degrees().rem_euclid(360.0), list(&moved))
+        }
+        GradientKind::Radial => {
+            if geom.is_default() { format!("radial-gradient(ellipse farthest-corner at 50% 50%,{})", list(stops)) }
+            else { format!("radial-gradient(ellipse {:.1}px {:.1}px at {cx:.2}% {cy:.2}%,{})", geom.radius * w, geom.radius * h, list(stops)) }
+        }
+        GradientKind::Angular => format!("conic-gradient(from {angle}deg at {cx:.2}% {cy:.2}%,{})", list(stops)),
+    }
+}
+
 /// What fills a slide's background.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Background {
-    /// A flat colour. (Serialized as a bare colour so older files stay readable.)
+    /// A flat color. (Serialized as a bare color so older files stay readable.)
     Solid(Rgba),
-    /// A linear gradient. `angle` is in degrees clockwise from "towards the top" (CSS style);
-    /// stops are `(position 0..1, colour)`.
-    Gradient { angle: f32, stops: Vec<(f32, Rgba)> },
+    /// A gradient. `angle` is in degrees clockwise from "towards the top" (CSS style; for an angular gradient, where it
+    /// starts); stops are `(position 0..1, color)`. Older files have no `kind` and are linear.
+    Gradient {
+        angle: f32,
+        stops: Vec<(f32, Rgba)>,
+        #[serde(default, skip_serializing_if = "GradientKind::is_linear")]
+        kind: GradientKind,
+        /// Where it starts, ends and centres (all left at their defaults, the gradient spans the slide from its middle).
+        #[serde(default, skip_serializing_if = "GradientGeom::is_default")]
+        geom: GradientGeom,
+    },
     /// A picture stretched to cover the slide (`asset` is a key into `Project::assets`).
     Image { asset: String },
 }
 
 impl Background {
-    /// A colour that represents the background, for contrast checks and fallbacks.
+    /// A color that represents the background, for contrast checks and fallbacks.
     pub fn base_color(&self) -> Rgba {
         match self {
             Background::Solid(c) => *c,
@@ -44,15 +177,15 @@ impl Background {
 
     /// A two-stop gradient.
     pub fn gradient(angle: f32, a: Rgba, b: Rgba) -> Self {
-        Background::Gradient { angle, stops: vec![(0.0, a), (1.0, b)] }
+        Background::Gradient { angle, stops: vec![(0.0, a), (1.0, b)], kind: GradientKind::Linear, geom: GradientGeom::default() }
     }
 }
 
 pub const THEME_COLOR_NAMES: [&str; 10] =
     ["Text", "Background", "Dark accent", "Light accent", "Accent 1", "Accent 2", "Accent 3", "Accent 4", "Accent 5", "Accent 6"];
 
-/// A palette and a pair of fonts that new content starts from. Objects keep literal colours, so
-/// changing the theme does not recolour what already exists.
+/// A palette and a pair of fonts that new content starts from. Objects keep literal colors, so
+/// changing the theme does not recolor what already exists.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     pub name: String,
@@ -85,7 +218,7 @@ impl Theme {
         ]
     }
 
-    /// The theme with its name set to that of the preset whose colours and fonts it has, else "Custom".
+    /// The theme with its name set to that of the preset whose colors and fonts it has, else "Custom".
     pub fn named(mut self) -> Self {
         self.name = Self::presets().into_iter().find(|p| p.colors == self.colors && p.heading_font == self.heading_font && p.body_font == self.body_font).map(|p| p.name).unwrap_or_else(|| "Custom".into());
         self
@@ -95,7 +228,7 @@ impl Theme {
         self.colors.get(i).copied().unwrap_or(Rgba(0, 0, 0, 255))
     }
 
-    /// Text colour, page colour.
+    /// Text color, page color.
     pub fn text(&self) -> Rgba { self.color(0) }
     pub fn page(&self) -> Rgba { self.color(1) }
 }
@@ -393,8 +526,8 @@ impl Project {
 }
 
 impl Project {
-    /// Switch to `theme`: the master's and layouts' placeholders take its fonts and colours, and
-    /// slides whose placeholders still look like their layout's follow. Other objects keep their colours.
+    /// Switch to `theme`: the master's and layouts' placeholders take its fonts and colors, and
+    /// slides whose placeholders still look like their layout's follow. Other objects keep their colors.
     pub fn set_theme(&mut self, theme: Theme) {
         let old_layouts = self.layouts.clone();
         let restyle = |o: &mut Object| {
@@ -423,6 +556,34 @@ mod tests {
         p.sanitize();
         p.layouts = sample_layouts(&p.theme, 1920.0, 1080.0);
         p
+    }
+
+    #[test]
+    fn gradient_kinds_are_saved_only_when_not_linear_and_older_files_read_as_linear() {
+        let old: Background = serde_json::from_str(r#"{"angle":90.0,"stops":[[0.0,[0,0,0,255]],[1.0,[255,255,255,255]]]}"#).unwrap();
+        assert!(matches!(&old, Background::Gradient { kind: GradientKind::Linear, .. }));
+        assert!(!serde_json::to_string(&old).unwrap().contains("kind"));
+        let radial = match old { Background::Gradient { angle, stops, .. } => Background::Gradient { angle, stops, kind: GradientKind::Radial, geom: GradientGeom { center: (0.25, 0.5), ..Default::default() } }, b => b };
+        let back: Background = serde_json::from_str(&serde_json::to_string(&radial).unwrap()).unwrap();
+        assert_eq!(back, radial);
+        let st = [(0.0, Rgba(0, 0, 0, 255)), (1.0, Rgba(255, 255, 255, 255))];
+        let g = GradientGeom::default();
+        assert!(gradient_css(GradientKind::Radial, 0.0, &st, &g, 1920.0, 1080.0).starts_with("radial-gradient(ellipse farthest-corner"));
+        assert!(gradient_css(GradientKind::Angular, 45.0, &st, &g, 1920.0, 1080.0).starts_with("conic-gradient(from 45deg at 50.00% 50.00%"));
+        // A moved centre is written out; so is a line that does not span the slide.
+        let moved = GradientGeom { center: (0.2, 0.8), ..g };
+        assert!(gradient_css(GradientKind::Radial, 0.0, &st, &moved, 1000.0, 500.0).contains("at 20.00% 80.00%"));
+        let fit = GradientGeom::fitted_line(135.0, 1000.0, 500.0);
+        assert!(fit.iter().all(|v| (-0.001..=1.001).contains(v)), "{fit:?}: both ends are on the slide");
+        let mut line = GradientGeom::default();
+        let angle = line.set_line_px((250.0, 250.0), (750.0, 250.0), 1000.0, 500.0);
+        assert!((angle - 90.0).abs() < 0.01);
+        // Left to right over the middle half of a 1000-wide slide: the CSS line is 1000 long, so the stops sit at 25% and 75%.
+        let css = gradient_css(GradientKind::Linear, angle, &st, &line, 1000.0, 500.0);
+        assert!(css.contains("25.00%") && css.contains("75.00%"), "{css}");
+        // Reflected runs out and back: the last stop sits in the middle.
+        let r = reflect_stops(&st);
+        assert_eq!((r.len(), r[1].0, r[2].0), (4, 0.5, 0.5));
     }
 
     #[test]

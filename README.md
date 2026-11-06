@@ -50,7 +50,7 @@ Every change is built and tested on macOS, Windows and Linux. Releases are on th
 | Group | Objects |
 |---|---|
 | Text | Text Box · Table · Slide Number |
-| Media | Picture · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolour) · Web Object |
+| Media | Picture · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolor) · Web Object |
 | Interactive | Button (with Normal, Hover, Down, Visited, Disabled and Selected states) · Slider · Hotspot (rectangle, oval or freeform) · Dial · Input (check box, radio button, text entry, number entry) · Marker |
 
 **Slides** (Slides tab)

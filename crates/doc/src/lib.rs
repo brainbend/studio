@@ -11,7 +11,7 @@ pub mod shapes;
 pub mod tables;
 pub mod variables;
 pub mod richtext;
-pub use master::{Background, Master, PlaceholderKind, SlideLayout, Theme};
+pub use master::{gradient_css, reflect_stops, Background, GradientGeom, GradientKind, Master, PlaceholderKind, SlideLayout, Theme};
 pub use player::{ButtonStyle, GlossaryTerm, PlayerControls, PlayerPalette, PlayerSettings, PlayerTheme, Resource, SidebarSide};
 pub use richtext::{Attr, Fmt, ListStyle};
 
@@ -27,7 +27,7 @@ impl Rgba {
         format!("#{:02X}{:02X}{:02X}", self.0, self.1, self.2)
     }
 
-    /// A colour typed by hand: "#4f81bd", "4f81bd", "#48b", "79, 129, 189" or "rgb(79,129,189)" (opaque).
+    /// A color typed by hand: "#4f81bd", "4f81bd", "#48b", "79, 129, 189" or "rgb(79,129,189)" (opaque).
     pub fn parse(text: &str) -> Option<Rgba> {
         let t = text.trim().to_ascii_lowercase();
         let inner = t.strip_prefix("rgb(").and_then(|r| r.strip_suffix(')')).unwrap_or(&t);
@@ -116,7 +116,7 @@ pub struct TextStyle {
     pub valign: VAlign,
 }
 
-/// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, colour)`.
+/// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, color)`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gradient {
     pub angle: f32,
@@ -180,7 +180,7 @@ pub struct Shadow {
     pub color: Rgba,
 }
 
-/// A soft halo of colour around an object.
+/// A soft halo of color around an object.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Glow {
     /// How far the halo reaches, in pixels.
@@ -393,7 +393,7 @@ pub struct Run {
     pub link: Option<String>,
     #[serde(default)]
     pub strike: Option<bool>,
-    /// A marker-pen colour behind the text.
+    /// A marker-pen color behind the text.
     #[serde(default)]
     pub highlight: Option<Rgba>,
     /// Extra space between letters, in px (negative pulls them together).
@@ -500,7 +500,7 @@ impl MarkerInfo {
     }
 }
 
-/// A data-entry field. Its look comes from the object's own style (font, text colour), fill and outline.
+/// A data-entry field. Its look comes from the object's own style (font, text color), fill and outline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputField {
     /// The id of the variable that holds what is typed: a text variable, or a number variable for a number field.
@@ -563,7 +563,7 @@ pub struct Slider {
     pub thumb_color: Rgba,
     /// The thumb's height as a fraction of the frame's height.
     pub thumb_height: f32,
-    /// The track line's colour; `None` leaves the track invisible.
+    /// The track line's color; `None` leaves the track invisible.
     pub track: Option<Rgba>,
 }
 
@@ -690,7 +690,7 @@ pub struct Object {
     pub w: f32,
     pub h: f32,
     pub fill: Option<Rgba>,
-    /// A gradient drawn instead of `fill` (which then holds a representative flat colour).
+    /// A gradient drawn instead of `fill` (which then holds a representative flat color).
     #[serde(default)]
     pub gradient: Option<Gradient>,
     /// Clockwise turn about the frame's centre, in degrees.
@@ -724,7 +724,7 @@ pub struct Object {
     pub stroke: Option<Stroke>,
     #[serde(default)]
     pub shadow: Option<Shadow>,
-    /// A halo of colour around the object.
+    /// A halo of color around the object.
     #[serde(default)]
     pub glow: Option<Glow>,
     /// Fades the object's edges inward over this many pixels (0 is off). A softened object shows no shadow or glow.
@@ -912,7 +912,7 @@ pub struct ObjectState {
     pub size: Option<(f32, f32)>,
     #[serde(default)]
     pub shine: Option<Shine>,
-    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat colour).
+    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat color).
     #[serde(default)]
     pub gradient: Option<Gradient>,
 }
@@ -1746,10 +1746,10 @@ pub struct Project {
     pub assets: BTreeMap<String, Asset>,
     #[serde(default)]
     pub variables: Vec<Variable>,
-    /// The author's brand colours, offered first in every colour menu. Empty until the author makes one.
+    /// The author's brand colors, offered first in every color menu. Empty until the author makes one.
     #[serde(default)]
     pub palette: Vec<Rgba>,
-    /// Colours picked lately that are not in the palette, newest first.
+    /// Colors picked lately that are not in the palette, newest first.
     #[serde(default)]
     pub recent_colors: Vec<Rgba>,
     /// Percent of quiz points needed to pass.
@@ -1777,7 +1777,7 @@ pub struct Project {
     /// Terms listed in the player's Notes tab.
     #[serde(default)]
     pub glossary: Vec<GlossaryTerm>,
-    /// Colours and fonts new content starts from.
+    /// Colors and fonts new content starts from.
     #[serde(default)]
     pub theme: Theme,
     #[serde(default)]
@@ -1810,12 +1810,12 @@ const MAX_PACKAGE_ENTRY: u64 = 512 * 1024 * 1024;
 const MAX_PACKAGE_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
 
 impl Project {
-    /// The most recent colours kept.
+    /// The most recent colors kept.
     pub const RECENT_COLORS: usize = 10;
-    /// The most colours a palette holds.
+    /// The most colors a palette holds.
     pub const PALETTE_MAX: usize = 24;
 
-    /// Remember a colour the author just used (opaque colours only matter: the colour, not its see-through amount).
+    /// Remember a color the author just used (opaque colors only matter: the color, not its see-through amount).
     pub fn note_color(&mut self, c: Rgba) {
         let c = Rgba(c.0, c.1, c.2, 255);
         if self.palette.contains(&c) { return; }
@@ -1824,7 +1824,7 @@ impl Project {
         self.recent_colors.truncate(Self::RECENT_COLORS);
     }
 
-    /// Add a colour to the palette (once); it leaves the recent colours.
+    /// Add a color to the palette (once); it leaves the recent colors.
     pub fn add_to_palette(&mut self, c: Rgba) {
         let c = Rgba(c.0, c.1, c.2, 255);
         if self.palette.contains(&c) || self.palette.len() >= Self::PALETTE_MAX { return; }
@@ -2441,7 +2441,7 @@ mod marker_tests {
     }
 
     #[test]
-    fn colours_typed_by_hand_are_understood() {
+    fn colors_typed_by_hand_are_understood() {
         let blue = Some(Rgba(79, 129, 189, 255));
         for t in ["#4F81BD", "4f81bd", " #4f81bd ", "79,129,189", "79, 129, 189", "rgb(79,129,189)", "RGB(79, 129, 189)"] { assert_eq!(Rgba::parse(t), blue, "{t}"); }
         assert_eq!(Rgba::parse("#48b"), Some(Rgba(68, 136, 187, 255)));
@@ -2450,7 +2450,7 @@ mod marker_tests {
     }
 
     #[test]
-    fn recent_colours_skip_the_palette_and_the_palette_takes_from_them() {
+    fn recent_colors_skip_the_palette_and_the_palette_takes_from_them() {
         let mut p = Project::new("t");
         let (a, b, c) = (Rgba(1, 2, 3, 255), Rgba(4, 5, 6, 255), Rgba(7, 8, 9, 255));
         p.note_color(a);
@@ -2459,9 +2459,9 @@ mod marker_tests {
         assert_eq!(p.recent_colors, vec![a, b], "newest first, no repeats");
         p.add_to_palette(b);
         assert_eq!(p.palette, vec![b]);
-        assert_eq!(p.recent_colors, vec![a], "a colour in the palette is not also recent");
+        assert_eq!(p.recent_colors, vec![a], "a color in the palette is not also recent");
         p.note_color(b);
-        assert_eq!(p.recent_colors, vec![a], "using a palette colour adds nothing to the recent ones");
+        assert_eq!(p.recent_colors, vec![a], "using a palette color adds nothing to the recent ones");
         p.add_to_palette(b);
         assert_eq!(p.palette.len(), 1, "once");
         for i in 0..40u8 { p.note_color(Rgba(100, i, 0, 255)); }

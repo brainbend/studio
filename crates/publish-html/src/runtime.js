@@ -10,13 +10,34 @@
   stage.style.height = slides[0].height + 'px';
 
   function unwrap(v) { return v === undefined || v === null ? v : Object.values(v)[0]; }
-  // Slide background: a bare [r,g,b,a] colour, a {angle, stops} gradient or an {asset} picture.
+  // Slide background: a bare [r,g,b,a] color, a {angle, stops} gradient or an {asset} picture.
   function gradCss(g) {
     return 'linear-gradient(' + g.angle + 'deg,' + g.stops.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100) + '%'; }).join(',') + ')';
   }
-  function bgCss(b) {
+  function bgCss(b, w, h) {
     if (Array.isArray(b)) return css(b);
-    if (b.stops) return 'linear-gradient(' + b.angle + 'deg,' + b.stops.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100) + '%'; }).join(',') + ')';
+    if (b.stops) {
+      var list = function (st) { return st.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100).toFixed(2) + '%'; }).join(','); };
+      var kind = b.kind || 'Linear';
+      var g = b.geom || {};
+      var ctr = g.center || [0.5, 0.5];
+      var cx = (ctr[0] * 100).toFixed(2) + '%', cy = (ctr[1] * 100).toFixed(2) + '%';
+      if (kind === 'Radial') {
+        if (!b.geom) return 'radial-gradient(ellipse farthest-corner at 50% 50%,' + list(b.stops) + ')';
+        var r = g.radius === undefined ? Math.SQRT1_2 : g.radius;
+        return 'radial-gradient(ellipse ' + (r * w).toFixed(1) + 'px ' + (r * h).toFixed(1) + 'px at ' + cx + ' ' + cy + ',' + list(b.stops) + ')';
+      }
+      if (kind === 'Angular') return 'conic-gradient(from ' + b.angle + 'deg at ' + cx + ' ' + cy + ',' + list(b.stops) + ')';
+      var st = b.stops;
+      if (kind === 'Reflected') st = st.map(function (s) { return [s[0] / 2, s[1]]; }).concat(st.slice().reverse().map(function (s) { return [1 - s[0] / 2, s[1]]; }));
+      if (!g.line) return 'linear-gradient(' + b.angle + 'deg,' + list(st) + ')';
+      var x0 = g.line[0] * w, y0 = g.line[1] * h, dx = g.line[2] * w - x0, dy = g.line[3] * h - y0;
+      var l = Math.max(1, Math.sqrt(dx * dx + dy * dy)), th = Math.atan2(dx, -dy);
+      var ux = Math.sin(th), uy = -Math.cos(th), len = Math.abs(w * Math.sin(th)) + Math.abs(h * Math.cos(th));
+      var off = (x0 - w / 2) * ux + (y0 - h / 2) * uy + len / 2;
+      var deg = ((th * 180 / Math.PI) % 360 + 360) % 360;
+      return 'linear-gradient(' + deg.toFixed(2) + 'deg,' + list(st.map(function (s) { return [(off + s[0] * l) / Math.max(1, len), s[1]]; })) + ')';
+    }
     if (b.asset && P.assetUrls[b.asset]) return 'url("' + P.assetUrls[b.asset] + '")';
     return 'transparent';
   }
@@ -185,7 +206,7 @@
     var sEl = el('div', 'slide');
     sEl.style.display = 'none';
     if (slide.background) {
-      sEl.style.background = bgCss(slide.background);
+      sEl.style.background = bgCss(slide.background, slide.width, slide.height);
       if (slide.background.asset) { sEl.style.backgroundSize = 'cover'; sEl.style.backgroundPosition = 'center'; sEl.style.backgroundRepeat = 'no-repeat'; }
     }
     stage.appendChild(sEl);
@@ -1282,7 +1303,7 @@
           if (r === markerRun) { sp.style.display = 'inline-block'; sp.style.minWidth = hang + 'em'; sp.style.textIndent = '0'; }
           if (r.link && /^(https?:|mailto:)/i.test(r.link)) {
             sp = el('a', null, subst(r.text)); sp.href = r.link; sp.target = '_blank'; sp.rel = 'noopener noreferrer';
-            // A link is the theme's hyperlink colour, underlined; the run's own colour and underline, applied below, win.
+            // A link is the theme's hyperlink color, underlined; the run's own color and underline, applied below, win.
             var lc = P.theme && P.theme.colors && P.theme.colors[4];
             if (lc) sp.style.color = css(lc);
             sp.style.textDecoration = 'underline';
@@ -1917,7 +1938,7 @@
     document.body.appendChild(topbar);
   }
   // Whether or not it is shown, the project's name is the page's one Heading 1.
-  if (!PL.show_title) { var h1 = el('h1', 'sr-only', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); document.body.insertBefore(h1, document.body.firstChild); }
+  if (!PL.show_title) { var h1 = el('h1', 'sr-only', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); stage.insertBefore(h1, stage.firstChild); }
   if ((nav && P.show_menu) || sidebarOn) {
     menu = el('nav'); menu.id = 'menu'; menu.setAttribute('aria-label', sidebarOn ? 'Sidebar' : 'Slides');
     var list = el('ol');

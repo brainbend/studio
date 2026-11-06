@@ -2,7 +2,7 @@
     var x = String(t).trim().replace(/\s+/g, ' ');
     return caseSensitive ? x : x.toLowerCase();
   }
-  // A written mark after a field that cannot carry a generated one, so right and wrong are not told by colour alone.
+  // A written mark after a field that cannot carry a generated one, so right and wrong are not told by color alone.
   function markAfter(field, ok) {
     var m = el('span', 'q-mark ' + (ok ? 'right' : 'wrong'), ok ? '\u2713 correct' : '\u2717 incorrect');
     field.parentNode.insertBefore(m, field.nextSibling);

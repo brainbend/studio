@@ -107,8 +107,9 @@ struct App {
     pan: egui::Vec2,
     fit_scale: f32,
     theme_colors_open: bool,
+    background_open: bool,
     theme_fonts_open: bool,
-    /// A colour just picked, to be remembered as recent once the pointer is released.
+    /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
     /// The issue count in the status bar, when it was counted and what it was.
     status_issues: (f64, usize),
@@ -274,7 +275,7 @@ struct App {
     hot_drag: Option<((f32, f32), (f32, f32))>,
     /// Far corner of a block of table cells chosen with shift-click (the near corner is the selected cell).
     range_end: Option<(String, (u16, u16))>,
-    /// Colour and width the Table panel's border buttons apply.
+    /// Color and width the Table panel's border buttons apply.
     border_color: Rgba,
     border_width: f32,
     /// The look the Table panel applies, and which parts of it.
@@ -460,7 +461,7 @@ impl Default for App {
             project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
             guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(), word_capture: None,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
@@ -610,7 +611,7 @@ fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui
                     if run.bold.is_some() || run.font_family.is_some() {
                         f.font_id.family = font_store::family_styled(run.font_family.as_deref().unwrap_or(&o.style.font_family), run.bold.unwrap_or(o.style.bold));
                     }
-                    // A link is the theme's hyperlink colour, underlined, unless the author set its colour or underline.
+                    // A link is the theme's hyperlink color, underlined, unless the author set its color or underline.
                     if run.link.is_some() {
                         f.color = run.color.map(color).unwrap_or(link);
                         f.underline = if run.underline.unwrap_or(true) { egui::Stroke::new(1.0, f.color) } else { egui::Stroke::NONE };
@@ -646,7 +647,7 @@ fn g_is_empty(g: &Option<Gradient>) -> bool {
     g.as_ref().is_none_or(|g| g.stops.is_empty())
 }
 
-/// Colour of a gradient at position `t` (0..1 along its axis).
+/// Color of a gradient at position `t` (0..1 along its axis).
 fn gradient_at(stops: &[(f32, Rgba)], t: f32) -> egui::Color32 {
     let t = t.clamp(0.0, 1.0);
     let mut prev = stops[0];
@@ -694,28 +695,78 @@ fn hit_object(slide: &Slide, shown: &[usize], p: egui::Vec2, scale: f32) -> Opti
     None
 }
 
-/// Linear gradient over `rect` (CSS angle: 0 = towards the top, clockwise), as a vertex-coloured grid.
+/// Linear gradient over `rect` (CSS angle: 0 = towards the top, clockwise), as a vertex-colored grid.
 pub(crate) fn paint_gradient(painter: &egui::Painter, rect: egui::Rect, angle: f32, stops: &[(f32, Rgba)]) {
+    paint_gradient_kind(painter, rect, brainbend_doc::GradientKind::Linear, angle, stops, &Default::default());
+}
+
+/// A background gradient of any kind over `rect`, as a vertex-colored grid (finer for the curved kinds).
+pub(crate) fn paint_gradient_kind(painter: &egui::Painter, rect: egui::Rect, kind: brainbend_doc::GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &brainbend_doc::GradientGeom) {
+    use brainbend_doc::GradientKind::*;
     if stops.is_empty() { return; }
-    const N: usize = 16;
+    let reflected;
+    let stops = if kind == Reflected { reflected = brainbend_doc::reflect_stops(stops); &reflected[..] } else { stops };
+    if kind == Angular {
+        // Thin wedges from the centre, each one flat color: a grid would show a ragged seam where the colors wrap.
+        const WEDGES: usize = 720;
+        let c = rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height());
+        let r = rect.size().length() * 3.0;
+        let clipped = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+        let mut mesh = egui::epaint::Mesh::default();
+        for k in 0..WEDGES {
+            let (a0, a1) = (k as f32 / WEDGES as f32, (k + 1) as f32 / WEDGES as f32);
+            let col = gradient_at(stops, (a0 + a1) / 2.0);
+            let pt = |t: f32| { let a = (angle + t * 360.0).to_radians(); c + egui::vec2(a.sin(), -a.cos()) * r };
+            let i = mesh.vertices.len() as u32;
+            mesh.colored_vertex(c, col);
+            mesh.colored_vertex(pt(a0), col);
+            mesh.colored_vertex(pt(a1 + 0.0015), col);
+            mesh.add_triangle(i, i + 1, i + 2);
+        }
+        clipped.add(egui::Shape::mesh(mesh));
+        return;
+    }
+    let n: usize = if kind == Radial { 64 } else { 16 };
+    let t_at = |p: egui::Pos2| -> f32 {
+        match kind {
+            Linear | Reflected => match geom.line {
+                None => gradient_t(rect, angle, p),
+                Some(_) => {
+                    let (a, b) = geom.line_px(angle, rect.width(), rect.height());
+                    let (a, b) = (rect.min + egui::vec2(a.0, a.1), rect.min + egui::vec2(b.0, b.1));
+                    let d = b - a;
+                    (p - a).dot(d) / d.length_sq().max(1.0)
+                }
+            },
+            Radial => {
+                let d = p - (rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height()));
+                ((d.x / rect.width().max(1.0)).powi(2) + (d.y / rect.height().max(1.0)).powi(2)).sqrt() / geom.radius.max(0.01)
+            }
+            Angular => {
+                let d = p - (rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height()));
+                let deg = d.x.atan2(-d.y).to_degrees() - angle;
+                deg.rem_euclid(360.0) / 360.0
+            }
+        }
+    };
     let mut mesh = egui::epaint::Mesh::default();
-    for j in 0..=N {
-        for i in 0..=N {
-            let p = rect.min + egui::vec2(rect.width() * i as f32 / N as f32, rect.height() * j as f32 / N as f32);
-            mesh.colored_vertex(p, gradient_at(stops, gradient_t(rect, angle, p)));
+    for j in 0..=n {
+        for i in 0..=n {
+            let p = rect.min + egui::vec2(rect.width() * i as f32 / n as f32, rect.height() * j as f32 / n as f32);
+            mesh.colored_vertex(p, gradient_at(stops, t_at(p)));
         }
     }
-    for j in 0..N {
-        for i in 0..N {
-            let k = (j * (N + 1) + i) as u32;
-            mesh.add_triangle(k, k + 1, k + N as u32 + 1);
-            mesh.add_triangle(k + 1, k + N as u32 + 2, k + N as u32 + 1);
+    for j in 0..n {
+        for i in 0..n {
+            let k = (j * (n + 1) + i) as u32;
+            mesh.add_triangle(k, k + 1, k + n as u32 + 1);
+            mesh.add_triangle(k + 1, k + n as u32 + 2, k + n as u32 + 1);
         }
     }
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// Fill a polygon (given in `rect`'s unrotated frame) with a gradient or a flat colour; `map` places each
+/// Fill a polygon (given in `rect`'s unrotated frame) with a gradient or a flat color; `map` places each
 /// vertex on screen (used to rotate).
 fn fill_polygon(painter: &egui::Painter, poly: &[egui::Pos2], map: &dyn Fn(egui::Pos2) -> egui::Pos2, shade: &dyn Fn(egui::Pos2) -> egui::Color32) {
     if poly.len() < 3 { return; }
@@ -836,7 +887,7 @@ fn figure_triangles(figs: &[Vec<egui::Pos2>]) -> Vec<(Vec<egui::Pos2>, Vec<usize
     out
 }
 
-/// Fill the figures of a path (see [`figure_triangles`]). `map` places each point on screen and `shade` colours it.
+/// Fill the figures of a path (see [`figure_triangles`]). `map` places each point on screen and `shade` colors it.
 fn fill_figures(painter: &egui::Painter, figs: &[Vec<egui::Pos2>], map: &dyn Fn(egui::Pos2) -> egui::Pos2, shade: &dyn Fn(egui::Pos2) -> egui::Color32) {
     let mut mesh = egui::epaint::Mesh::default();
     for (pts, tris) in figure_triangles(figs) {
@@ -2362,7 +2413,7 @@ impl App {
         true
     }
 
-    /// An icon from the gallery as a freeform vector shape in the theme's text colour, named and described for screen
+    /// An icon from the gallery as a freeform vector shape in the theme's text color, named and described for screen
     /// readers by the icon's name (the author can change both).
     fn insert_icon(&mut self, icon: &icons::Icon) {
         let Some((cmds, aspect)) = icons::outline(icon) else { return };
@@ -2526,7 +2577,7 @@ impl App {
     }
 
     /// A caption (a speech or thought bubble) with its own text: shape `i` of `shapes::CAPTIONS` in the theme's accent
-    /// colour with readable text, the text kept clear of the pointer.
+    /// color with readable text, the text kept clear of the pointer.
     fn insert_caption(&mut self, i: usize) {
         use brainbend_doc::shapes::{caption, CAPTIONS, Preset};
         let accent = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255));
@@ -3070,7 +3121,7 @@ impl App {
         if ui.button("Open Home").clicked() { self.ribbon_tab = ribbon::HOME_TAB; }
     }
 
-    /// What a hyperlink looks like in text: the theme's hyperlink colour (accent 1), as the PowerPoint export sets it.
+    /// What a hyperlink looks like in text: the theme's hyperlink color (accent 1), as the PowerPoint export sets it.
     fn link_color(&self) -> egui::Color32 {
         color(self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255)))
     }
@@ -4258,7 +4309,7 @@ impl App {
         match bg {
             None => {}
             Some(Background::Solid(c)) => { painter.rect_filled(rect, 0.0, color(c)); }
-            Some(Background::Gradient { angle, stops }) => paint_gradient(painter, rect, angle, &stops),
+            Some(Background::Gradient { angle, stops, kind, geom }) => paint_gradient_kind(painter, rect, kind, angle, &stops, &geom),
             Some(Background::Image { asset }) => {
                 if let Some(t) = self.texture(ctx, &asset) {
                     // Cover: scale to fill, cropping the overflow evenly.
@@ -5143,7 +5194,7 @@ fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, current
     changed
 }
 
-/// A colour button for an optional colour (with a "none" tick). Returns true when it changed.
+/// A color button for an optional color (with a "none" tick). Returns true when it changed.
 fn value_editor(ui: &mut egui::Ui, v: &mut Value) -> bool {
     match v {
         Value::Bool(b) => ui.checkbox(b, if *b { "true" } else { "false" }).changed(),
@@ -5766,6 +5817,7 @@ impl App {
         self.focus_order_window(ctx);
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
+        self.background_window(ctx);
         self.theme_fonts_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
@@ -6379,7 +6431,7 @@ impl App {
                     if ui.button("Edit equation…").clicked() { want_equation = Some((li, oi)); }
                 });
                 ui.label(egui::RichText::new(&e.latex).monospace().size(12.0).weak());
-                ui.weak("Its colour is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
+                ui.weak("Its color is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
             }
             if let Some(m) = obj.marker.as_mut() {
                 ui.horizontal(|ui| {
@@ -6775,6 +6827,7 @@ impl App {
                 self.paint_slide(ctx, &painter, origin, scale, &slide, &shown, if try_on { None } else { self.selected });
             }
 
+            if !try_on { self.background_handles(ui, &painter, origin, scale, slide_idx); }
             if try_on {
                 // Nothing is selected, moved or saved while trying.
                 let strip = egui::Rect::from_min_size(area.left_top(), egui::vec2(area.width(), 40.0));
@@ -8441,7 +8494,7 @@ mod tests {
         let solid = ribbon::quick_look(2, theme[4], &theme);
         assert_eq!((solid.fill, solid.stroke, solid.text), (theme[4], None, white), "white on a dark accent");
         let pale = ribbon::quick_look(2, Rgba(250, 230, 120, 255), &theme);
-        assert_eq!(pale.text, theme[0], "dark text on a light colour");
+        assert_eq!(pale.text, theme[0], "dark text on a light color");
         assert!(ribbon::quick_look(3, theme[5], &theme).shadow.is_some());
         let mut a = App::default();
         a.new_project();
@@ -8785,7 +8838,7 @@ mod tests {
     }
 
     #[test]
-    fn linked_text_is_drawn_in_the_link_colour_underlined() {
+    fn linked_text_is_drawn_in_the_link_color_underlined() {
         use brainbend_doc::richtext::Attr;
         let mut a = App::default();
         a.new_project();
@@ -8798,8 +8851,8 @@ mod tests {
         let job = text_job(&o, 1.0, 500.0, blue);
         assert_eq!(job.sections[0].format.color, blue);
         assert_ne!(job.sections[0].format.underline, egui::Stroke::NONE);
-        assert_ne!(job.sections.last().unwrap().format.color, blue, "unlinked text keeps its colour");
-        // The author's own colour and underline on a link win, even when they equal the object's style.
+        assert_ne!(job.sections.last().unwrap().format.color, blue, "unlinked text keeps its color");
+        // The author's own color and underline on a link win, even when they equal the object's style.
         o.format_range(0, 2, &Attr::Color(o.style.color));
         o.format_range(0, 2, &Attr::ToggleUnderline);
         let job = text_job(&o, 1.0, 500.0, blue);
@@ -9874,7 +9927,7 @@ mod tests {
         a.bottom_tab = 2;
         let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
         a.state_view = Some((id, "Hover".into()));
-        // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolours, the frame ends.
+        // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolors, the frame ends.
         a.begin_state_swap();
         assert!(a.swap.is_some());
         a.snapshot();
@@ -10057,10 +10110,10 @@ mod tests {
         assert_ne!(hover.fill, o.states[0].fill, "hover differs from rest");
         assert!(hover.gradient.is_some(), "and keeps the look");
         assert!(o.states.iter().find(|s| s.name == "Disabled").unwrap().gradient.is_none(), "disabled is a flat grey");
-        // A flat style has an outline but no gradient or shadow, and light colours get dark text.
+        // A flat style has an outline but no gradient or shadow, and light colors get dark text.
         a.apply_button_style(&style_of("Grey", Look::Flat, Corners::Square));
         let o = a.selected_object().unwrap().clone();
-        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a colour and an outline");
+        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a color and an outline");
         assert_eq!(o.radius, 0.0);
         assert_eq!(o.style.color, button_styles::HUES[1].text, "dark text on light grey");
         a.apply_button_style(&style_of("Teal", Look::Gloss, Corners::Pill));
@@ -10072,12 +10125,12 @@ mod tests {
     }
 
     #[test]
-    fn the_gallery_has_nine_colours_in_four_looks_and_three_corner_shapes() {
+    fn the_gallery_has_nine_colors_in_four_looks_and_three_corner_shapes() {
         use button_styles::{Corners, Look, HUES};
         assert_eq!(HUES.len(), 9);
         assert_eq!(Look::GALLERY.len(), 4);
         assert_eq!(Corners::ALL.len(), 3);
-        // Every look gives the colour it is built on to the resting state, so a swatch's colour is its hue's.
+        // Every look gives the color it is built on to the resting state, so a swatch's color is its hue's.
         for hue in &HUES { for look in Look::GALLERY {
             let mut o = Object::new("b", "b", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
             button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, look, Corners::Rounded));
@@ -10129,11 +10182,11 @@ mod tests {
         assert_eq!(faces(2, 2).normal.angle, 90.0);
         assert_eq!(faces(2, 2).normal.stops.len(), 3);
         assert!(faces(2, 2).normal.stroke.is_none());
-        // Blue, split gloss: the top half is one flat colour, with a hard edge in the middle.
+        // Blue, split gloss: the top half is one flat color, with a hard edge in the middle.
         let gloss = faces(2, 3).normal.stops;
         assert!(gloss.windows(2).any(|w| w[0].0 == w[1].0 && w[0].1 != w[1].1), "a hard edge: two stops at one position");
         assert_eq!(gloss[0].1, gloss[1].1, "the top half is flat");
-        // Every look of every colour has its three faces, and the shaded looks all have a gradient.
+        // Every look of every color has its three faces, and the shaded looks all have a gradient.
         for hue in 0..HUES.len() { for look in 0..4 {
             let f = faces(hue, look);
             for face in [&f.normal, &f.hover, &f.down] { assert_eq!(face.stops.is_empty(), look == 0, "{} look {}", HUES[hue].name, look); }
@@ -10176,7 +10229,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-styles.png")).unwrap();
         }
-        // Click the first Teal swatch (its flat look): found by its colour, so the popup can be rearranged.
+        // Click the first Teal swatch (its flat look): found by its color, so the popup can be rearranged.
         let teal = button_styles::HUES.iter().find(|d| d.name == "Teal").unwrap().fill;
         let img = h.render().expect("renderer");
         let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0.0f32);
@@ -10925,6 +10978,49 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_gradient_handle_moves_only_that_handle_and_new_handles_start_on_the_slide() {
+        let mut h = harness_fast(app());
+        h.run_steps(4);
+        {
+            let p = h.state_mut().project.as_mut().unwrap();
+            let (w, hh) = (p.slides[0].width, p.slides[0].height);
+            let mut g = Background::gradient(135.0, Rgba(0, 80, 160, 255), Rgba(230, 120, 30, 255));
+            if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, w, hh)); }
+            p.slides[0].background = Some(g);
+        }
+        h.state_mut().background_open = true;
+        h.run_steps(4);
+        let line = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[0].background {
+            Some(Background::Gradient { geom, .. }) => geom.line.unwrap(),
+            _ => unreachable!(),
+        };
+        let start = line(&h);
+        assert!(start.iter().all(|v| (-0.001..=1.001).contains(v)), "a new gradient's handles are on the slide: {start:?}");
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (w, hh) = { let s = &h.state().project.as_ref().unwrap().slides[0]; (s.width, s.height) };
+        let at = |x: f32, y: f32| origin + egui::vec2(x * w, y * hh) * scale;
+        let from = at(start[0], start[1]);
+        // Handle at the very edge of the slide: press just inside it.
+        let from = from + egui::vec2(6.0, 6.0);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        let mut pos = from;
+        for _ in 0..12 {
+            pos += egui::vec2(9.0, 4.0);
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(2);
+            let now = line(&h);
+            assert_eq!((now[2], now[3]), (start[2], start[3]), "the end handle stays put while the start one is dragged");
+        }
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(2);
+        let end = line(&h);
+        assert!(end[0] > start[0] + 0.05 && end[1] > start[1] + 0.02, "the start handle followed: {start:?} -> {end:?}");
+    }
+
+    #[test]
     fn gui_design_tab_changes_colors_and_fonts_and_hides_background_graphics() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
@@ -10971,7 +11067,7 @@ mod tests {
             h.state_mut().theme_colors_open = false;
             h.run_steps(2);
         }
-        // "Edit…" in a colour menu asks for the same window.
+        // "Edit…" in a color menu asks for the same window.
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("open-project-colors"), true));
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
@@ -10979,6 +11075,47 @@ mod tests {
         h.run_steps(2);
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
+        // Background: a window with a kind, a live preview and a gradient you build.
+        h.state_mut().background_open = true;
+        h.run_steps(3);
+        h.get_by_label("Gradient").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Gradient { .. })));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-gradient.png")).unwrap();
+        }
+        h.get_by_label("Radial").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Gradient { kind: brainbend_doc::GradientKind::Radial, .. })));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-radial.png")).unwrap();
+        }
+        // Move the centre and shrink it: the slide follows, and the handles sit where the gradient is.
+        if let Some(brainbend_doc::Background::Gradient { geom, .. }) = h.state_mut().project.as_mut().unwrap().slides[0].background.as_mut() { geom.center = (0.25, 0.3); geom.radius = 0.3; }
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-radial-moved.png")).unwrap();
+        }
+        h.get_by_label("Linear").click();
+        h.run_steps(3);
+        if let Some(brainbend_doc::Background::Gradient { geom, angle, .. }) = h.state_mut().project.as_mut().unwrap().slides[0].background.as_mut() { *angle = geom.set_line_px((300.0, 200.0), (1400.0, 800.0), 1920.0, 1080.0); }
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-linear-moved.png")).unwrap();
+        }
+        h.get_by_label("Angular").click();
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-angular.png")).unwrap();
+        }
+        h.get_by_label("Color").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Solid(_))));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-color.png")).unwrap();
+        }
+        h.state_mut().background_open = false;
+        h.run_steps(2);
     }
 
     #[test]
@@ -11028,7 +11165,7 @@ mod tests {
     }
 
     #[test]
-    fn gui_brand_colors_recent_colors_and_the_colour_menu_notes() {
+    fn gui_brand_colors_recent_colors_and_the_color_menu_notes() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
@@ -11037,26 +11174,26 @@ mod tests {
         h.run_steps(3);
         let proj = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().clone();
         assert!(proj(&h).palette.is_empty() && proj(&h).recent_colors.is_empty(), "nothing is preset");
-        // The Brand Colors window: add a colour, change it.
+        // The Brand Colors window: add a color, change it.
         h.get_by_label_contains("Colors").click();
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
-        h.get_by_label("+ Add colour").click();
+        h.get_by_label("+ Add color").click();
         h.run_steps(3);
         assert_eq!(proj(&h).palette.len(), 1);
-        // A colour menu's + adds the colour it is showing.
+        // A color menu's + adds the color it is showing.
         let teal = Rgba(0, 128, 128, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), teal));
         h.run_steps(3);
         assert_eq!(proj(&h).palette, vec![Rgba(128, 128, 128, 255), teal]);
-        // Using a colour makes it recent (not if it is in the palette).
+        // Using a color makes it recent (not if it is in the palette).
         let coral = Rgba(255, 127, 80, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), coral));
         h.run_steps(3);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), teal));
         h.run_steps(3);
         assert_eq!(proj(&h).recent_colors, vec![coral]);
-        // Adding a recent colour to the palette takes it out of the recent ones.
+        // Adding a recent color to the palette takes it out of the recent ones.
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), coral));
         h.run_steps(3);
         assert!(proj(&h).recent_colors.is_empty() && proj(&h).palette.contains(&coral));
@@ -11068,14 +11205,14 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.run_steps(3);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("brand-colors.png")).unwrap();
-            // A colour menu, from Home with a text box selected.
+            // A color menu, from Home with a text box selected.
             h.state_mut().theme_colors_open = false;
             h.state_mut().insert_text();
             h.state_mut().ribbon_tab = 1;
             h.run_steps(4);
             h.get_by_label("Text color").click();
             h.run_steps(4);
-            h.render().expect("renderer").save(std::path::Path::new(&dir).join("colour-menu.png")).unwrap();
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("color-menu.png")).unwrap();
         }
     }
 
@@ -11213,7 +11350,7 @@ mod tests {
         let png = word_export::crop_png(&image, egui::Rect::from_min_size(egui::pos2(20.0, 10.0), egui::vec2(50.0, 25.0)), 2.0).expect("a picture");
         let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
         assert_eq!(decoded.dimensions(), (100, 50), "points times the pixels in each point");
-        assert_eq!(decoded.get_pixel(5, 5).0, [10, 20, 30, 255], "the slide's colour, from inside the dark patch");
+        assert_eq!(decoded.get_pixel(5, 5).0, [10, 20, 30, 255], "the slide's color, from inside the dark patch");
         assert!(word_export::crop_png(&image, egui::Rect::from_min_size(egui::pos2(500.0, 500.0), egui::vec2(10.0, 10.0)), 1.0).is_none(), "nothing of the window is there");
     }
 
@@ -12581,7 +12718,7 @@ mod tests {
         let before = state(&h);
         let whole = crop::image_rect(&before);
 
-        // The handle on the left edge, found by its colour in the rendered frame.
+        // The handle on the left edge, found by its color in the rendered frame.
         let img = h.render().expect("renderer");
         let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "eight crop handles: {handles:?}");

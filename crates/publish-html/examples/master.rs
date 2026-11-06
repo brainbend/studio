@@ -1,12 +1,12 @@
 //! A course whose look comes from the master and layouts: gradient master background, a master
-//! logo, one slide on a layout that overrides the background with a colour, one with a picture.
+//! logo, one slide on a layout that overrides the background with a color, one with a picture.
 use brainbend_doc::*;
 
 fn main() {
     let out = std::env::args().nth(1).expect("output dir");
     let mut p = Project::new("Master demo");
     p.slides.push(Slide::new("s1", "Follows the master", 640.0, 360.0));
-    p.slides.push(Slide::new("s2", "Own colour", 640.0, 360.0));
+    p.slides.push(Slide::new("s2", "Own color", 640.0, 360.0));
     p.slides.push(Slide::new("s3", "Picture", 640.0, 360.0));
     p.sanitize();
     p.master.background = Some(Background::gradient(90.0, Rgba(255, 0, 0, 255), Rgba(0, 0, 255, 255)));

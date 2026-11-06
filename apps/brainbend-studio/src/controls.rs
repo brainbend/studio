@@ -39,7 +39,7 @@ fn range_fields(ui: &mut egui::Ui, min: &mut f32, max: &mut f32, step: &mut f32)
     changed
 }
 
-fn colour_row(ui: &mut egui::Ui, label: &str, c: &mut Rgba) -> bool {
+fn color_row(ui: &mut egui::Ui, label: &str, c: &mut Rgba) -> bool {
     ui.horizontal(|ui| { ui.label(label); crate::ribbon::color_swatch(ui, c) }).inner
 }
 
@@ -52,14 +52,14 @@ pub fn slider_editor(ui: &mut egui::Ui, sl: &mut Slider, vars: &[(String, String
         if ui.button("Choose picture…").clicked() { *pick_thumb = true; }
         if sl.thumb.is_some() && ui.small_button("Remove").clicked() { sl.thumb = None; changed = true; }
     });
-    if sl.thumb.is_none() { changed |= colour_row(ui, "Thumb colour", &mut sl.thumb_color); }
+    if sl.thumb.is_none() { changed |= color_row(ui, "Thumb color", &mut sl.thumb_color); }
     ui.horizontal(|ui| {
         ui.label("Thumb size");
         changed |= ui.add(egui::Slider::new(&mut sl.thumb_height, 0.1..=1.0).show_value(true)).on_hover_text("The thumb's height as a share of the slider's height").changed();
     });
     let mut visible = sl.track.is_some();
     if ui.checkbox(&mut visible, "Show the track").changed() { sl.track = visible.then_some(Rgba(150, 160, 175, 255)); changed = true; }
-    if let Some(t) = sl.track.as_mut() { changed |= colour_row(ui, "Track colour", t); }
+    if let Some(t) = sl.track.as_mut() { changed |= color_row(ui, "Track color", t); }
     changed
 }
 
@@ -113,11 +113,11 @@ pub fn check_editor(ui: &mut egui::Ui, o: &mut Object) -> bool {
             ui.label("Box size");
             changed |= ui.add(egui::DragValue::new(&mut ck.size).speed(0.5).range(8.0..=200.0)).changed();
         });
-        changed |= colour_row(ui, "Box colour", &mut ck.box_fill);
+        changed |= color_row(ui, "Box color", &mut ck.box_fill);
         let mut outline = ck.box_line.is_some();
         if ui.checkbox(&mut outline, "Outline").changed() { ck.box_line = outline.then_some(Rgba(150, 150, 150, 255)); changed = true; }
-        if let Some(l) = ck.box_line.as_mut() { changed |= colour_row(ui, "Outline colour", l); }
-        changed |= colour_row(ui, "Tick colour", &mut ck.tick);
+        if let Some(l) = ck.box_line.as_mut() { changed |= color_row(ui, "Outline color", l); }
+        changed |= color_row(ui, "Tick color", &mut ck.tick);
         let mut ticked = o.initial_state == "Selected";
         if ui.checkbox(&mut ticked, "Ticked at the start").changed() { o.initial_state = if ticked { "Selected".into() } else { "Normal".into() }; changed = true; }
     }

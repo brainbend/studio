@@ -27,7 +27,7 @@ fn png(w: u32, h: u32) -> Vec<u8> {
     out.into_inner()
 }
 
-/// A small valid PNG, written by hand: a solid colour.
+/// A small valid PNG, written by hand: a solid color.
 fn image_png(w: u32, h: u32) -> Vec<u8> {
     fn crc(data: &[u8]) -> u32 {
         let mut c = 0xffff_ffffu32;

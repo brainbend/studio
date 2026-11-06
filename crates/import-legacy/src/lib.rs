@@ -241,7 +241,7 @@ struct Ctx<'a> {
     /// Ids of hidden groups. Group members point at their group via `parentG` (they are not nested).
     hidden_groups: std::collections::HashSet<String>,
     parts: &'a HashMap<String, Vec<u8>>,
-    /// The text colour the source app gives shapes drawn from the shape gallery (the "DrawingShape" default style:
+    /// The text color the source app gives shapes drawn from the shape gallery (the "DrawingShape" default style:
     /// usually white), for shapes that do not set one.
     drawing_text: Option<Rgba>,
     /// Hover triggers that change a state and "restore the previous state when the user hovers out":
@@ -665,11 +665,11 @@ fn check_shape<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
     child(st, "shapeLst")?.children().find(|c| c.is_element())
 }
 
-/// The box and tick of a check box. The file stores only the box's colours (`btnBg`); the source app
+/// The box and tick of a check box. The file stores only the box's colors (`btnBg`); the source app
 /// draws the box itself, in the space the text margin leaves at the left.
 fn check_of(src: Node, ctx: &mut Ctx) -> Check {
     let mut c = Check::new();
-    // The Selected state's shape has no colours of its own, so the Normal state's are used.
+    // The Selected state's shape has no colors of its own, so the Normal state's are used.
     if let Some(bg) = child(src, "btnBg") {
         if let Some(f) = child(bg, "solidFill").and_then(|f| child(f, "clr")).and_then(|f| resolve_clr(f, ctx)) { c.box_fill = f; }
         if let Some(l) = child(bg, "solidLine").and_then(|f| child(f, "clr")).and_then(|f| resolve_clr(f, ctx)) { c.box_line = Some(l); }
@@ -691,7 +691,7 @@ fn dial_of(n: Node, ctx: &mut Ctx) -> Option<Dial> {
     Some(Dial { variable, min: at("start", 0.0), max: at("end", 10.0), step: num(data, "increment", 1.0).max(0.0), sweep: num(data, "rotation", 180.0).clamp(1.0, 360.0), pivot })
 }
 
-/// A slider: its range, step and variable, and a thumb picture or colour read from its Normal state.
+/// A slider: its range, step and variable, and a thumb picture or color read from its Normal state.
 /// `thumbH` (the thumb's height as a fraction of the frame) is read as written; a slider that does not
 /// say gets a thumb a little shorter than its frame.
 fn slider_of(n: Node, ctx: &mut Ctx) -> Slider {
@@ -914,7 +914,7 @@ fn parse_states(n: Node, fallback: &TextParts, ctx: &mut Ctx) -> Vec<ObjectState
         // A state only lists what it changes: a fill or line it does not mention is the object's own.
         let says = |tags: &[&str]| child(shape, "bG").is_some_and(|bg| tags.iter().any(|t| child(bg, t).is_some()));
         let fill = if says(&["solidFill", "noFill", "gradFill", "picFill", "pattFill"]) { fill_of(shape, ctx) } else { fill_of(n, ctx) };
-        // An empty `<solidFill><clr/></solidFill>` (a button's Visited and Disabled states) sets no colour: it keeps the first state's.
+        // An empty `<solidFill><clr/></solidFill>` (a button's Visited and Disabled states) sets no color: it keeps the first state's.
         let fill = match (fill, out.first()) {
             (None, Some(first)) if !says(&["noFill"]) => first.fill,
             (f, _) => f,
@@ -1181,7 +1181,7 @@ fn parse_triggers(owner_node: Node, owner: Owner, ctx: &mut Ctx) {
     }
 }
 
-/// The text colour of the "DrawingShape" default style in `defaultStyles.xml`.
+/// The text color of the "DrawingShape" default style in `defaultStyles.xml`.
 fn drawing_shape_text(parts: &HashMap<String, Vec<u8>>, palette: &HashMap<String, Rgba>) -> Option<Rgba> {
     let text = std::str::from_utf8(parts.get("story/defaultStyles.xml")?).ok()?;
     let doc = Document::parse(strip_bom(text)).ok()?;
@@ -1245,7 +1245,7 @@ fn layout_placeholders(parts: &HashMap<String, Vec<u8>>, sld: Node, palette: &Ha
                 bold: font.and_then(|f| f.attribute("style")).map(|st| st.contains("Bold")),
                 font: font.and_then(|f| f.attribute("name")).map(String::from),
                 valign: match n.attribute("vertAlign") { Some("t") => Some(VAlign::Top), Some("m") => Some(VAlign::Middle), Some("b") => Some(VAlign::Bottom), _ => None },
-                // The text colour the layout gives it, which can be a light one on a dark layout.
+                // The text color the layout gives it, which can be a light one on a dark layout.
                 color: font.and_then(|f| child(f, "clr")).and_then(|c| {
                     child(c, "srgbClr").and_then(|v| v.attribute("val")).and_then(parse_hex).or_else(|| child(c, "schemeClr").and_then(|v| v.attribute("val")).and_then(|k| palette.get(k).copied()))
                 }),
@@ -1271,7 +1271,7 @@ fn find_master_layout(parts: &HashMap<String, Vec<u8>>, sld: Node) -> (Option<St
     };
     let mut chosen: Option<&String> = None;
     let mut layout_part: Option<&String> = None;
-    // The slide's layout belongs to its master. (`fmGuid` can name the Feedback master instead, which has its own colours.)
+    // The slide's layout belongs to its master. (`fmGuid` can name the Feedback master instead, which has its own colors.)
     if let Some(layout_g) = sld.attribute("layoutG") {
         layout_part = parts.keys().filter(|k| k.starts_with("story/slideLayouts/") && k.ends_with(".xml")).find(|k| {
             parse(k).is_some_and(|d| d.root_element().attribute("internalG") == Some(layout_g))
@@ -1339,7 +1339,7 @@ fn master_palette(parts: &HashMap<String, Vec<u8>>, sld: Node) -> (HashMap<Strin
         }
     }
     // The background a slide inherits: its layout's if that has a fill, else the master's. Only a plain
-    // colour can be drawn; a picture or gradient there is left as the white page.
+    // color can be drawn; a picture or gradient there is left as the white page.
     let own = |d: &Document| -> Option<Option<Rgba>> {
         let bg = d.descendants().find(|n| n.has_tag_name("bg"))?;
         if let Some(clr) = child(bg, "solidFill").and_then(|f| child(f, "clr")) {
@@ -1365,7 +1365,7 @@ fn is_hidden(n: Node) -> bool {
 /// Resolve a `<clr>` node: `srgbClr` or a theme `schemeClr`, with `shade` (darken, linear
 /// light) and `alpha` modifiers. Other modifiers are ignored.
 #[allow(clippy::question_mark)] // the missing-palette branch deliberately counts before returning None
-/// `c` in variant `v` of the theme colour picker (see `resolve_clr`). Greys, whose variants are laid out
+/// `c` in variant `v` of the theme color picker (see `resolve_clr`). Greys, whose variants are laid out
 /// differently, are left as they are.
 fn theme_variant(c: Rgba, v: u32) -> Rgba {
     let (r, g, b) = (c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0);
@@ -1374,7 +1374,7 @@ fn theme_variant(c: Rgba, v: u32) -> Rgba {
     let d = hi - lo;
     let s = if d == 0.0 { 0.0 } else { d / (1.0 - (2.0 * l - 1.0).abs()) };
     if d < 0.06 { return c; }
-    // 1-5: lighter 80/60/40 %, darker 25/50 %. 6-10 (seen on dark theme colours): a ramp from nearly white down to the colour
+    // 1-5: lighter 80/60/40 %, darker 25/50 %. 6-10 (seen on dark theme colors): a ramp from nearly white down to the color
     // itself, read off the source app (6 = the card behind the slide, 8 = a button's Hover, 9 = Normal, 10 = Selected).
     let (m, o) = match v { 1 => (0.2, 0.8), 2 => (0.4, 0.6), 3 => (0.6, 0.4), 4 => (0.75, 0.0), 5 => (0.5, 0.0), 6 => (0.1, 0.9), 7 => (0.25, 0.75), 8 => (0.5, 0.5), 9 => (0.75, 0.25), 10 => (1.0, 0.0), _ => return c };
     let h = if hi == r { ((g - b) / d).rem_euclid(6.0) } else if hi == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
@@ -1412,7 +1412,7 @@ fn resolve_clr(clr: Node, ctx: &mut Ctx) -> Option<Rgba> {
                 c = Rgba(f(c.0), f(c.1), f(c.2), c.3);
             }
             "alpha" => c.3 = (v * 255.0).round().clamp(0.0, 255.0) as u8,
-            // The source app's colour picker offers each theme colour in lighter and darker variants: `grad` is
+            // The source app's color picker offers each theme color in lighter and darker variants: `grad` is
             // the variant (1-3 lighter by 80, 60 and 40 percent, 4 and 5 darker by 25 and 50, as in Office).
             "grad" => c = theme_variant(c, m.attribute("val").and_then(|v| v.parse().ok()).unwrap_or(0)),
             _ => {}
@@ -1556,7 +1556,7 @@ fn fmt_justification(shape: Node) -> Option<Align> {
 
 fn base_style(shape: Node, ctx: &mut Ctx) -> TextStyle {
     let mut st = default_style();
-    // Shapes from the shape gallery start from the "DrawingShape" text colour; text boxes and buttons do not.
+    // Shapes from the shape gallery start from the "DrawingShape" text color; text boxes and buttons do not.
     if matches!(shape.tag_name().name(), "rect" | "roundRect" | "oval" | "triangle" | "rightTriangle" | "rightArrow" | "roundSameSideCorner" | "snipDiagCorner" | "lnCall1" | "multiply" | "checkMark") {
         if let Some(c) = ctx.drawing_text { st.color = c; }
     }
@@ -1626,7 +1626,7 @@ pub fn parse_text_rich(src: &str, base: &TextStyle, scale: f32, palette: &HashMa
     parse_text_rich_with(src, base, scale, palette, &HashMap::new())
 }
 
-/// The colour a hyperlink is drawn in when the theme does not say.
+/// The color a hyperlink is drawn in when the theme does not say.
 const LINK_BLUE: Rgba = Rgba(5, 99, 193, 255);
 
 /// Like [`parse_text_rich`]. `links` maps a span's `LinkId` to the address it opens.
@@ -1675,7 +1675,7 @@ pub fn parse_text_rich_with(src: &str, base: &TextStyle, scale: f32, palette: &H
                 style = st.clone();
                 styled = true;
             }
-            // A link is drawn the way the source app draws one: underlined, in the theme's link colour.
+            // A link is drawn the way the source app draws one: underlined, in the theme's link color.
             let link = child(*span, "Style").and_then(|s| s.attribute("LinkId")).and_then(|id| links.get(id)).cloned();
             let mut shown = st;
             if link.is_some() {
@@ -1918,7 +1918,7 @@ mod tests {
     }
 
     #[test]
-    fn a_slide_takes_the_colours_of_the_master_its_layout_belongs_to_not_the_feedback_one() {
+    fn a_slide_takes_the_colors_of_the_master_its_layout_belongs_to_not_the_feedback_one() {
         let mk = |g: &str, role: &str, dk2: &str| format!(r#"<master g="{g}" role="{role}"><clrLst><dk2><srgbClr val="{dk2}"/></dk2></clrLst></master>"#);
         let feedback = mk("F", "Feedback", "FF0000");
         let content = mk("C", "Content", "00FF00");
@@ -2214,7 +2214,7 @@ mod tests {
     }
 
     #[test]
-    fn a_check_box_takes_its_label_and_colours_from_its_normal_state_and_state_triggers_fan_out() {
+    fn a_check_box_takes_its_label_and_colors_from_its_normal_state_and_state_triggers_fan_out() {
         let inner = |text: &str, fill: &str| format!(r#"<checkBox name="Check Box">{LOC}<text>{text}</text><plain>{text}</plain><margins l="32" t="0" r="0" b="0"/><btnBg>{fill}</btnBg></checkBox>"#);
         let fill = r#"<solidFill><clr><srgbClr val="F0F0F0"/></clr></solidFill><solidLine><clr><srgbClr val="102030"/></clr></solidLine>"#;
         let boxed = |g: &str| format!(r#"<checkBox g="{g}" name="Check Box" initState="Normal">{LOC}<stateLst>
@@ -2228,7 +2228,7 @@ mod tests {
         assert_eq!(ck.box_fill, Rgba(0xF0, 0xF0, 0xF0, 255));
         assert_eq!(ck.box_line, Some(Rgba(0x10, 0x20, 0x30, 255)));
         assert_eq!(o.margins[0], 32.0, "the label starts after the box");
-        assert!(o.states.is_empty() && o.fill.is_none(), "the box colours are not the object's fill");
+        assert!(o.states.is_empty() && o.fill.is_none(), "the box colors are not the object's fill");
         // "any of c1, c2 are Selected" watches each of them.
         let events: Vec<_> = p.slides[0].triggers.iter().map(|t| format!("{:?}", t.event)).collect();
         assert_eq!(events, ["StateChanged(\"c1\", \"Selected\")", "StateChanged(\"c2\", \"Selected\")"], "{events:?}");
@@ -2299,7 +2299,7 @@ mod tests {
         assert_eq!((plain(0).as_str(), plain(1).as_str(), plain(2).as_str(), plain(3).as_str(), plain(4).as_str()), ("Intro with a link", "", "Choices:\n", "• First", ""), "an empty bulleted paragraph gets no bullet");
         let link = paras[0].runs.iter().find(|r| r.text == "link").unwrap();
         assert_eq!(link.link.as_deref(), Some("https://example.com/"));
-        assert_eq!((link.underline, link.color), (Some(true), Some(Rgba(1, 2, 3, 255))), "underlined in the theme's link colour");
+        assert_eq!((link.underline, link.color), (Some(true), Some(Rgba(1, 2, 3, 255))), "underlined in the theme's link color");
         assert!(paras[0].runs[0].link.is_none());
     }
 
@@ -2329,7 +2329,7 @@ mod tests {
     }
 
     #[test]
-    fn a_slide_without_its_own_fill_takes_the_colour_of_its_master() {
+    fn a_slide_without_its_own_fill_takes_the_color_of_its_master() {
         let story = r#"<story><propLst><prop><sz w="960" h="540"/></prop></propLst></story>"#;
         let master = r#"<slideMaster g="M"><clrLst><lt1><srgbClr val="FAFEFF"/></lt1></clrLst><bg><solidFill><clr><schemeClr val="lt1"/><alpha val="71000"/></clr></solidFill></bg></slideMaster>"#;
         let plain = r#"<sld g="S" name="S" fmGuid="M"><bg/><shapeLst/><sldLayerLst/></sld>"#;
@@ -2338,7 +2338,7 @@ mod tests {
         let bg = |slide: &str| import(package(&[("story/story.xml", story), ("story/slideMasters/m.xml", master), ("story/slides/slide.xml", slide)]), "t").unwrap().slides[0].background.clone();
         assert!(matches!(bg(plain), Some(brainbend_doc::Background::Solid(c)) if c == Rgba(250, 254, 255, 181)), "{:?}", bg(plain));
         assert!(matches!(bg(own), Some(brainbend_doc::Background::Solid(c)) if c == Rgba(16, 32, 48, 255)));
-        assert!(bg(pic).is_none(), "a picture fill is not drawn, and the master's colour must not stand in for it");
+        assert!(bg(pic).is_none(), "a picture fill is not drawn, and the master's color must not stand in for it");
     }
 
     #[test]
@@ -2385,7 +2385,7 @@ mod tests {
     }
 
     #[test]
-    fn theme_colour_variants_are_the_lighter_and_darker_shades_of_the_picker() {
+    fn theme_color_variants_are_the_lighter_and_darker_shades_of_the_picker() {
         let accent = Rgba(0x4B, 0xAC, 0xC6, 255);
         let near = |a: Rgba, b: (u8, u8, u8)| (a.0 as i32 - b.0 as i32).abs() <= 2 && (a.1 as i32 - b.1 as i32).abs() <= 2 && (a.2 as i32 - b.2 as i32).abs() <= 2;
         assert!(near(theme_variant(accent, 1), (0xDA, 0xEE, 0xF3)), "{:?}", theme_variant(accent, 1));
@@ -2398,7 +2398,7 @@ mod tests {
         // 6-10 on a dark slate (the theme's dk2): the card behind a slide, Hover, Normal and Selected of its buttons.
         let slate = Rgba(0x24, 0x2E, 0x37, 255);
         assert!(near(theme_variant(slate, 8), (128, 151, 172)) && near(theme_variant(slate, 9), (77, 99, 118)), "{:?}", theme_variant(slate, 9));
-        assert_eq!(theme_variant(slate, 10), slate, "10 is the colour itself");
+        assert_eq!(theme_variant(slate, 10), slate, "10 is the color itself");
         assert!(theme_variant(slate, 6).0 > 220, "6 is nearly white");
     }
 

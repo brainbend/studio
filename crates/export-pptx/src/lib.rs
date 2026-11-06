@@ -46,6 +46,20 @@ fn solid(c: Rgba) -> String {
     format!("<a:solidFill>{}</a:solidFill>", color_xml(c))
 }
 
+/// A background gradient: radial uses a circular path; reflected is spelled out as stops; angular has no equivalent in
+/// PowerPoint and falls back to linear.
+fn background_gradient_xml(kind: brainbend_doc::GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &brainbend_doc::GradientGeom) -> String {
+    use brainbend_doc::GradientKind::*;
+    match kind {
+        Radial => {
+            let gs: String = stops.iter().map(|(p, c)| format!("<a:gs pos=\"{}\">{}</a:gs>", (p * 100000.0).round() as i32, color_xml(*c))).collect();
+            format!("<a:gradFill rotWithShape=\"1\"><a:gsLst>{gs}</a:gsLst><a:path path=\"circle\"><a:fillToRect l=\"{l}\" t=\"{t}\" r=\"{r}\" b=\"{b}\"/></a:path></a:gradFill>", l = (geom.center.0 * 100000.0).round() as i32, t = (geom.center.1 * 100000.0).round() as i32, r = ((1.0 - geom.center.0) * 100000.0).round() as i32, b = ((1.0 - geom.center.1) * 100000.0).round() as i32)
+        }
+        Reflected => gradient_xml(angle, &brainbend_doc::reflect_stops(stops)),
+        _ => gradient_xml(angle, stops),
+    }
+}
+
 fn gradient_xml(angle: f32, stops: &[(f32, Rgba)]) -> String {
     let gs: String = stops.iter().map(|(p, c)| format!("<a:gs pos=\"{}\">{}</a:gs>", (p * 100000.0).round() as i32, color_xml(*c))).collect();
     // CSS 90deg points right; DrawingML 0 points right.
@@ -182,7 +196,7 @@ impl Part<'_> {
     fn background(&mut self, bg: &Background) -> String {
         let fill = match bg {
             Background::Solid(c) => solid(*c),
-            Background::Gradient { angle, stops } => gradient_xml(*angle, stops),
+            Background::Gradient { angle, stops, kind, geom } => background_gradient_xml(*kind, *angle, stops, geom),
             Background::Image { asset } => match self.blip(asset) {
                 Some(rid) => format!("<a:blipFill dpi=\"0\" rotWithShape=\"1\"><a:blip r:embed=\"{rid}\"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"),
                 None => solid(Rgba(255, 255, 255, 255)),
@@ -287,7 +301,7 @@ impl Part<'_> {
         let hl = run.and_then(|r| r.highlight).map(|c| format!("<a:highlight><a:srgbClr val=\"{:02X}{:02X}{:02X}\"/></a:highlight>", c.0, c.1, c.2)).unwrap_or_default();
         let font = run.and_then(|r| r.font_family.clone()).unwrap_or_else(|| base.font_family.clone());
         let link = match run.and_then(|r| r.link.as_deref()).filter(|u| u.starts_with("http://") || u.starts_with("https://") || u.starts_with("mailto:")) {
-            // PowerPoint draws links in the theme's hyperlink colour unless the click asks for the text's own colour.
+            // PowerPoint draws links in the theme's hyperlink color unless the click asks for the text's own color.
             Some(url) if run.is_some_and(|r| r.color.is_some()) => { let rid = self.rels.add("hyperlink", url, true); format!("<a:hlinkClick r:id=\"{rid}\"><a:extLst><a:ext uri=\"{{A12FA001-AC4F-418D-AE19-62706E023703}}\"><ahyp:hlinkClr xmlns:ahyp=\"http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor\" val=\"tx\"/></a:ext></a:extLst></a:hlinkClick>") }
             Some(url) => { let rid = self.rels.add("hyperlink", url, true); format!("<a:hlinkClick r:id=\"{rid}\"/>") }
             None => String::new(),

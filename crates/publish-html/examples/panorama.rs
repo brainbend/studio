@@ -18,7 +18,7 @@ fn main() {
     let mut lamp = pin("lamp", 5.0, 10.0, "Lamp", "");
     lamp.button = true;
     tour.pins.push(lamp);
-    // A hotspot: a shaded area with a card of its own, and its own colour.
+    // A hotspot: a shaded area with a card of its own, and its own color.
     let mut bench = brainbend_doc::pano::PanoPin::hotspot("bench".into(), vec![(30.0, -6.0), (42.0, -6.0), (42.0, 8.0), (30.0, 8.0)]);
     bench.title = "Bench".into();
     bench.description = "A workbench.".into();

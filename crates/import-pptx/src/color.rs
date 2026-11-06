@@ -1,4 +1,4 @@
-//! DrawingML colours, fills and the theme's colour/format scheme.
+//! DrawingML colors, fills and the theme's color/format scheme.
 use roxmltree::Node;
 use std::collections::HashMap;
 use brainbend_doc::Rgba;
@@ -19,11 +19,11 @@ pub fn attr_f(n: Node, name: &str) -> Option<f32> {
 pub enum Base {
     Rgb(u8, u8, u8),
     Scheme(String),
-    /// The colour a style reference passes in ("placeholder colour").
+    /// The color a style reference passes in ("placeholder color").
     PhClr,
 }
 
-/// A colour as written (base plus the transforms applied in order); resolved against a theme later.
+/// A color as written (base plus the transforms applied in order); resolved against a theme later.
 #[derive(Clone, Debug)]
 pub struct ColorSpec {
     pub base: Base,
@@ -63,7 +63,7 @@ fn preset(name: &str) -> (u8, u8, u8) {
     }
 }
 
-/// Parse a colour element (`srgbClr`, `schemeClr`, `sysClr`, `prstClr`, ...).
+/// Parse a color element (`srgbClr`, `schemeClr`, `sysClr`, `prstClr`, ...).
 pub fn parse_color(n: Node) -> Option<ColorSpec> {
     let val = n.attribute("val").unwrap_or("");
     let base = match n.tag_name().name() {
@@ -84,7 +84,7 @@ pub fn parse_color(n: Node) -> Option<ColorSpec> {
     Some(ColorSpec { base, mods })
 }
 
-/// The first colour child of `parent` (e.g. inside `solidFill`).
+/// The first color child of `parent` (e.g. inside `solidFill`).
 pub fn first_color(parent: Node) -> Option<ColorSpec> {
     parent.children().filter(|c| c.is_element()).find_map(parse_color)
 }
@@ -204,7 +204,7 @@ pub fn parse_fill(parent: Node) -> Option<FillSpec> {
 }
 
 impl FillSpec {
-    /// A single colour standing for the fill (gradients use their middle stop).
+    /// A single color standing for the fill (gradients use their middle stop).
     pub fn flat(&self, cx: &ColorCtx) -> Option<Rgba> {
         match self {
             FillSpec::NoFill | FillSpec::Blip { .. } => None,
@@ -217,7 +217,7 @@ impl FillSpec {
     }
 }
 
-/// Theme data needed to resolve colours and style references.
+/// Theme data needed to resolve colors and style references.
 #[derive(Clone, Debug, Default)]
 pub struct ThemeData {
     pub name: String,

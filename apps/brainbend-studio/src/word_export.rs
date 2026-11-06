@@ -53,7 +53,7 @@ pub fn crop_png(image: &egui::ColorImage, rect: egui::Rect, pixels_per_point: f3
     let mut rgba = Vec::with_capacity(w * h * 4);
     for y in y0..y1 {
         for c in &image.pixels[y * iw + x0..y * iw + x1] {
-            // The window is opaque, so the colour needs no un-premultiplying.
+            // The window is opaque, so the color needs no un-premultiplying.
             rgba.extend_from_slice(&[c.r(), c.g(), c.b(), 255]);
         }
     }
@@ -200,6 +200,6 @@ impl App {
     pub(super) fn word_export_running(&self) -> bool { self.word_capture.is_some() }
 }
 
-/// Used by tests: a window-sized image of one colour, standing in for the captured window.
+/// Used by tests: a window-sized image of one color, standing in for the captured window.
 #[cfg(test)]
 pub fn plain_image(size: [usize; 2], c: egui::Color32) -> std::sync::Arc<egui::ColorImage> { std::sync::Arc::new(egui::ColorImage::filled(size, c)) }

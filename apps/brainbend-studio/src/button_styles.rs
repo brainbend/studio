@@ -1,4 +1,4 @@
-//! The Button Styles gallery: ready-made looks for a button's states, laid out like Storyline's (nine colours across,
+//! The Button Styles gallery: ready-made looks for a button's states, laid out like Storyline's (nine colors across,
 //! four looks down, and a choice of square, rounded or pill corners).
 use super::*;
 use crate::button_faces::FACES;
@@ -6,7 +6,7 @@ use crate::button_faces::FACES;
 /// How a style's fill is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
-    /// A flat colour with a darker outline.
+    /// A flat color with a darker outline.
     Flat,
     /// Lighter at the top, darker at the bottom, with a drop shadow.
     Gradient,
@@ -14,7 +14,7 @@ pub enum Look {
     Sheen,
     /// The top half lighter than the bottom half, with a crisp line between, and a drop shadow.
     Gloss,
-    /// A flat colour with nothing else (for the markers, which draw their own look).
+    /// A flat color with nothing else (for the markers, which draw their own look).
     Plain,
 }
 
@@ -41,7 +41,7 @@ impl Corners {
     pub fn label(self) -> &'static str { match self { Corners::Square => "Square", Corners::Rounded => "Rounded", Corners::Pill => "Pill" } }
 }
 
-/// One of the gallery's colours.
+/// One of the gallery's colors.
 pub struct Hue {
     pub name: &'static str,
     pub fill: Rgba,
@@ -52,7 +52,7 @@ pub(crate) const fn c(r: u8, g: u8, b: u8) -> Rgba { Rgba(r, g, b, 255) }
 const WHITE: Rgba = c(255, 255, 255);
 const BLACK: Rgba = c(0, 0, 0);
 
-/// Storyline's nine colours: black, light grey, its six theme accents and a bright blue.
+/// Storyline's nine colors: black, light grey, its six theme accents and a bright blue.
 pub const HUES: [Hue; 9] = [
     Hue { name: "Black", fill: c(38, 38, 38), text: WHITE },
     Hue { name: "Grey", fill: c(217, 217, 217), text: BLACK },
@@ -65,7 +65,7 @@ pub const HUES: [Hue; 9] = [
     Hue { name: "Bright blue", fill: c(24, 136, 231), text: WHITE },
 ];
 
-/// One style: the colour its states are worked out from, how that colour is drawn, and the corners.
+/// One style: the color its states are worked out from, how that color is drawn, and the corners.
 #[derive(Clone, Debug)]
 pub struct StyleDef {
     pub name: &'static str,
@@ -73,7 +73,7 @@ pub struct StyleDef {
     pub text: Rgba,
     pub look: Look,
     pub radius: f32,
-    /// Which of the gallery's colours it is (`None` for a plain colour that is not one of them).
+    /// Which of the gallery's colors it is (`None` for a plain color that is not one of them).
     pub hue: Option<usize>,
 }
 
@@ -84,7 +84,7 @@ impl StyleDef {
     }
 }
 
-/// One face of a style: a flat colour or gradient (`stops` empty means flat), and an outline with its own opacity.
+/// One face of a style: a flat color or gradient (`stops` empty means flat), and an outline with its own opacity.
 pub struct Face {
     pub fill: Rgba,
     /// CSS angle of the gradient: 0 is towards the top, 90 towards the right, 180 towards the bottom.
@@ -188,7 +188,7 @@ pub fn swatch(ui: &mut egui::Ui, def: &StyleDef) -> bool {
     resp.on_hover_text(format!("{}, {}", def.name, def.look.label().to_lowercase())).clicked()
 }
 
-/// The gallery itself: the corner choice, then a grid of nine colours by four looks. Returns the style clicked.
+/// The gallery itself: the corner choice, then a grid of nine colors by four looks. Returns the style clicked.
 pub fn gallery(ui: &mut egui::Ui, corners: &mut Corners) -> Option<StyleDef> {
     let mut picked = None;
     ui.horizontal(|ui| {

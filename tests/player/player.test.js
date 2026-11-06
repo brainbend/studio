@@ -309,7 +309,7 @@ test('lines are drawn as SVG strokes, rising or falling', () => {
   assert.deepEqual(errors, []);
 });
 
-test('slides follow the master: gradient, colour and picture backgrounds, and master shapes underneath', () => {
+test('slides follow the master: gradient, color and picture backgrounds, and master shapes underneath', () => {
   const { w, errors } = boot(fixture('master'));
   const slides = $$(w, '.slide');
   assert.match(slides[0].style.background, /linear-gradient\(90deg/);
@@ -960,7 +960,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const audit = async (w) => {
   w.eval(axe.source);
-  // jsdom does no layout, so colour contrast is checked from the stylesheets elsewhere.
+  // jsdom does no layout, so color contrast is checked from the stylesheets elsewhere.
   const r = await w.axe.run(w.document, { rules: { 'color-contrast': { enabled: false } } });
   return Array.from(r.violations, (v) => `${v.id}: ${v.nodes[0].html.slice(0, 120)}`);
 };
@@ -988,8 +988,10 @@ test('accessibility: landmarks, a heading and a spoken announcement name each sl
   assert.equal(main.getAttribute('aria-label'), 'Access');
   assert.equal($(w, 'nav#nav').getAttribute('aria-label'), 'Course navigation');
   assert.equal($(w, '#slide-title').textContent, 'First topic');
-  assert.equal($(w, '#slide-title').getAttribute('role'), 'heading', 'the hidden slide title is a level 1 heading');
-  assert.equal($(w, '#slide-title').getAttribute('aria-level'), '1');
+  assert.equal($(w, '#slide-title').getAttribute('role'), 'heading', 'the hidden slide title is a heading');
+  assert.equal($(w, '#slide-title').getAttribute('aria-level'), '2', 'level 2: the project name is the page\'s one level 1 heading');
+  assert.equal($$(w, 'h1').length, 1, 'one level 1 heading on the page');
+  assert.ok($(w, 'main#stage h1.sr-only'), 'the project name heading sits inside the main landmark, so no content is outside a landmark');
   assert.equal($(w, '#announce').textContent, 'First topic, slide 1 of 2');
   assert.equal($(w, '#announce').getAttribute('aria-live'), 'polite');
   assert.equal($(w, '.nav-count').getAttribute('aria-label'), 'Slide 1 of 2');
@@ -1072,7 +1074,7 @@ test('accessibility: a key a control handled does not also play a click step', (
   assert.equal(hidden('one'), false, 'an unused space bar plays the step');
 });
 
-test('accessibility: questions - results are written as well as coloured, and answering moves focus to the feedback', () => {
+test('accessibility: questions - results are written as well as colored, and answering moves focus to the feedback', () => {
   const { w } = boot(fixture('quiz2'));
   // The first question in this fixture is typed; answer it wrong, then see the written mark and the focus.
   const input = $(w, '.q-text');
@@ -1237,7 +1239,7 @@ test('list items hang: the marker sits in the margin and wrapped lines line up w
   assert.deepEqual(errors, []);
 });
 
-test('headings are published as real heading elements, and a Heading 1 replaces the hidden slide title as the slide heading', () => {
+test('headings are published as real heading elements, and the slide title stays a level 2 heading beside them', () => {
   const { w, errors } = boot(fixture('richtext'));
   const h2 = $(w, 'h2.label');
   assert.ok(h2, 'a Heading 2 text object is an h2');
@@ -1245,8 +1247,8 @@ test('headings are published as real heading elements, and a Heading 1 replaces 
   const h1 = $(w, 'h1.label');
   assert.equal(h1.textContent, 'Main heading');
   const title = $(w, '#slide-title');
-  assert.equal(title.getAttribute('role'), 'group', 'the hidden slide title steps aside for an author-made Heading 1');
-  assert.equal(title.getAttribute('aria-label'), 'A');
+  assert.equal(title.getAttribute('role'), 'heading', 'the hidden slide title is still the slide heading');
+  assert.equal(title.getAttribute('aria-level'), '2');
   assert.equal($$(w, '.obj .label').filter((l) => l.tagName === 'DIV').length > 0, true, 'ordinary text stays a block');
   assert.deepEqual(errors, []);
 });
@@ -1575,7 +1577,7 @@ test('button styles: a state can be a gradient, so a button keeps its look when 
   assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(110,179,215,1\) 0%,rgba\(47,78,162,1\) 100%\)/, 'the resting face is the gradient');
   assert.match(btn.style.boxShadow, /^0px 4px 3\.5px 0px /, 'with its drop shadow');
   btn.dispatchEvent(new w.MouseEvent('mouseenter'));
-  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat colour');
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat color');
   btn.dispatchEvent(new w.MouseEvent('mouseleave'));
   assert.match(btn.style.background, /rgba\(110,179,215,1\)/, 'and it goes back');
   assert.deepEqual(errors, []);
@@ -1829,7 +1831,7 @@ test('player sidebar: menu and notes tabs, the title and the logo, a toggle that
   assert.ok($(right, '#menu').classList.contains('side-right'));
 });
 
-test('player buttons and controls: text by default, icons with words on request; volume, captions and speed; the theme colours', () => {
+test('player buttons and controls: text by default, icons with words on request; volume, captions and speed; the theme colors', () => {
   const plain = boot(fixture('playerui')).w;
   assert.deepEqual($$(plain, '#nav button').map((b) => b.textContent), ['Previous', 'Next'], 'text buttons by default');
   assert.equal($(plain, '#nav .nav-controls'), null, 'no controls unless asked for');
@@ -1847,7 +1849,7 @@ test('player buttons and controls: text by default, icons with words on request;
   assert.equal(ctl('speed').textContent, '1x');
   click(w, ctl('speed'));
   assert.equal(ctl('speed').textContent, '1.25x');
-  // A light theme with the author's accent colour reaches the page as custom properties.
+  // A light theme with the author's accent color reaches the page as custom properties.
   const css = $$(w, 'style').map((s) => s.textContent).join('');
   assert.match(css, /--p-panel:#f4f6f9/);
   assert.match(css, /--p-accent:#e87722/);
@@ -1874,9 +1876,9 @@ test('a question slide carries its own shapes, buttons and triggers beside the q
   assert.equal(area.style.left, '100px');
   assert.equal(area.querySelector('.q').style.background, 'transparent', 'the slide shows around it');
   assert.ok($$(w, '.obj').length >= 3, 'the slide objects are built next to it');
-  assert.equal(obj('Think about the colour of the sky').style.display, 'none', 'the note starts hidden');
+  assert.equal(obj('Think about the color of the sky').style.display, 'none', 'the note starts hidden');
   click(w, obj('Hint'));
-  assert.notEqual(obj('Think about the colour of the sky').style.display, 'none', 'the button shows the note');
+  assert.notEqual(obj('Think about the color of the sky').style.display, 'none', 'the button shows the note');
   assert.ok($(w, '.q'), 'the question was not wiped');
   assert.deepEqual(errors, []);
 });
@@ -1991,12 +1993,12 @@ test('an annotation set to be a button runs its triggers and opens no card', asy
   assert.deepEqual(errors, []);
 });
 
-test('a marker has its colour and icon, a hotspot is a shaded area, and each pulses until it is visited', async () => {
+test('a marker has its color and icon, a hotspot is a shaded area, and each pulses until it is visited', async () => {
   const { w, errors } = panoBoot();
   const tour = panoNode(w, 'A teaching laboratory');
   await sleep(60);
   const door = [...tour.querySelectorAll(':scope > button')].find((b) => b.getAttribute('aria-label') === 'Door');
-  assert.match(door.style.background, /rgb\(79, 129, 189\)/, 'the default marker colour');
+  assert.match(door.style.background, /rgb\(79, 129, 189\)/, 'the default marker color');
   assert.match(door.querySelector('svg path').getAttribute('d'), /^M0\.25 0\.25L0\.75 0\.25/, 'its icon');
   assert.ok(door.classList.contains('pano-pulse'), 'unvisited pulses');
   const poly = tour.querySelector('svg polygon');
