@@ -13004,7 +13004,7 @@ mod tests {
         assert_eq!(h.state().project.as_ref().unwrap().slides[n0 - 1].name, "Quiz page");
         assert_eq!(h.state().slide, n0 - 1);
         h.state_mut().move_layout(1, false);
-        assert_eq!(h.state().slide, n0 - 1, "the first layout cannot move up, nor the All layouts stand-in");
+        assert_eq!(h.state().slide, n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
         h.state_mut().leave_master_view();
         let p = h.state().project.as_ref().unwrap();
         assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");

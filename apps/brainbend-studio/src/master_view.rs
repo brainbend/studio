@@ -62,7 +62,7 @@ impl App {
             s.scene = MASTER_SCENE.into();
             s
         };
-        let mut slides = vec![stand_in("m:master".into(), "All layouts", &p.master.background, &p.master.objects, None)];
+        let mut slides = vec![stand_in("m:master".into(), "Layout Master", &p.master.background, &p.master.objects, None)];
         for l in &p.layouts {
             slides.push(stand_in(format!("m:{}", l.id), &l.name, &l.background, &l.objects, Some(l.id.clone())));
         }
@@ -199,7 +199,7 @@ impl App {
         self.insert(o);
     }
 
-    /// Swap layout `i` with its neighbour (never the "All layouts" stand-in at the top).
+    /// Swap layout `i` with its neighbour (never the "Layout Master" stand-in at the top).
     pub(super) fn move_layout(&mut self, i: usize, down: bool) {
         if !self.in_master_view() { return; }
         let Some(p) = self.project.as_ref() else { return };
@@ -221,7 +221,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Left panel in the Layout Builder: the "All layouts" stand-in, then each layout, like the slide list outside.
+    /// Left panel in the Layout Builder: the "Layout Master" stand-in, then each layout, like the slide list outside.
     pub(super) fn master_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout Builder").strong());
