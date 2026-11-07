@@ -29,7 +29,7 @@
 </p>
 
 > [!NOTE]
-> BrainBend Studio is a work in progress, heading for its first release (v0.1.0). Web Lessons are not available to create yet.
+> BrainBend Studio is a work in progress. Web Lessons are not available to create yet.
 
 ## Runs where you do
 
@@ -79,8 +79,9 @@ Press **Publish** to choose how the project goes out:
 - **Print**: the same handout in your browser's print dialog, for a printer or its own "Save as PDF".
 - **Word**: an editable .docx handout with a picture of each slide (questions as they look in the lesson), on a portrait page: one slide with its notes and alt text, or two slides to a page.
 - **PowerPoint**: a `.pptx` file.
+- **Video**: an MP4 of the lesson. Each slide shows for its timeline's length or as long as its sound plays, slide transitions are blended in, and sound that starts by itself is mixed in. Effects and motion paths are not played yet, and a report afterwards lists what the video leaves out. Making video needs the free ffmpeg program: the first time, Studio asks and downloads it once from [studio-components](https://github.com/brainbend/studio-components).
 
-BrainBend Review, BrainBend LMS and Video are marked Coming soon.
+BrainBend Review and BrainBend LMS are marked Coming soon.
 
 ## License
 
