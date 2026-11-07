@@ -15,7 +15,7 @@ pulldown-latex = "0.8"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
 rfd = "0.17.2"
 skrifa = "0.44"
-brainbend-doc = { path = "../../crates/doc" }
+brainbend-doc = { path = "../../crates/doc", features = ["schema"] }
 brainbend-fonts = { path = "../../crates/fonts" }
 brainbend-import-legacy = { path = "../../crates/import-legacy" }
 brainbend-import-pptx = { path = "../../crates/import-pptx" }

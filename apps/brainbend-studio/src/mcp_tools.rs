@@ -75,6 +75,18 @@ fn table() -> Vec<(Access, ToolDef)> {
                 p
             }, &["slide", "object"]), false),
         tool(Access::Edit, "delete_object", "Deletes an object from a slide.", schema(json!({ "slide": slide_prop(), "object": object_prop() }), &["slide", "object"]), false),
+        tool(Access::Read, "describe_model", "Tells you how the project is written and what can be set. With no `type` it gives an overview and lists every type; with a type name (Object, Entrance, Emphasis, Trigger, Action, Event, TextStyle, Slide, Layer, Theme, ...) it lists that type's fields, what each takes and what each does. Use it before changing anything you are not sure of.",
+            schema(json!({ "type": { "type": "string", "description": "A type name, such as Object or Entrance. Leave out for the overview." } }), &[]), true),
+        tool(Access::Read, "read", "Reads any part of the project as JSON, by path (JSON Pointer, counting from 0): /slides/0, /slides/0/layers/0/objects/2, /slides/0/triggers, /theme, /variables, /player. With no path, or a part too big to show, it lists what is inside and how big each part is. Pictures, video and audio files are not included.",
+            schema(json!({ "path": { "type": "string", "description": "A JSON Pointer such as /slides/0/layers/0/objects/1. Leave out to see what the project contains." } }), &[]), true),
+        tool(Access::Edit, "patch", "Changes anything in the project with JSON Patch (RFC 6902) operations: add, remove, replace, move, copy, test. All or nothing: it is checked against the model first and nothing changes if any part is wrong; the error says where. `add` also sets a field (replacing it if there); `-` at the end of a list's path means append. Cannot change assets, the project's kind or format. Example: [{\"op\":\"add\",\"path\":\"/slides/0/triggers/-\",\"value\":{...}}]. Use describe_model to see what each thing takes.",
+            schema(json!({ "operations": { "type": "array", "items": { "type": "object" }, "description": "JSON Patch operations, each with op, path and (for add, replace, test) value, or from (for move, copy)." } }), &["operations"]), false),
+        tool(Access::Edit, "create_object", "Adds an object of any kind to a slide and returns its id and path. `object` holds any properties of the object (kind, name, x, y, w, h, text, style, fill, stroke, shadow, entrance, exit, emphasis, motion, timing, states, and so on) and what you leave out takes its default. It goes on layer 0 (the base layer) unless you give `layer`, at the end unless you give `index`. An id is made for it. Use describe_model with Object for everything it can have.",
+            schema(json!({ "slide": slide_prop(), "layer": { "type": "integer", "minimum": 0, "description": "The layer, counting from 0 (0 is the base layer)." }, "index": { "type": "integer", "minimum": 0, "description": "Where in the layer's list; stacking order is the list order, the last is in front." }, "object": { "type": "object", "description": "The object's properties." } }), &["slide", "object"]), false),
+        tool(Access::Edit, "update_object", "Changes any properties of an object. `set` holds the fields to change: a field you give is set, a field set to null is removed (back to its default), and a field that is itself an object, such as style, is merged into rather than replaced. A list, such as a path's points, is replaced whole. Returns the object. Use describe_model with Object for everything it can have, and with Entrance, Emphasis or MotionPath for animation.",
+            schema(json!({ "slide": slide_prop(), "object": object_prop(), "set": { "type": "object", "description": "The properties to change." } }), &["slide", "object", "set"]), false),
+        tool(Access::Edit, "update_slide", "Changes any properties of a slide, the same way as update_object: its name, notes, size, background, transition (transition and fade_ms), whether it moves on by itself (auto_advance), navigation rules, its triggers, and so on. A list such as triggers or layers is replaced whole; to change one item in it, use patch. Returns the slide's number. Use describe_model with Slide.",
+            schema(json!({ "slide": slide_prop(), "set": { "type": "object", "description": "The properties to change." } }), &["slide", "set"]), false),
         tool(Access::Edit, "undo", "Undoes the last change made to the project, whoever made it.", schema(json!({}), &[]), false),
         tool(Access::Edit, "redo", "Redoes the change that was just undone.", schema(json!({}), &[]), false),
     ]
@@ -214,7 +226,7 @@ impl App {
                 done(json!({
                     "number": i + 1, "id": s.id, "name": s.name, "kind": slide_kind(s), "width": s.width, "height": s.height,
                     "notes": s.notes, "timeline_ms": timeline_ms(s),
-                    "layers": s.layers.iter().enumerate().map(|(li, l)| json!({ "layer": li, "name": l.name, "objects": l.objects.iter().map(describe_object).collect::<Vec<_>>() })).collect::<Vec<_>>(),
+                    "layers": s.layers.iter().enumerate().map(|(li, l)| json!({ "layer": li, "name": l.name, "duration_ms": l.duration_ms, "objects": l.objects.iter().enumerate().map(|(oi, o)| { let mut d = describe_object(o); d["path"] = json!(format!("/slides/{i}/layers/{li}/objects/{oi}")); d }).collect::<Vec<_>>() })).collect::<Vec<_>>(),
                 }))
             }
             "add_slide" => {
@@ -265,6 +277,12 @@ impl App {
                 self.status = format!("AI tool: deleted {} from slide {}", removed.name, i + 1);
                 done(json!({ "deleted": removed.id }))
             }
+            "describe_model" => brainbend_doc::model_json::describe(text_arg(a, "type")?.as_deref()),
+            "read" => self.mcp_read(a),
+            "patch" => self.mcp_patch(a),
+            "create_object" => self.mcp_create_object(a, count),
+            "update_object" => self.mcp_update(a, count, true),
+            "update_slide" => self.mcp_update(a, count, false),
             "undo" => {
                 if self.undo.is_empty() { return Err("There is nothing to undo.".into()); }
                 self.undo();
@@ -375,6 +393,117 @@ impl App {
     }
 }
 
+/// The most of the project one `read` shows; anything bigger gets an outline of what is inside.
+const MAX_READ: usize = 30_000;
+
+/// Each part of `v` with its place and size, for choosing what to read.
+fn outline(path: &str, v: &Value) -> String {
+    let size = |c: &Value| { let n = c.to_string().len(); if n >= 1024 { format!("{:.1} KB", n as f64 / 1024.0) } else { format!("{n} bytes") } };
+    let rows: Vec<String> = match v {
+        Value::Object(m) => m.iter().map(|(k, c)| format!("  {path}/{k} ({})", size(c))).collect(),
+        Value::Array(a) => a.iter().enumerate().take(60).map(|(i, c)| format!("  {path}/{i} ({})", size(c))).collect(),
+        _ => vec![],
+    };
+    rows.join("\n")
+}
+
+/// Problems in a project as short sentences, to tell what a change newly broke.
+fn issue_lines(p: &Project) -> std::collections::BTreeSet<String> {
+    p.check().iter().map(|i| format!("slide {}: {}", i.at.slide + 1, i.message)).collect()
+}
+
+/// The slide a patch is about, from the first path that names one: `/slides/3/...` is slide 4.
+fn slide_in(ops: &Value) -> Option<usize> {
+    ops.as_array()?.iter().find_map(|op| op.get("path")?.as_str()?.strip_prefix("/slides/")?.split('/').next()?.parse::<usize>().ok())
+}
+
+impl App {
+    /// Puts a project an edit has made in place of the open one, as one undo step, and says what it newly broke.
+    fn mcp_install(&mut self, new: Project, what: &str, slide: Option<usize>, select: Option<(usize, usize, usize)>) -> Value {
+        let before = self.project.as_ref().map(issue_lines).unwrap_or_default();
+        self.snapshot();
+        let after = issue_lines(&new);
+        self.project = Some(new);
+        let slides = self.project.as_ref().map_or(1, |p| p.slides.len()).max(1);
+        self.slide = slide.unwrap_or(self.slide).min(slides - 1);
+        match select {
+            Some((si, li, oi)) => { self.slide = si.min(slides - 1); self.layer = li; self.selected = Some((li, oi)); }
+            None => { self.layer = 0; self.selected = None; }
+        }
+        self.reset_visibility();
+        self.status = format!("AI tool: {what}");
+        let warnings: Vec<String> = after.difference(&before).take(12).cloned().collect();
+        json!({ "ok": true, "warnings": warnings })
+    }
+
+    fn mcp_read(&mut self, a: &Value) -> Result<String, String> {
+        let path = text_arg(a, "path")?.unwrap_or_default();
+        let project = self.project.as_mut().ok_or("No project is open.")?;
+        let value = brainbend_doc::model_json::read(project, &path)?;
+        let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
+        if path.is_empty() || text.len() > MAX_READ {
+            let inside = outline(&path, &value);
+            return if path.is_empty() {
+                Ok(format!("The project, by part (read a path to see one):\n{inside}\nA slide's objects are at /slides/N/layers/L/objects/I; get_slide lists them with their paths."))
+            } else if inside.is_empty() {
+                Err(format!("That is {} KB of text; it is too big to show.", text.len() / 1024))
+            } else {
+                Err(format!("That is {} KB, too big to show at once. It contains:\n{inside}\nRead one of those.", text.len() / 1024))
+            };
+        }
+        Ok(text)
+    }
+
+    fn mcp_patch(&mut self, a: &Value) -> Result<String, String> {
+        let ops = a.get("operations").cloned().ok_or("`operations` must be a list of JSON Patch operations.")?;
+        let new = brainbend_doc::model_json::patch(self.project.as_mut().ok_or("No project is open.")?, &ops)?;
+        let n = ops.as_array().map_or(0, Vec::len);
+        let mut v = self.mcp_install(new, &format!("made {n} change{}", if n == 1 { "" } else { "s" }), slide_in(&ops), None);
+        v["applied"] = json!(n);
+        done(v)
+    }
+
+    fn mcp_create_object(&mut self, a: &Value, count: usize) -> Result<String, String> {
+        let si = slide_arg(a, "slide", count)?;
+        let layers = self.project.as_ref().unwrap().slides[si].layers.len();
+        let li = match a.get("layer") { None | Some(Value::Null) => 0, Some(v) => v.as_u64().map(|n| n as usize).filter(|n| *n < layers).ok_or_else(|| format!("`layer` must be a layer number from 0 to {}.", layers - 1))? };
+        let given = a.get("object").ok_or("`object` must be an object of properties.")?;
+        let have = self.project.as_ref().unwrap().slides[si].layers[li].objects.len();
+        let at = match a.get("index") { None | Some(Value::Null) => have, Some(v) => v.as_u64().map(|n| n as usize).filter(|n| *n <= have).ok_or_else(|| format!("`index` must be from 0 to {have}."))? };
+        let id = given.get("id").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| self.new_id("obj"));
+        let mut value = brainbend_doc::model_json::new_object(&id, given)?;
+        value["id"] = json!(id);
+        let ops = json!([{ "op": "add", "path": format!("/slides/{si}/layers/{li}/objects/{at}"), "value": value }]);
+        let new = brainbend_doc::model_json::patch(self.project.as_mut().unwrap(), &ops)?;
+        let mut v = self.mcp_install(new, &format!("added an object to slide {}", si + 1), Some(si), Some((si, li, at)));
+        v["id"] = json!(id);
+        v["path"] = json!(format!("/slides/{si}/layers/{li}/objects/{at}"));
+        done(v)
+    }
+
+    /// `update_object` (`object` true) and `update_slide`: a merge patch of the fields in `set`.
+    fn mcp_update(&mut self, a: &Value, count: usize, object: bool) -> Result<String, String> {
+        let si = slide_arg(a, "slide", count)?;
+        let set = a.get("set").filter(|s| s.is_object()).ok_or("`set` must be an object of the properties to change.")?;
+        let (pointer, id) = if object {
+            let which = text_arg(a, "object")?.ok_or("`object` must be an id or a name.")?;
+            let slide = &self.project.as_ref().unwrap().slides[si];
+            let (li, oi) = find_object(slide, &which)?;
+            (format!("/slides/{si}/layers/{li}/objects/{oi}"), slide.layers[li].objects[oi].id.clone())
+        } else {
+            (format!("/slides/{si}"), self.project.as_ref().unwrap().slides[si].id.clone())
+        };
+        if set.get("id").is_some_and(|v| v.as_str() != Some(id.as_str())) { return Err("An id cannot be changed.".into()); }
+        let new = brainbend_doc::model_json::merge(self.project.as_mut().unwrap(), &pointer, set)?;
+        let what = if object { format!("changed an object on slide {}", si + 1) } else { format!("changed slide {}", si + 1) };
+        let select = if object { new.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == id).map(|oi| (si, li, oi))) } else { None };
+        let described = if object { select.map(|(_, li, oi)| { let mut d = describe_object(&new.slides[si].layers[li].objects[oi]); d["path"] = json!(format!("/slides/{si}/layers/{li}/objects/{oi}")); d }) } else { None };
+        let mut v = self.mcp_install(new, &what, Some(si), select);
+        if let Some(d) = described { v["object"] = d; } else { v["slide"] = json!(si + 1); }
+        done(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,7 +525,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 13);
+        assert_eq!(t.len(), 19);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -559,4 +688,172 @@ mod tests {
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), 0);
         assert!(run(&mut a, "list_slides", json!({})).is_ok(), "reading is fine while they type");
     }
+
+    fn text_run(a: &mut App, name: &str, args: Value) -> Result<String, String> { a.mcp_run(name, &args) }
+
+    #[test]
+    fn the_model_is_described_and_any_part_of_it_can_be_read() {
+        let mut a = app_with(2);
+        let overview = text_run(&mut a, "describe_model", json!({})).unwrap();
+        assert!(overview.contains("JSON Pointers") && overview.contains("Entrance"), "{overview}");
+        let object = text_run(&mut a, "describe_model", json!({ "type": "Object" })).unwrap();
+        assert!(object.contains("entrance") && object.contains("timing"), "{object}");
+        assert!(text_run(&mut a, "describe_model", json!({ "type": "Entranc" })).unwrap_err().contains("Did you mean"));
+        let name = text_run(&mut a, "read", json!({ "path": "/slides/1/name" })).unwrap();
+        assert_eq!(name.trim(), "\"Slide 2\"");
+        let whole = text_run(&mut a, "read", json!({})).unwrap();
+        assert!(whole.contains("/slides (") && whole.contains("/theme (") && !whole.contains("\"layers\""), "with no path it outlines the project: {whole}");
+        assert!(text_run(&mut a, "read", json!({ "path": "/nothing" })).unwrap_err().contains("nothing at"));
+        assert!(!a.dirty && a.undo.is_empty(), "reading changes nothing");
+    }
+
+    #[test]
+    fn something_too_big_to_show_is_outlined_instead() {
+        let mut a = app_with(1);
+        let long = "x".repeat(40_000);
+        run(&mut a, "set_slide_notes", json!({ "slide": 1, "notes": long })).unwrap();
+        let e = text_run(&mut a, "read", json!({ "path": "/slides/0" })).unwrap_err();
+        assert!(e.contains("too big") && e.contains("/slides/0/notes"), "{e}");
+    }
+
+    #[test]
+    fn a_patch_changes_anything_in_one_undoable_step() {
+        let mut a = app_with(2);
+        let r = run(&mut a, "patch", json!({ "operations": [
+            { "op": "replace", "path": "/slides/1/name", "value": "Patched" },
+            { "op": "add", "path": "/slides/1/notes", "value": "A note" },
+            { "op": "replace", "path": "/pass_mark", "value": 70 },
+        ] })).unwrap();
+        assert_eq!((r["ok"].as_bool(), r["applied"].as_u64()), (Some(true), Some(3)));
+        let p = a.project.as_ref().unwrap();
+        assert_eq!((p.slides[1].name.as_str(), p.slides[1].notes.as_str(), p.pass_mark), ("Patched", "A note", 70));
+        assert_eq!(a.slide, 1, "the slide it worked on is on screen");
+        assert!(a.dirty);
+        run(&mut a, "undo", json!({})).unwrap();
+        let p = a.project.as_ref().unwrap();
+        assert_eq!((p.slides[1].name.as_str(), p.slides[1].notes.as_str(), p.pass_mark), ("Slide 2", "", 80), "one undo takes back all three");
+    }
+
+    #[test]
+    fn a_patch_that_is_wrong_changes_nothing_and_leaves_no_undo_step() {
+        let mut a = app_with(1);
+        for (ops, wants) in [
+            (json!([{ "op": "add", "path": "/slides/0/layers/0/objects/-", "value": { "id": "x", "colour": "red" } }]), "invalid"),
+            (json!([{ "op": "replace", "path": "/slides/0/name", "value": 5 }]), "/slides/0/name"),
+            (json!([{ "op": "remove", "path": "/slides/9" }]), "could not be applied"),
+            (json!([{ "op": "remove", "path": "/assets" }]), "cannot be changed"),
+            (json!("not a list"), "list"),
+        ] {
+            let e = run(&mut a, "patch", json!({ "operations": ops })).unwrap_err();
+            assert!(e.contains(wants), "{e} should mention {wants}");
+        }
+        assert!(!a.dirty && a.undo.is_empty(), "no failed patch is recorded");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].name, "Slide 1");
+    }
+
+    #[test]
+    fn objects_of_any_kind_are_created_with_everything_they_can_have() {
+        let mut a = app_with(1);
+        let r = run(&mut a, "create_object", json!({ "slide": 1, "object": {
+            "kind": "Ellipse", "name": "Dot", "x": 50, "y": 60, "w": 120, "h": 120, "fill": [200, 30, 30, 255],
+            "shadow": null,
+            "entrance": { "kind": "Zoom", "delay_ms": 0, "duration_ms": 500 },
+            "timing": { "start_ms": 1000, "dur_ms": 3000 },
+            "style": { "size": 30, "bold": true },
+        } })).unwrap();
+        let id = r["id"].as_str().unwrap().to_string();
+        assert_eq!(r["path"], "/slides/0/layers/0/objects/0");
+        let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert_eq!((o.id.as_str(), o.name.as_str(), o.x, o.w), (id.as_str(), "Dot", 50.0, 120.0));
+        assert!(matches!(o.kind, Kind::Ellipse) && o.entrance.is_some() && o.timing == Some(Timing { start_ms: 1000, dur_ms: Some(3000) }));
+        assert_eq!((o.style.size, o.style.bold), (30.0, true));
+        assert_eq!(a.selected, Some((0, 0)), "it is selected, so the author sees it");
+        let second = run(&mut a, "create_object", json!({ "slide": 1, "index": 0, "object": { "name": "Behind", "kind": "Rect" } })).unwrap();
+        assert_eq!(second["path"], "/slides/0/layers/0/objects/0", "an index puts it there");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[1].name, "Dot");
+        let g = run(&mut a, "get_slide", json!({ "slide": 1 })).unwrap();
+        assert_eq!(g["layers"][0]["objects"][1]["path"], "/slides/0/layers/0/objects/1", "get_slide gives each object's path");
+    }
+
+    #[test]
+    fn creating_an_object_checks_what_it_is_given() {
+        let mut a = app_with(1);
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "object": { "kind": "Teleporter" } })).unwrap_err().contains("invalid"));
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "object": { "nonsense": 1 } })).unwrap_err().contains("nonsense"));
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "layer": 4, "object": {} })).unwrap_err().contains("layer number"));
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "index": 9, "object": {} })).unwrap_err().contains("`index`"));
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "object": "text" })).is_err());
+        assert!(a.project.as_ref().unwrap().slides[0].layers[0].objects.is_empty());
+        let first = run(&mut a, "create_object", json!({ "slide": 1, "object": { "id": "mine" } })).unwrap();
+        assert_eq!(first["id"], "mine", "an id can be chosen");
+        assert!(run(&mut a, "create_object", json!({ "slide": 1, "object": { "id": "mine" } })).unwrap_err().contains("Two objects"), "but not one that is taken");
+    }
+
+    #[test]
+    fn an_object_can_be_restyled_animated_and_timed_by_name_or_id() {
+        let mut a = app_with(1);
+        let id = run(&mut a, "create_object", json!({ "slide": 1, "object": { "kind": "Text", "name": "Headline", "text": "Hi" } })).unwrap()["id"].as_str().unwrap().to_string();
+        let r = run(&mut a, "update_object", json!({ "slide": 1, "object": "Headline", "set": {
+            "fill": [10, 20, 30, 255], "style": { "size": 90, "color": [255, 255, 255, 255], "align": "Center" },
+            "entrance": { "kind": "Fade", "delay_ms": 100, "duration_ms": 700 },
+            "emphasis": { "kind": "Pulse", "delay_ms": 0, "duration_ms": 900, "repeat": 3 },
+            "exit": { "kind": "SlideLeft", "delay_ms": 0, "duration_ms": 400 },
+            "timing": { "start_ms": 500, "dur_ms": 4000 },
+            "shadow": { "color": [0, 0, 0, 120], "dx": 4.0, "dy": 4.0, "blur": 8.0 },
+        } })).unwrap();
+        assert_eq!(r["object"]["id"], id.as_str());
+        let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert_eq!((o.text.as_str(), o.style.size, o.style.align, o.fill), ("Hi", 90.0, Align::Center, Some(Rgba(10, 20, 30, 255))), "what was not set stays");
+        assert!(o.entrance.is_some() && o.emphasis.is_some() && o.exit.is_some() && o.shadow.is_some());
+        assert_eq!(o.timing, Some(Timing { start_ms: 500, dur_ms: Some(4000) }));
+        run(&mut a, "update_object", json!({ "slide": 1, "object": id, "set": { "entrance": null, "timing": null } })).unwrap();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.entrance.is_none() && o.timing.is_none(), "null takes a property away");
+        assert!(run(&mut a, "update_object", json!({ "slide": 1, "object": id, "set": { "id": "other" } })).unwrap_err().contains("id cannot be changed"));
+        assert!(run(&mut a, "update_object", json!({ "slide": 1, "object": id, "set": { "style": { "size": "huge" } } })).unwrap_err().contains("invalid"));
+        assert!(run(&mut a, "update_object", json!({ "slide": 1, "object": id, "set": [] })).is_err());
+    }
+
+    #[test]
+    fn a_slide_can_be_given_a_transition_and_triggers() {
+        let mut a = app_with(2);
+        let layer = run(&mut a, "patch", json!({ "operations": [{ "op": "add", "path": "/slides/1/layers/-", "value": {
+            "id": "pop", "name": "Pop-up", "objects": [], "duration_ms": null, "modal": true, "hide_others": false, "pause_base": false
+        } }] })).unwrap();
+        assert_eq!(layer["ok"], true);
+        let r = run(&mut a, "update_slide", json!({ "slide": 2, "set": { "fade_ms": 600, "transition": { "kind": "Wipe", "from": "Left", "inward": false } } })).unwrap();
+        assert_eq!(r["slide"], 2);
+        let s = &a.project.as_ref().unwrap().slides[1];
+        assert_eq!((s.fade_ms, s.transition.kind), (600, TransitionKind::Wipe));
+        let t = run(&mut a, "patch", json!({ "operations": [{ "op": "add", "path": "/slides/1/triggers/-", "value": {
+            "id": "t1", "owner": "Slide", "event": "SlideStart", "action": { "ShowLayer": "pop" }, "conditions": []
+        } }] })).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().slides[1].triggers.len(), 1);
+        assert_eq!(t["warnings"].as_array().unwrap().len(), 0, "a trigger that shows a layer that exists is fine");
+        assert!(run(&mut a, "update_slide", json!({ "slide": 2, "set": { "id": "x" } })).is_err());
+    }
+
+    #[test]
+    fn a_change_that_newly_breaks_something_comes_back_with_a_warning() {
+        let mut a = app_with(1);
+        let r = run(&mut a, "patch", json!({ "operations": [{ "op": "add", "path": "/slides/0/triggers/-", "value": {
+            "id": "t1", "owner": "Slide", "event": "SlideStart", "action": { "ShowLayer": "no-such-layer" }, "conditions": []
+        } }] })).unwrap();
+        let w = r["warnings"].as_array().unwrap();
+        assert!(!w.is_empty(), "the checker found a trigger pointing at nothing: {r}");
+        assert!(w[0].as_str().unwrap().starts_with("slide 1: "), "{w:?}");
+        let again = run(&mut a, "patch", json!({ "operations": [{ "op": "replace", "path": "/slides/0/name", "value": "Renamed" }] })).unwrap();
+        assert_eq!(again["warnings"].as_array().unwrap().len(), 0, "only what the change broke is reported, not what was already wrong");
+    }
+
+    #[test]
+    fn the_models_enum_values_are_found_by_describing_the_type() {
+        let mut a = app_with(1);
+        let kinds = text_run(&mut a, "describe_model", json!({ "type": "Kind" })).unwrap();
+        assert!(kinds.contains("Rect") && kinds.contains("Video"), "{kinds}");
+        let trigger = text_run(&mut a, "describe_model", json!({ "type": "Trigger" })).unwrap();
+        assert!(trigger.contains("event") && trigger.contains("action") && trigger.contains("conditions"), "{trigger}");
+        assert!(text_run(&mut a, "describe_model", json!({ "type": "Action" })).unwrap().contains("ShowLayer"));
+    }
+
 }
