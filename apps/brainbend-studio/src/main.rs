@@ -6325,7 +6325,9 @@ impl App {
             if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
-            if !self.in_master_view() {
+            // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
+            // tab away.
+            if !self.in_master_view() && self.right_tab != AI_TAB {
                 egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
@@ -8049,10 +8051,12 @@ mod tests {
         h.run_steps(3);
         assert_eq!(h.state().right_tab, AI_TAB, "the Help tab's button opens the AI tab in the side panel");
         assert!(!h.state().mcp.running(), "nothing listens until the author turns it on");
-        assert!(h.query_by_label_contains("Use an AI tool you already have").is_some());
+        assert!(h.query_by_label_contains("Use a tool you already pay for").is_some());
         assert!(h.get_all_by_label("AI").next().is_some(), "the tab is in the strip");
         assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Let AI tools connect when BrainBend Studio opens").is_some());
         assert!(h.state().mcp.settings.allow_edit && !h.state().mcp.settings.allow_files, "changes are allowed, files are not");
+        // The panel is short and the chat above takes room, so what is below it is scrolled to.
+        h.hover_at(egui::pos2(1320.0, 560.0)); h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -300.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3);
         h.get_by_label("Let AI tools connect").click();
         h.run_steps(3);
         assert!(h.state().mcp.running(), "it is on");
@@ -8064,10 +8068,18 @@ mod tests {
         h.hover_at(egui::pos2(1320.0, 560.0)); h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -300.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3); h.get_by_label("Show").click();
         h.run_steps(3);
         assert!(h.query_all_by_label_contains(&token).next().is_some(), "now it shows");
+        assert!(h.query_all_by_label_contains("claude mcp add").next().is_some(), "Claude Code is shown first");
+        h.get_by_label("Codex").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("codex mcp add").next().is_some() && h.query_all_by_label_contains("claude mcp add").next().is_none(), "Codex has its own command");
+        h.get_by_label("Gemini CLI").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("gemini mcp add").next().is_some());
         assert!(h.state().window_title().ends_with("AI tools on"), "the window title says so while it is on: {}", h.state().window_title());
         assert!(h.get_all_by_label("AI •").next().is_some(), "and the tab shows a dot while it is on");
         h.get_by_label("Hide").click();
         h.run_steps(2);
+        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 600.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3);
         h.get_by_label("Let AI tools connect").click();
         h.run_steps(3);
         assert!(!h.state().mcp.running(), "and off again");
@@ -8207,7 +8219,7 @@ mod tests {
         let mut a = app();
         a.dirty = false;
         a.undo.clear();
-        a.assistant.settings = assistant::Settings { api_key: "sk-test".into(), model: "claude-opus-5-5".into(), base_url: Some(url) };
+        a.assistant.settings = assistant::Settings { base_url: Some(url), ..assistant::Settings::claude("sk-test") };
         let mut h = harness(a);
         h.state_mut().file_view = false;
         chat_until_done(&mut h, "Add a title that says Safety first");
@@ -8217,7 +8229,7 @@ mod tests {
         let chat = h.state().assistant.chat.clone();
         assert!(matches!(&chat[0], assistant::Line::You(t) if t == "Add a title that says Safety first"));
         assert!(chat.iter().any(|l| matches!(l, assistant::Line::Tool { name, state: assistant::ToolState::Done, .. } if name == "create_object")), "{chat:?}");
-        assert!(matches!(chat.last(), Some(assistant::Line::Claude(t)) if t == "I added a title that fades in."));
+        assert!(matches!(chat.last(), Some(assistant::Line::Reply(t)) if t == "I added a title that fades in."));
         assert!(h.state().assistant.usage.tokens() > 1000, "the use is counted");
         assert!(h.state().mcp.log.iter().any(|l| l.ok && l.text == "assistant: create_object"), "and it shows in the activity list");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
@@ -8264,7 +8276,7 @@ mod tests {
             }
         });
         let mut a = app();
-        a.assistant.settings = assistant::Settings { api_key: "sk-bad".into(), model: "claude-opus-5-5".into(), base_url: Some(url) };
+        a.assistant.settings = assistant::Settings { base_url: Some(url), ..assistant::Settings::claude("sk-bad") };
         let mut h = harness(a);
         h.state_mut().file_view = false;
         let before = h.state().project.as_ref().unwrap().slides.len();
@@ -8273,6 +8285,74 @@ mod tests {
         let last = h.state().assistant.chat.last().cloned();
         assert!(matches!(&last, Some(assistant::Line::Error(e)) if e.contains("API key was not accepted") && e.contains("Undo takes it back")), "{last:?}");
         assert!(!h.state().assistant.busy(), "and it can be used again");
+    }
+
+    #[test]
+    fn gpt_and_gemini_build_with_the_same_tools_as_claude() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-providers");
+        let object = serde_json::json!({ "slide": 1, "object": { "kind": "Text", "name": "Title", "text": "Safety first", "style": { "size": 80, "bold": true } } });
+        let gpt = vec![
+            serde_json::json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "role": "assistant", "content": "On it.", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "create_object", "arguments": object.to_string() } }] } }], "usage": { "prompt_tokens": 900, "completion_tokens": 60 } }),
+            serde_json::json!({ "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "Added the title." } }], "usage": { "prompt_tokens": 1000, "completion_tokens": 20 } }),
+        ];
+        let gemini = vec![
+            serde_json::json!({ "candidates": [{ "finishReason": "STOP", "content": { "role": "model", "parts": [{ "text": "On it." }, { "functionCall": { "name": "create_object", "args": object } }] } }], "usageMetadata": { "promptTokenCount": 900, "candidatesTokenCount": 60 } }),
+            serde_json::json!({ "candidates": [{ "finishReason": "STOP", "content": { "role": "model", "parts": [{ "text": "Added the title." }] } }], "usageMetadata": { "promptTokenCount": 1000, "candidatesTokenCount": 20 } }),
+        ];
+        for (provider, replies, slot) in [(brainbend_assistant::Provider::OpenAi, gpt, 1), (brainbend_assistant::Provider::Gemini, gemini, 2)] {
+            let (url, seen) = fake_claude(replies);
+            let mut a = app();
+            a.assistant.settings = assistant::Settings { provider, base_url: Some(url), ..Default::default() };
+            a.assistant.settings.keys[slot] = "key-abc".into();
+            let mut h = harness(a);
+            h.state_mut().file_view = false;
+            chat_until_done(&mut h, "Add a title that says Safety first");
+            let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+            assert_eq!((o.text.as_str(), o.style.size, o.style.bold), ("Safety first", 80.0, true), "{provider:?}: the tool call changed the lesson");
+            let chat = h.state().assistant.chat.clone();
+            assert!(matches!(chat.last(), Some(assistant::Line::Reply(t)) if t == "Added the title."), "{provider:?}: {chat:?}");
+            assert_eq!(seen.lock().unwrap().len(), 2);
+            assert!(h.state().assistant.usage.tokens() > 1000, "the use is counted");
+        }
+    }
+
+    #[test]
+    fn changing_the_provider_starts_a_new_chat_and_each_provider_has_its_own_key_prompt() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-switch");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
+        let mut a = app();
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        a.assistant.settings = assistant::Settings::claude("sk-ant-test");
+        a.assistant.settings.keys[1] = "sk-openai-test".into();
+        a.assistant.chat.push(assistant::Line::You("hello".into()));
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The provider list is the first list in the side panel, which is on the right.
+        let mut combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).filter(|c| c.rect().left() > 1100.0).collect();
+        combos.sort_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
+        assert_eq!(combos.len(), 2, "a provider list and a model list");
+        combos[0].click();
+        h.run_steps(2);
+        h.get_by_label("GPT (OpenAI)").click();
+        h.run_steps(3);
+        assert_eq!(h.state().assistant.settings.provider, brainbend_assistant::Provider::OpenAi);
+        assert!(!h.state().assistant.chat.iter().any(|l| matches!(l, assistant::Line::You(_))), "the old chat is gone: a conversation belongs to one provider");
+        assert!(h.query_by_label_contains("Now asking GPT").is_some() && h.query_by_label("Send").is_some(), "it says so, and GPT has its own key");
+        h.state_mut().assistant.settings.keys[1].clear();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Or use your own OpenAI API key").is_some(), "the Claude key is not used for GPT");
+        assert!(h.query_by_label_contains("sent to OpenAI and billed to your key").is_some());
+        assert!(h.query_by_label_contains("Already pay for Claude, ChatGPT or Gemini").is_some());
+        let mut combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).filter(|c| c.rect().left() > 1100.0).collect();
+        combos.sort_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
+        combos[1].click();
+        h.run_steps(2);
+        assert!(h.query_by_label_contains("GPT-5 mini").is_some() && h.query_by_label_contains("Claude Opus").is_none(), "its models are listed, and not Claude's");
+        assert_eq!(h.state().assistant.settings.keys[0], "sk-ant-test", "and the Claude key is kept for when it is chosen again");
     }
 
     #[test]
@@ -8286,12 +8366,13 @@ mod tests {
         a.file_view = false;
         let mut h = harness(a);
         h.run_steps(4);
-        assert!(h.query_by_label("This needs your own Claude API key.").is_some());
+        assert!(h.query_by_label_contains("Or use your own Anthropic API key").is_some());
+        assert!(h.query_by_label_contains("Already pay for Claude, ChatGPT or Gemini").is_some(), "a subscriber is pointed to the tools that can use one");
         assert!(h.query_by_label_contains("sent to Anthropic and billed to your key").is_some(), "it says where the lesson's content goes");
         assert!(h.query_by_label("Save key").is_some() && h.query_by_label("Send").is_none(), "no chat until there is a key");
-        h.state_mut().assistant.settings.api_key = "sk-ant-test".into();
+        h.state_mut().assistant.settings.keys[0] = "sk-ant-test".into();
         h.run_steps(3);
-        assert!(h.query_by_label("This needs your own Claude API key.").is_none());
+        assert!(h.query_by_label_contains("Or use your own Anthropic API key").is_none());
         assert!(h.query_by_label("Send").is_some() && h.query_by_label("New chat").is_some());
         assert!(h.query_by_label_contains("Make a title slide").is_some(), "it offers a few ways to start");
         assert!(h.query_by_label_contains("Claude Opus 5.5").is_some(), "the model is shown");

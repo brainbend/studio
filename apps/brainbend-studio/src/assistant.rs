@@ -1,7 +1,9 @@
-//! The chat in the AI tab: the author asks, Claude builds and changes the lesson with the same tools an outside AI tool gets.
+//! The chat in the AI tab: the author asks, an AI model builds and changes the lesson with the same tools an outside AI tool gets.
 //!
-//! Claude is reached with the author's own API key (kept on this computer, readable only by them); what Claude reads of the
-//! lesson and what the author types go to Anthropic and are billed to that key, which the tab says. The conversation runs on
+//! The model (Claude, GPT or Gemini) is reached with the author's own API key for that provider, kept on this computer and
+//! readable only by them; what the model reads of the lesson and what the author types go to that provider and are billed to
+//! the key, which the tab says. (A Claude, ChatGPT or Gemini subscription cannot be used here: those companies do not let
+//! other apps sign in with one. The tab points to their own tools, which connect through MCP, instead.) The conversation runs on
 //! a background thread (`brainbend-assistant`); each tool Claude uses is handed back to the app's own thread, through the
 //! same permission switches and undo steps as an outside AI tool, so it shows on screen and can be undone.
 use super::*;
@@ -25,17 +27,20 @@ contrast between text and its background, objects kept inside the slide and not 
 - Do not invent facts the author did not give you. Do not delete things the author did not ask you to.\n\
 - When you have finished, say in one to three sentences what you did.\n\n";
 
-/// The settings kept in `~/.brainbend-studio/assistant.json`.
+/// The settings kept in `~/.brainbend-studio/assistant.json`: which provider, and for each provider a key and a model.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
-    pub api_key: String,
-    pub model: String,
+    pub provider: ai::Provider,
+    /// One key per provider, in the order of [`ai::PROVIDERS`]; empty for none.
+    pub keys: [String; 3],
+    /// One model id per provider; empty for the provider's usual one. Any id may be typed in.
+    pub models: [String; 3],
     /// The API's address; only a test sets it.
     pub base_url: Option<String>,
 }
 
 impl Default for Settings {
-    fn default() -> Self { Self { api_key: String::new(), model: ai::MODELS[0].id.to_string(), base_url: None } }
+    fn default() -> Self { Self { provider: ai::Provider::Anthropic, keys: Default::default(), models: Default::default(), base_url: None } }
 }
 
 impl Settings {
@@ -44,23 +49,49 @@ impl Settings {
         Some(std::path::PathBuf::from(home).join(".brainbend-studio").join("assistant.json"))
     }
 
+    /// Reads the file. The first version kept only a Claude key and model, as `api_key` and `model`; those are still read.
     pub fn parse(text: &str) -> Self {
         let v: serde_json::Value = serde_json::from_str(text).unwrap_or(serde_json::Value::Null);
-        let model = v["model"].as_str().filter(|m| ai::MODELS.iter().any(|k| k.id == *m)).unwrap_or(ai::MODELS[0].id);
-        Settings { api_key: v["api_key"].as_str().unwrap_or("").trim().to_string(), model: model.to_string(), base_url: None }
+        let mut s = Settings::default();
+        s.provider = v["provider"].as_str().and_then(ai::Provider::from_id).unwrap_or(ai::Provider::Anthropic);
+        for p in ai::PROVIDERS {
+            let i = p.index();
+            s.keys[i] = v["keys"][p.id()].as_str().unwrap_or("").trim().to_string();
+            s.models[i] = v["models"][p.id()].as_str().unwrap_or("").trim().to_string();
+        }
+        if s.keys[0].is_empty() { s.keys[0] = v["api_key"].as_str().unwrap_or("").trim().to_string(); }
+        if s.models[0].is_empty() { s.models[0] = v["model"].as_str().unwrap_or("").trim().to_string(); }
+        s
     }
 
-    pub fn to_json(&self) -> String { serde_json::json!({ "api_key": self.api_key, "model": self.model }).to_string() }
+    pub fn to_json(&self) -> String {
+        let keys: serde_json::Map<String, serde_json::Value> = ai::PROVIDERS.iter().map(|p| (p.id().to_string(), self.keys[p.index()].clone().into())).collect();
+        let models: serde_json::Map<String, serde_json::Value> = ai::PROVIDERS.iter().map(|p| (p.id().to_string(), self.models[p.index()].clone().into())).collect();
+        serde_json::json!({ "provider": self.provider.id(), "keys": keys, "models": models }).to_string()
+    }
 
     pub fn load() -> Self { Self::path().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| Self::parse(&t)).unwrap_or_default() }
 
     pub fn save(&self) { if let Some(p) = Self::path() { mcp::write_private(&p, &self.to_json()); } }
 
-    /// The key to use: the one the author saved, else `ANTHROPIC_API_KEY` from the environment. `None` when there is neither.
+    /// Settings for Claude with this key.
+    #[cfg(test)]
+    pub fn claude(key: &str) -> Self { let mut s = Settings::default(); s.keys[0] = key.to_string(); s }
+
+    /// The model in use: the one chosen for this provider, else its usual one.
+    pub fn model(&self) -> String {
+        let m = self.models[self.provider.index()].trim();
+        if m.is_empty() { ai::default_model(self.provider).to_string() } else { m.to_string() }
+    }
+
+    pub fn set_model(&mut self, id: &str) { self.models[self.provider.index()] = id.trim().to_string(); }
+
+    /// The key to use: the one the author saved for this provider, else the provider's variable in the environment. `None`
+    /// when there is neither.
     pub fn key(&self) -> Option<String> {
-        let saved = self.api_key.trim();
+        let saved = self.keys[self.provider.index()].trim();
         if !saved.is_empty() { return Some(saved.to_string()); }
-        std::env::var("ANTHROPIC_API_KEY").ok().map(|k| k.trim().to_string()).filter(|k| !k.is_empty())
+        self.provider.env_keys().iter().find_map(|name| std::env::var(name).ok().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()))
     }
 }
 
@@ -71,7 +102,7 @@ pub enum ToolState { Running, Done, Failed(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Line {
     You(String),
-    Claude(String),
+    Reply(String),
     Tool { name: String, what: String, state: ToolState },
     Notice(String),
     Error(String),
@@ -84,10 +115,11 @@ pub struct Usage { pub input: u64, pub output: u64, pub cache_read: u64, pub cac
 impl Usage {
     pub fn tokens(&self) -> u64 { self.input + self.output + self.cache_read + self.cache_write }
 
-    /// US dollars at the model's list price: cached input costs a tenth, and writing the cache a quarter more (a rough
-    /// estimate; the bill on the author's Anthropic account is what counts).
-    pub fn dollars(&self, m: &ai::Model) -> f64 {
-        (self.input as f64 * m.input + self.output as f64 * m.output + self.cache_read as f64 * m.input * 0.1 + self.cache_write as f64 * m.input * 1.25) / 1_000_000.0
+    /// US dollars at the model's list price (input, output per million tokens), when the price is known: cached input costs
+    /// a tenth, and writing Claude's cache a quarter more (a rough estimate; the bill on the author's account is what counts).
+    pub fn dollars(&self, price: Option<(f64, f64)>) -> Option<f64> {
+        let (input, output) = price?;
+        Some((self.input as f64 * input + self.output as f64 * output + self.cache_read as f64 * input * 0.1 + self.cache_write as f64 * input * 1.25) / 1_000_000.0)
     }
 }
 
@@ -121,7 +153,7 @@ fn brief(text: &str) -> String {
 /// Turns what the conversation reports into lines of the chat.
 fn apply(chat: &mut Vec<Line>, usage: &mut Usage, event: ai::Event) {
     match event {
-        ai::Event::Text(t) => chat.push(Line::Claude(t)),
+        ai::Event::Text(t) => chat.push(Line::Reply(t)),
         ai::Event::ToolStart { name, input } => { let w = what(&name, &input); chat.push(Line::Tool { name, what: w, state: ToolState::Running }); }
         ai::Event::ToolEnd { name, ok, text } => {
             if let Some(Line::Tool { state, .. }) = chat.iter_mut().rev().find(|l| matches!(l, Line::Tool { name: n, state: ToolState::Running, .. } if *n == name)) {
@@ -135,7 +167,7 @@ fn apply(chat: &mut Vec<Line>, usage: &mut Usage, event: ai::Event) {
     }
 }
 
-/// Claude's hands: the app's tools, run on the app's own thread.
+/// The model's hands: the app's tools, run on the app's own thread.
 struct UiTools {
     calls: Sender<ToolCall>,
     ctx: egui::Context,
@@ -180,6 +212,12 @@ pub struct Assistant {
     pub usage: Usage,
     /// The text box for a new key.
     pub key_input: String,
+    /// The text box for a model id that is not in the list.
+    pub model_input: String,
+    /// Open (`Some(true)`) the section for connecting an outside AI tool on the next frame.
+    pub connect_open: Option<bool>,
+    /// Which outside AI tool the connect section shows the command for.
+    pub connect_tool: usize,
     convo: Arc<Mutex<ai::Conversation>>,
     run: Option<Run>,
     calls_tx: Sender<ToolCall>,
@@ -191,7 +229,7 @@ pub struct Assistant {
 impl Default for Assistant {
     fn default() -> Self {
         let (calls_tx, calls_rx) = channel();
-        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
+        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), model_input: String::new(), connect_open: None, connect_tool: 0, convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
     }
 }
 
@@ -200,7 +238,7 @@ impl Assistant {
 
     pub fn busy(&self) -> bool { self.run.is_some() }
 
-    /// Starts over: an empty chat and a fresh conversation. Not while Claude is working.
+    /// Starts over: an empty chat and a fresh conversation. Not while the model is working.
     pub fn new_chat(&mut self) {
         if self.busy() { return; }
         self.chat.clear();
@@ -210,14 +248,14 @@ impl Assistant {
 
     pub fn stop(&mut self) { if let Some(r) = &self.run { r.cancel.store(true, Ordering::Relaxed); } }
 
-    /// Sends the author's message to Claude, which works on its own thread while the app keeps drawing.
+    /// Sends the author's message to the model, which works on its own thread while the app keeps drawing.
     pub fn send(&mut self, text: &str, ctx: &egui::Context) {
         let text = text.trim();
         if text.is_empty() || self.busy() { return; }
         let Some(key) = self.settings.key() else { self.chat.push(Line::Error("There is no API key. Add one first.".into())); return };
         self.chat.push(Line::You(text.to_string()));
         self.stick = true;
-        let mut cfg = ai::Config::new(&key, &self.settings.model, &format!("{SYSTEM}{}", mcp_tools::INSTRUCTIONS));
+        let mut cfg = ai::Config::new(self.settings.provider, &key, &self.settings.model(), &format!("{SYSTEM}{}", mcp_tools::INSTRUCTIONS));
         if let Some(u) = &self.settings.base_url { cfg.base_url = u.clone(); cfg.retry_ms = 0; }
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -263,7 +301,7 @@ impl Assistant {
 }
 
 impl App {
-    /// Once a frame: run the tools Claude asked for, and take in what it said.
+    /// Once a frame: run the tools the model asked for, and take in what it said.
     pub(super) fn assistant_frame(&mut self) {
         while let Ok(call) = self.assistant.calls_rx.try_recv() {
             let result = self.mcp_dispatch(&call.name, &call.arguments);
@@ -277,35 +315,63 @@ impl App {
     pub(super) fn chat_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         ui.add_space(4.0);
+        let provider = self.assistant.settings.provider;
+        let busy = self.assistant.busy();
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Ask Claude").strong());
-            let current = ai::model(&self.assistant.settings.model);
-            egui::ComboBox::from_id_salt("assistant-model").selected_text(current.name).show_ui(ui, |ui| {
-                for m in ai::MODELS {
-                    if ui.selectable_label(m.id == current.id, format!("{}  ({})", m.name, m.note)).clicked() && m.id != current.id { self.assistant.settings.model = m.id.to_string(); self.assistant.settings.save(); }
-                }
+            ui.label(egui::RichText::new("Ask").strong());
+            let mut chosen = provider;
+            ui.add_enabled_ui(!busy, |ui| {
+                egui::ComboBox::from_id_salt("assistant-provider").selected_text(provider.label()).show_ui(ui, |ui| {
+                    for p in ai::PROVIDERS { ui.selectable_value(&mut chosen, p, p.label()); }
+                });
+            });
+            if chosen != provider {
+                // A conversation is in one provider's form, so a different provider starts a new one.
+                let had_chat = !self.assistant.chat.is_empty();
+                self.assistant.new_chat();
+                self.assistant.settings.provider = chosen;
+                self.assistant.settings.save();
+                if had_chat && self.assistant.settings.key().is_some() { self.assistant.chat.push(Line::Notice(format!("Now asking {}. This is a new chat; the lesson is as you left it.", chosen.name()))); }
+            }
+            let provider = self.assistant.settings.provider;
+            let current = self.assistant.settings.model();
+            let known = ai::find_model(provider, &current);
+            ui.add_enabled_ui(!busy, |ui| {
+                egui::ComboBox::from_id_salt(("assistant-model", provider.id())).selected_text(known.map(|m| m.name).unwrap_or(current.as_str())).show_ui(ui, |ui| {
+                    for m in provider.models() {
+                        if ui.selectable_label(m.id == current, format!("{}  ({})", m.name, m.note)).clicked() && m.id != current { self.assistant.settings.set_model(m.id); self.assistant.settings.save(); }
+                    }
+                });
             });
         });
+        let provider = self.assistant.settings.provider;
+        let name = provider.name();
         let Some(_) = self.assistant.settings.key() else {
-            ui.label("Describe what you want and Claude builds it in your lesson: slides, text, shapes, styles, animations, timing and triggers. You watch it happen, and Undo takes any of it back.");
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("This needs your own Claude API key.").strong());
-            ui.weak("What you type, and the parts of your lesson that Claude reads to do the work, are sent to Anthropic and billed to your key. The key is kept on this computer, readable only by you.");
+            ui.label(format!("Describe what you want and {name} builds it in your lesson: slides, text, shapes, styles, animations, timing and triggers. You watch it happen, and Undo takes any of it back."));
+            ui.add_space(6.0);
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.label(egui::RichText::new("Already pay for Claude, ChatGPT or Gemini?").strong());
+                ui.label("You can use that, with no API key. Those companies keep subscriptions for their own apps, so BrainBend Studio cannot sign in with one. Their tools can: Claude Code, Codex and Gemini CLI connect to this lesson and work on it from outside.");
+                if ui.button("Connect one of those tools").clicked() { self.assistant.connect_open = Some(true); }
+            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(format!("Or use your own {} API key", provider.company())).strong());
+            ui.weak(format!("What you type, and the parts of your lesson that {name} reads to do the work, are sent to {} and billed to your key. The key is kept on this computer, readable only by you.", provider.company()));
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.assistant.key_input).password(true).hint_text("sk-ant-…").desired_width(180.0));
+                ui.add(egui::TextEdit::singleline(&mut self.assistant.key_input).password(true).hint_text(provider.key_hint()).desired_width(180.0));
                 let ready = !self.assistant.key_input.trim().is_empty();
                 if ui.add_enabled(ready, egui::Button::new("Save key")).clicked() {
-                    self.assistant.settings.api_key = self.assistant.key_input.trim().to_string();
+                    self.assistant.settings.keys[provider.index()] = self.assistant.key_input.trim().to_string();
                     self.assistant.key_input.clear();
                     self.assistant.settings.save();
                 }
             });
-            if ui.link("Get an API key at console.anthropic.com").clicked() { update::open_in_browser("https://console.anthropic.com/settings/keys"); }
+            if ui.link(format!("Get an API key at {}", provider.billing_site())).clicked() { update::open_in_browser(provider.key_url()); }
             return;
         };
-        let busy = self.assistant.busy();
-        let model = ai::model(&self.assistant.settings.model);
-        if !self.mcp.settings.allow_edit { ui.colored_label(ui.visuals().warn_fg_color, "Changes are switched off below, so Claude can look but not change anything."); }
+        let model_id = self.assistant.settings.model();
+        let known = ai::find_model(provider, &model_id);
+        if !self.mcp.settings.allow_edit { ui.colored_label(ui.visuals().warn_fg_color, format!("Changes are switched off below, so {name} can look but not change anything.")); }
         egui::ScrollArea::vertical().id_salt("assistant-chat").max_height(300.0).auto_shrink([false, true]).stick_to_bottom(self.assistant.stick).show(ui, |ui| {
             if self.assistant.chat.is_empty() {
                 ui.weak("Ask for something, or start with one of these:");
@@ -316,7 +382,7 @@ impl App {
             for line in &self.assistant.chat {
                 match line {
                     Line::You(t) => { ui.label(egui::RichText::new(format!("You: {t}")).strong()); }
-                    Line::Claude(t) => { ui.label(t); }
+                    Line::Reply(t) => { ui.label(t); }
                     Line::Tool { what, state, .. } => {
                         let (mark, color) = match state { ToolState::Running => ("…", ui.visuals().weak_text_color()), ToolState::Done => ("✓", ui.visuals().weak_text_color()), ToolState::Failed(_) => ("✗", egui::Color32::from_rgb(220, 70, 70)) };
                         let text = match state { ToolState::Failed(why) => format!("{mark} {what}: {why}"), _ => format!("{mark} {what}") };
@@ -327,7 +393,7 @@ impl App {
                 }
                 ui.add_space(2.0);
             }
-            if busy { ui.horizontal(|ui| { ui.spinner(); ui.weak("Claude is working…"); }); }
+            if busy { ui.horizontal(|ui| { ui.spinner(); ui.weak(format!("{name} is working…")); }); }
         });
         self.assistant.stick = busy;
         let id = ui.make_persistent_id("assistant-input");
@@ -342,11 +408,28 @@ impl App {
                 if (ui.add_enabled(can, egui::Button::new("Send")).clicked() || (send_key && can)) && can { let t = self.assistant.input.clone(); self.assistant.send(&t, &ctx); }
                 if ui.add_enabled(!self.assistant.chat.is_empty(), egui::Button::new("New chat")).on_hover_text("Clear the chat and start over").clicked() { self.assistant.new_chat(); }
             }
-            if ui.small_button("Remove key").on_hover_text("Forget the API key kept on this computer").clicked() && !busy { self.assistant.settings.api_key.clear(); self.assistant.settings.save(); }
+            if ui.small_button("Remove key").on_hover_text(format!("Forget the {} API key kept on this computer", provider.company())).clicked() && !busy { self.assistant.settings.keys[provider.index()].clear(); self.assistant.settings.save(); }
+        });
+        ui.collapsing("Use a different model", |ui| {
+            ui.weak(format!("Type a model id from {}'s documentation. It is used as it is, so a wrong one is refused with an error.", provider.company()));
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.assistant.model_input).hint_text(model_id.as_str()).desired_width(180.0));
+                if ui.add_enabled(!busy && !self.assistant.model_input.trim().is_empty(), egui::Button::new("Use")).clicked() {
+                    let typed = self.assistant.model_input.trim().to_string();
+                    self.assistant.settings.set_model(&typed);
+                    self.assistant.model_input.clear();
+                    self.assistant.settings.save();
+                }
+            });
         });
         let u = self.assistant.usage;
-        if u.tokens() > 0 { ui.weak(format!("{} tokens this chat, about ${:.2} at {}'s list price (an estimate).", u.tokens(), u.dollars(&model), model.name)); }
-        else { ui.weak(format!("{}. Billed to your Claude account.", model.name)); }
+        let shown = known.map(|m| m.name.to_string()).unwrap_or_else(|| model_id.clone());
+        if u.tokens() > 0 {
+            match u.dollars(known.and_then(|m| m.price)) {
+                Some(d) => { ui.weak(format!("{} tokens this chat, about ${d:.2} at {shown}'s list price (an estimate).", u.tokens())); }
+                None => { ui.weak(format!("{} tokens this chat. The price of {shown} is not known here, so there is no cost estimate.", u.tokens())); }
+            }
+        } else { ui.weak(format!("{shown}. Billed to your {} account.", provider.company())); }
     }
 }
 
@@ -355,19 +438,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_keep_the_key_and_model_and_fall_back_safely() {
-        let s = Settings { api_key: "sk-ant-abc".into(), model: "claude-sonnet-5-5".into(), base_url: None };
+    fn settings_keep_a_key_and_model_for_each_provider_and_fall_back_safely() {
+        let mut s = Settings::claude("sk-ant-abc");
+        s.keys[ai::Provider::OpenAi.index()] = "sk-openai".into();
+        s.keys[ai::Provider::Gemini.index()] = "AIza-g".into();
+        s.models[0] = "claude-sonnet-5-5".into();
+        s.models[ai::Provider::Gemini.index()] = "gemini-9-custom".into();
+        s.provider = ai::Provider::Gemini;
         assert_eq!(Settings::parse(&s.to_json()), s);
-        assert_eq!(Settings::parse("{broken").model, ai::MODELS[0].id, "a damaged file gives the usual model");
-        assert_eq!(Settings::parse(r#"{"model":"gpt-9"}"#).model, ai::MODELS[0].id, "an unknown model is not kept");
-        assert_eq!(Settings::parse(r#"{"api_key":"  k  "}"#).api_key, "k");
+        assert_eq!((s.model().as_str(), s.key().as_deref()), ("gemini-9-custom", Some("AIza-g")), "a typed model id is kept and used");
+        s.provider = ai::Provider::OpenAi;
+        assert_eq!(s.model(), ai::default_model(ai::Provider::OpenAi), "no choice gives the provider's usual model");
+        assert_eq!(Settings::parse("{broken"), Settings::default());
+        assert_eq!(Settings::parse(r#"{"provider":"nonsense"}"#).provider, ai::Provider::Anthropic);
         assert!(!s.to_json().contains("base_url"), "the test address is never saved");
     }
 
     #[test]
-    fn a_saved_key_wins_over_the_environment() {
-        let s = Settings { api_key: "saved".into(), ..Default::default() };
+    fn a_file_from_before_there_were_other_providers_still_reads() {
+        let s = Settings::parse(r#"{"api_key":"  k  ","model":"claude-haiku-5-5"}"#);
+        assert_eq!((s.provider, s.keys[0].as_str(), s.model().as_str()), (ai::Provider::Anthropic, "k", "claude-haiku-5-5"));
+        assert!(s.keys[1].is_empty() && s.keys[2].is_empty());
+    }
+
+    #[test]
+    fn a_saved_key_wins_over_the_environment_and_each_provider_has_its_own() {
+        let mut s = Settings::claude("saved");
         assert_eq!(s.key().as_deref(), Some("saved"));
+        s.provider = ai::Provider::OpenAi;
+        std::env::remove_var("OPENAI_API_KEY");
+        assert_eq!(s.key(), None, "a Claude key is not offered to OpenAI");
     }
 
     #[test]
@@ -382,7 +482,7 @@ mod tests {
         apply(&mut chat, &mut usage, ai::Event::Notice("Stopped after 40 steps.".into()));
         apply(&mut chat, &mut usage, ai::Event::Usage { input: 1000, output: 200, cache_read: 5000, cache_write: 300 });
         apply(&mut chat, &mut usage, ai::Event::Usage { input: 100, output: 50, cache_read: 0, cache_write: 0 });
-        assert_eq!(chat[0], Line::Claude("Let me look.".into()));
+        assert_eq!(chat[0], Line::Reply("Let me look.".into()));
         assert_eq!(chat[1], Line::Tool { name: "get_slide".into(), what: "Looking at slide 2".into(), state: ToolState::Done });
         assert_eq!(chat[2], Line::Tool { name: "add_text".into(), what: "Adding an object on slide 2".into(), state: ToolState::Failed("The author is typing in a text box.".into()) });
         assert_eq!(chat[3], Line::Notice("Stopped after 40 steps.".into()));
@@ -390,12 +490,13 @@ mod tests {
     }
 
     #[test]
-    fn the_cost_estimate_uses_the_models_list_price() {
+    fn the_cost_estimate_uses_the_models_list_price_and_is_none_when_the_price_is_not_known() {
         let u = Usage { input: 1_000_000, output: 100_000, cache_read: 1_000_000, cache_write: 0 };
-        let opus = ai::model("claude-opus-5-5");
-        assert!((u.dollars(&opus) - (4.0 + 2.0 + 0.4)).abs() < 1e-9, "{}", u.dollars(&opus));
-        assert!(u.dollars(&ai::model("claude-haiku-5-5")) < u.dollars(&opus) / 10.0);
-        assert_eq!(Usage::default().dollars(&opus), 0.0);
+        let price = |id: &str| ai::find_model(ai::Provider::Anthropic, id).and_then(|m| m.price);
+        assert!((u.dollars(price("claude-opus-5-5")).unwrap() - (4.0 + 2.0 + 0.4)).abs() < 1e-9);
+        assert!(u.dollars(price("claude-haiku-5-5")).unwrap() < u.dollars(price("claude-opus-5-5")).unwrap() / 10.0);
+        assert_eq!(Usage::default().dollars(price("claude-opus-5-5")), Some(0.0));
+        assert_eq!(u.dollars(None), None, "a model the author typed has no price here");
     }
 
     #[test]

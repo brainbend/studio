@@ -210,8 +210,9 @@ impl App {
             ui.add_space(6.0);
             ui.separator();
             let has_key = self.assistant.settings.key().is_some();
-            egui::CollapsingHeader::new(egui::RichText::new("Connect your own AI tool").strong()).default_open(!has_key).show(ui, |ui| {
-                ui.label("Use an AI tool you already have, such as Claude Code, instead of the chat above. It connects through MCP, runs only on this computer, and only while this is on.");
+            let force = self.assistant.connect_open.take();
+            egui::CollapsingHeader::new(egui::RichText::new("Connect your own AI tool").strong()).default_open(!has_key).open(force).show(ui, |ui| {
+                ui.label("Use a tool you already pay for instead of the chat above: Claude Code (Claude), Codex (ChatGPT) or Gemini CLI (Gemini). It connects through MCP, needs no API key from this app, runs only on this computer, and only while this is on.");
                 ui.add_space(4.0);
                 let mut on = self.mcp.running();
                 if ui.checkbox(&mut on, "Let AI tools connect").changed() { if on { start = true; } else { stop = true; } }
@@ -232,12 +233,16 @@ impl App {
                         if ui.button("New token").on_hover_text("An AI tool that has the old token stops working until it is given the new one").clicked() { new_token = true; }
                     });
                     ui.add_space(4.0);
-                    ui.label("To connect Claude Code, run this once in a terminal:");
-                    let command = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {token}\"");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Connect:");
+                        for (i, tool) in CONNECT_TOOLS.iter().enumerate() { ui.selectable_value(&mut self.assistant.connect_tool, i, tool.name); }
+                    });
+                    let tool = &CONNECT_TOOLS[self.assistant.connect_tool.min(CONNECT_TOOLS.len() - 1)];
+                    ui.label(format!("To connect {}, run {} in a terminal:", tool.name, if tool.steps > 1 { "these once" } else { "this once" }));
                     // Shown wrapped, so all of it can be read; the token stays hidden here until Show is pressed, but Copy takes the real one.
-                    let shown = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {}\"", if self.mcp.show_token { token.as_str() } else { "<token>" });
+                    let shown = connect_command(tool, &url, if self.mcp.show_token { token.as_str() } else { "<token>" });
                     ui.add(egui::Label::new(egui::RichText::new(shown).monospace()).wrap().selectable(true));
-                    if ui.button("Copy command").on_hover_text("Copies the whole command, with the token").clicked() { copy = Some(command); }
+                    if ui.button("Copy command").on_hover_text("Copies the whole command, with the token").clicked() { copy = Some(connect_command(tool, &url, &token)); }
                     ui.weak("Another AI tool: give it the address, and have it send the token as the header  Authorization: Bearer <token>.");
                 }
             });
@@ -267,6 +272,27 @@ impl App {
         if self.mcp.running() || self.assistant.busy() { ctx.request_repaint_after(Duration::from_secs(1)); }
     }
 }
+
+/// An outside AI tool that can be connected, and how to tell it about this app.
+pub(super) struct ConnectTool {
+    pub name: &'static str,
+    /// How many lines the command has.
+    pub steps: usize,
+    /// The command, with `{url}` and `{token}` to fill in.
+    pub command: &'static str,
+}
+
+/// Claude Code, Codex and Gemini CLI. ChatGPT and Gemini in the browser cannot reach a program on this computer, but these
+/// command-line tools can, and they use the author's own subscription or key. Each line is that tool's own way of adding an
+/// MCP server that is reached over HTTP with a bearer token.
+pub(super) const CONNECT_TOOLS: [ConnectTool; 3] = [
+    ConnectTool { name: "Claude Code", steps: 1, command: "claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {token}\"" },
+    ConnectTool { name: "Codex", steps: 2, command: "export BRAINBEND_TOKEN=\"{token}\"\ncodex mcp add brainbend --url {url} --bearer-token-env-var BRAINBEND_TOKEN" },
+    ConnectTool { name: "Gemini CLI", steps: 1, command: "gemini mcp add --transport http --header \"Authorization: Bearer {token}\" brainbend {url}" },
+];
+
+/// The command for a tool, with this app's address and the token (or a stand-in for it).
+pub(super) fn connect_command(tool: &ConnectTool, url: &str, token: &str) -> String { tool.command.replace("{url}", url).replace("{token}", token) }
 
 #[cfg(test)]
 mod tests {
@@ -309,5 +335,18 @@ mod tests {
         assert_eq!(ago(now - Duration::from_secs(30)), "30 s ago");
         assert_eq!(ago(now - Duration::from_secs(600)), "10 min ago");
         assert_eq!(ago(now - Duration::from_secs(7300)), "2 h ago");
+    }
+
+    #[test]
+    fn each_tool_gets_a_command_with_the_address_and_the_token() {
+        for tool in &CONNECT_TOOLS {
+            let c = connect_command(tool, "http://127.0.0.1:5000/mcp", "TOKEN123");
+            assert!(c.contains("http://127.0.0.1:5000/mcp") && c.contains("TOKEN123") && !c.contains('{'), "{}: {c}", tool.name);
+            assert!(c.contains("brainbend") && c.lines().count() == tool.steps, "{}: {c}", tool.name);
+        }
+        assert!(connect_command(&CONNECT_TOOLS[0], "u", "t").starts_with("claude mcp add --transport http"));
+        let codex = connect_command(&CONNECT_TOOLS[1], "u", "t");
+        assert!(codex.starts_with("export BRAINBEND_TOKEN=") && codex.contains("codex mcp add") && codex.lines().count() == 2);
+        assert!(connect_command(&CONNECT_TOOLS[2], "u", "t").starts_with("gemini mcp add"));
     }
 }
