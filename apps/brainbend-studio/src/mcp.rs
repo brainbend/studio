@@ -115,6 +115,11 @@ impl Mcp {
 
     pub fn running(&self) -> bool { self.handle.is_some() }
 
+    /// Whether anything has connected: being on only means this app is listening.
+    pub fn status_line(&self) -> String {
+        match self.last_call { Some(t) => format!("• Connected. Last request {}.", ago(t)), None => "• On, and waiting for an AI tool to connect.".to_string() }
+    }
+
     pub fn url(&self) -> Option<String> { self.handle.as_ref().map(|h| h.url()) }
 
     pub fn stop(&mut self) {
@@ -210,10 +215,10 @@ impl App {
         }
         if has_key {
             self.chat_ui(ui);
-            if connected { ui.weak("• An AI tool is connected."); }
+            if connected { ui.weak(self.mcp.status_line()); }
         } else {
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("• An AI tool is connected").strong());
+            ui.label(egui::RichText::new(self.mcp.status_line()).strong());
             ui.weak("What it does is listed here. Undo takes it back.");
             egui::ScrollArea::vertical().id_salt("ai-activity").auto_shrink([false, true]).max_height((ui.available_height() - 50.0).max(100.0)).show(ui, |ui| self.activity_ui(ui));
             if ui.small_button("Settings").clicked() { self.assistant.setup_open = true; }
@@ -335,6 +340,10 @@ impl App {
                 });
                 ui.weak("Another tool: give it the address, and have it send the token as the header  Authorization: Bearer <token>.");
             });
+            ui.label(egui::RichText::new(self.mcp.status_line()).strong());
+            if self.mcp.last_call.is_none() {
+                ui.weak("Run the command, then start the tool in any folder and ask it about your lesson. Turning this off, or closing Studio, disconnects it.");
+            }
             ui.weak("Only this computer can reach it, and only with the token.");
         }
         if let Some(text) = copy { ctx.copy_text(text); }
@@ -357,9 +366,9 @@ pub(super) struct ConnectTool {
 /// command-line tools can, and they use the author's own subscription or key. Each line is that tool's own way of adding an
 /// MCP server that is reached over HTTP with a bearer token.
 pub(super) const CONNECT_TOOLS: [ConnectTool; 3] = [
-    ConnectTool { name: "Claude Code", steps: 1, command: "claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {token}\"" },
+    ConnectTool { name: "Claude Code", steps: 1, command: "claude mcp add --scope user --transport http brainbend {url} --header \"Authorization: Bearer {token}\"" },
     ConnectTool { name: "Codex", steps: 2, command: "export BRAINBEND_TOKEN=\"{token}\"\ncodex mcp add brainbend --url {url} --bearer-token-env-var BRAINBEND_TOKEN" },
-    ConnectTool { name: "Gemini CLI", steps: 1, command: "gemini mcp add --transport http --header \"Authorization: Bearer {token}\" brainbend {url}" },
+    ConnectTool { name: "Gemini CLI", steps: 1, command: "gemini mcp add --scope user --transport http --header \"Authorization: Bearer {token}\" brainbend {url}" },
 ];
 
 /// The command for a tool, with this app's address and the token (or a stand-in for it).
@@ -415,9 +424,9 @@ mod tests {
             assert!(c.contains("http://127.0.0.1:5000/mcp") && c.contains("TOKEN123") && !c.contains('{'), "{}: {c}", tool.name);
             assert!(c.contains("brainbend") && c.lines().count() == tool.steps, "{}: {c}", tool.name);
         }
-        assert!(connect_command(&CONNECT_TOOLS[0], "u", "t").starts_with("claude mcp add --transport http"));
+        assert!(connect_command(&CONNECT_TOOLS[0], "u", "t").starts_with("claude mcp add --scope user --transport http"));
         let codex = connect_command(&CONNECT_TOOLS[1], "u", "t");
         assert!(codex.starts_with("export BRAINBEND_TOKEN=") && codex.contains("codex mcp add") && codex.lines().count() == 2);
-        assert!(connect_command(&CONNECT_TOOLS[2], "u", "t").starts_with("gemini mcp add"));
+        assert!(connect_command(&CONNECT_TOOLS[2], "u", "t").starts_with("gemini mcp add --scope user"));
     }
 }
