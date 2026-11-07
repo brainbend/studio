@@ -15,6 +15,7 @@ pub const PITCH_LIMIT: f32 = 85.0;
 pub const SPEED_DEFAULT: f32 = 6.0;
 
 /// What an item on the picture is: a round marker, or a hotspot (a shaded area with corners).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PinKind {
     #[default]
@@ -23,6 +24,7 @@ pub enum PinKind {
 }
 
 /// A marker or hotspot the learner can press, with a title and text shown in a card and triggers it can run.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PanoPin {
     pub id: String,
@@ -107,6 +109,7 @@ impl PanoPin {
 }
 
 /// What a 360° image object holds besides its picture (the object's `asset`).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pano {
     /// The view the learner starts with.

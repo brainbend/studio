@@ -1,4 +1,7 @@
 //! Framework-neutral document model for BrainBend Studio projects.
+/// The model as JSON, for AI tools: its schema, strict checking and atomic patches.
+#[cfg(feature = "schema")]
+pub mod model_json;
 pub mod check;
 pub mod find;
 pub mod lesson;
@@ -18,6 +21,7 @@ pub use richtext::{Attr, Fmt, ListStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
@@ -48,6 +52,7 @@ impl Rgba {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Align {
     Left,
@@ -59,6 +64,7 @@ pub enum Align {
 
 /// What a text object is published as, for screen readers and navigation: ordinary text (a `p`) or a heading
 /// (`h1` to `h4`).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextRole {
     #[default]
@@ -93,6 +99,7 @@ impl TextRole {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VAlign {
     Top,
@@ -101,6 +108,7 @@ pub enum VAlign {
     Bottom,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextStyle {
     pub font_family: String,
@@ -117,6 +125,7 @@ pub struct TextStyle {
 }
 
 /// The way one slide gives way to the next.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransitionKind {
     #[default]
@@ -148,6 +157,7 @@ impl TransitionKind {
 
 /// The edge a transition comes from, as PowerPoint's "From Right" says it. For a split, left or right means vertical
 /// lines and top or bottom horizontal ones.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Edge { Left, Right, Top, Bottom }
 
@@ -160,6 +170,7 @@ impl Edge {
 }
 
 /// A slide transition: its kind, the edge it comes from, and (for a split or zoom) whether it goes in or out.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
     pub kind: TransitionKind,
@@ -202,6 +213,7 @@ impl Transition {
 }
 
 /// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, color)`.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gradient {
     pub angle: f32,
@@ -210,6 +222,7 @@ pub struct Gradient {
 
 /// How a video or audio object plays. The default is what an object added in BrainBend Studio does: wait for the
 /// viewer, with the player's controls showing.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaPlay {
     /// Starts by itself when the object's turn on the timeline comes.
@@ -228,6 +241,7 @@ impl Default for MediaPlay {
 }
 
 /// How an outline is drawn: unbroken, in dots or in dashes.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LineDash {
     #[default]
@@ -248,12 +262,14 @@ impl LineDash {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     pub color: Rgba,
     pub width: f32,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shadow {
     pub dx: f32,
@@ -266,6 +282,7 @@ pub struct Shadow {
 }
 
 /// A soft halo of color around an object.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Glow {
     /// How far the halo reaches, in pixels.
@@ -274,6 +291,7 @@ pub struct Glow {
 }
 
 /// A faded, upside-down copy of an object just below it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reflection {
     /// How much of the object's height the reflection shows, from 0 to 1.
@@ -284,6 +302,7 @@ pub struct Reflection {
     pub gap: f32,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind {
     Fade,
@@ -307,6 +326,7 @@ pub enum EffectKind {
 }
 
 /// Entrance animation played each time the object's layer or slide is shown.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entrance {
     pub kind: EffectKind,
@@ -315,6 +335,7 @@ pub struct Entrance {
 }
 
 /// Emphasis effects: the object stays where it is and draws attention to itself.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EmphasisKind {
     /// Swells and settles back.
@@ -350,6 +371,7 @@ impl EmphasisKind {
 }
 
 /// An emphasis animation, played after the object appears (and again on a "play animation" action).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Emphasis {
     pub kind: EmphasisKind,
@@ -361,6 +383,7 @@ pub struct Emphasis {
 
 /// A motion path: the object travels through `points`, given as offsets in slide units from where it
 /// sits (it starts at offset 0, 0 and ends at the last point).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MotionPath {
     pub points: Vec<(f32, f32)>,
@@ -438,6 +461,7 @@ impl MotionPath {
 /// Which click starts each of an object's animations. 0 = automatically (on the timeline); 1, 2, ...
 /// = the learner's first, second, ... click on the slide (as in a PowerPoint presentation). Effects with
 /// the same number play together; their delays count from that click.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClickSteps {
     pub entrance: u32,
@@ -454,6 +478,7 @@ impl ClickSteps {
 
 /// When an object is on screen within its layer's (or slide's) timeline. Objects without timing
 /// are there for the whole timeline.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Timing {
     pub start_ms: u32,
@@ -462,6 +487,7 @@ pub struct Timing {
 }
 
 /// A run of text whose style differs from the object's. Unset fields inherit the object style.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     pub text: String,
@@ -486,6 +512,7 @@ pub struct Run {
     pub spacing: Option<f32>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Paragraph {
     pub runs: Vec<Run>,
@@ -498,6 +525,7 @@ pub struct Paragraph {
 pub const INDENT_STEP: f32 = 40.0;
 
 /// One drawing command of a freeform path, in 0..1 coordinates of the object's frame.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PathCmd {
     Move(f32, f32),
@@ -507,6 +535,7 @@ pub enum PathCmd {
     Close,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Kind {
     Rect,
@@ -538,6 +567,7 @@ pub enum Kind {
 
 /// An equation: its LaTeX source, kept so it can be edited again, and the MathML that screen readers get. The object
 /// itself is an ordinary freeform shape (`Kind::Path`) holding the typeset outlines, so every renderer draws it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationInfo {
     pub latex: String,
@@ -554,6 +584,7 @@ pub struct EquationInfo {
 
 /// What a marker shows: a title on hover (or keyboard focus) and, when it is clicked, a card with the title and a
 /// description. Clicking anywhere else closes the card.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MarkerInfo {
     pub title: String,
@@ -586,6 +617,7 @@ impl MarkerInfo {
 }
 
 /// A data-entry field. Its look comes from the object's own style (font, text color), fill and outline.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputField {
     /// The id of the variable that holds what is typed: a text variable, or a number variable for a number field.
@@ -614,6 +646,7 @@ impl InputField {
 }
 
 /// A web page shown in a frame on the slide. The object's `alt` is the frame's title for screen readers.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebObject {
     /// The page's address (`https://`; many sites refuse to be shown inside another page).
@@ -635,6 +668,7 @@ impl WebObject {
 
 /// A slider: the thumb's place along the track sets a number variable, and the variable's value
 /// places the thumb. The frame is the track area; the thumb is as tall as `thumb_height` of it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Slider {
     /// The id of the number variable it sets; empty while it is not linked to one.
@@ -676,6 +710,7 @@ impl Default for Slider {
 
 /// A check box: a small box ticked by clicking, drawn at the left of the object's text. Clicking
 /// moves the object between its Normal and Selected states; Disabled greys it out and ignores clicks.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Check {
     /// The box's side, in slide units.
@@ -727,6 +762,7 @@ impl Default for Check {
 /// An object that turns like a dial: turning it sets a number variable, and the variable's value
 /// sets how far it is turned. The object turns through `sweep` degrees from `min` to `max`, with
 /// the middle of the range at its drawn orientation.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Dial {
     /// The id of the number variable it sets.
@@ -765,6 +801,7 @@ fn snap_value(min: f32, max: f32, step: f32, v: f32) -> f32 {
     v.clamp(min.min(max), max.max(min))
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Object {
     pub id: String,
@@ -969,6 +1006,7 @@ impl Object {
 
 /// A button's glossy overlay ("shine"): a light-to-clear gradient over the fill. A stronger `alpha`
 /// is how a button's Hover state brightens it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shine {
     pub alpha: f32,
@@ -976,6 +1014,7 @@ pub struct Shine {
     pub reverse: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObjectState {
     pub name: String,
@@ -1002,6 +1041,7 @@ pub struct ObjectState {
     pub gradient: Option<Gradient>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Bool(bool),
@@ -1009,6 +1049,7 @@ pub enum Value {
     Text(String),
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Variable {
     pub id: String,
@@ -1018,6 +1059,7 @@ pub struct Variable {
     pub built_in: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cmp {
     Eq,
@@ -1028,6 +1070,7 @@ pub enum Cmp {
     Le,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Condition {
     pub variable: String,
@@ -1037,6 +1080,7 @@ pub struct Condition {
     pub or_with_previous: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
     SlideStart,
@@ -1083,6 +1127,7 @@ impl Event {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Action {
     ShowLayer(String),
@@ -1122,6 +1167,7 @@ pub enum Action {
 }
 
 /// How `Action::AdjustVariable` combines the variable with its value.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AdjustOp {
     Add,
@@ -1149,6 +1195,7 @@ impl AdjustOp {
 /// Where the whole source picture sits relative to its frame, as fractions of the frame:
 /// `[x, y, width, height]`. Anything outside `0..1` is cropped away.
 /// The shapes a picture can be cropped to.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PictureShape {
     Oval,
@@ -1278,6 +1325,7 @@ impl Action {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Owner {
     Slide,
@@ -1285,6 +1333,7 @@ pub enum Owner {
     Object(String),
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Trigger {
     pub id: String,
@@ -1294,6 +1343,7 @@ pub struct Trigger {
     pub conditions: Vec<Condition>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layer {
     pub id: String,
@@ -1349,6 +1399,7 @@ impl Layer {
 
 fn yes() -> bool { true }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Choice {
     pub id: String,
@@ -1358,6 +1409,7 @@ pub struct Choice {
 
 /// How a question is answered. Choice questions use `Question::choices`/`multiple`; the others
 /// carry their own data.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum QuestionStyle {
     #[default]
@@ -1397,6 +1449,7 @@ pub enum QuestionStyle {
 }
 
 /// One area of a labelled picture and the label that belongs there.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LabelZone {
     pub region: HotRegion,
@@ -1422,6 +1475,7 @@ impl QuestionStyle {
 }
 
 /// An area of a picture, as fractions (0 to 1) of its width and height.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HotRegion {
     pub x: f32,
@@ -1448,6 +1502,7 @@ impl HotRegion {
 
 /// A graded question. The player draws the question UI itself (prompt, choices, submit,
 /// feedback); the slide's layers are not used for question slides.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
     pub prompt: String,
@@ -1466,6 +1521,7 @@ pub struct Question {
 }
 
 /// The part of a slide a question is drawn in, in slide pixels.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QuestionArea {
     pub x: f32,
@@ -1481,6 +1537,7 @@ impl QuestionArea {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum SlideKind {
     #[default]
@@ -1491,6 +1548,7 @@ pub enum SlideKind {
 }
 
 /// A named group of related slides. Slides are kept in scene order, so the flat slide list is also the lesson order.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub id: String,
@@ -1502,12 +1560,14 @@ pub struct Scene {
 
 /// A scene whose question slides are drawn from at random: each attempt shows `draw` of them
 /// (all when 0 or more than there are), in their order or shuffled. Other slides of the scene always show.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bank {
     pub draw: u32,
     pub shuffle: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Slide {
     pub id: String,
@@ -1550,6 +1610,7 @@ pub struct Slide {
 }
 
 /// When the player's Next button works on a slide.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum NextRule {
     #[default]
@@ -1561,6 +1622,7 @@ pub enum NextRule {
 }
 
 /// What a slide looks like when the learner comes back to it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Revisit {
     /// Back to how it starts.
@@ -1570,6 +1632,7 @@ pub enum Revisit {
     Resume,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlideNav {
     pub next: NextRule,
@@ -1802,6 +1865,7 @@ impl Drop for LeaveOutBytes {
     fn drop(&mut self) { LEAVE_OUT_BYTES.with(|f| f.set(false)); }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub name: String,
@@ -1816,6 +1880,7 @@ pub struct Asset {
 
 /// What kind of lesson a project is. The aliases read files written before the types were renamed
 /// or removed (the short "micro" kinds are now ordinary lessons).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProjectKind {
     /// A deck-style lesson of slides with layers, triggers and quizzes.
@@ -1836,6 +1901,7 @@ impl ProjectKind {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Project {
     pub format: String,

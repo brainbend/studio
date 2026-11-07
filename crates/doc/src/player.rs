@@ -5,6 +5,7 @@
 use crate::Rgba;
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlayerTheme {
     #[default]
@@ -14,6 +15,7 @@ pub enum PlayerTheme {
     Custom,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SidebarSide {
     /// No sidebar: the slide menu opens over the slide from a Menu button.
@@ -24,6 +26,7 @@ pub enum SidebarSide {
 }
 
 /// How the player's buttons are drawn.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ButtonStyle {
     #[default]
@@ -33,6 +36,7 @@ pub enum ButtonStyle {
 }
 
 /// Player controls beyond Previous / Next, each shown only when asked for.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerControls {
     /// Play and pause the slide: its timeline, or its video or audio when it has no timeline.
@@ -54,6 +58,7 @@ pub struct PlayerControls {
 }
 
 /// A link or an attached file offered in the player's Notes tab.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Resource {
     pub title: String,
@@ -66,12 +71,14 @@ pub struct Resource {
 }
 
 /// A term and what it means, listed (alphabetically) in the player's Notes tab.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlossaryTerm {
     pub term: String,
     pub definition: String,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlayerSettings {
     pub theme: PlayerTheme,
