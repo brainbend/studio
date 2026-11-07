@@ -7,4 +7,4 @@ pub mod protocol;
 pub mod server;
 
 pub use protocol::{Action, ToolDef};
-pub use server::{new_token, refuse, start, Config, Handle, ToolCall};
+pub use server::{new_token, refuse, start, Config, Handle, ToolCall, PICKUP_MS};

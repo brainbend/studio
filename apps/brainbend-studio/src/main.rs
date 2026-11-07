@@ -30,6 +30,7 @@ mod video_export;
 mod mcp_tools;
 mod mcp;
 mod assistant;
+mod terminal;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -6315,7 +6316,9 @@ impl App {
         let mut restore_ratio = false;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
-        egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
+        // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
+        let wide_panel = self.right_tab == AI_TAB && self.assistant.shows_terminal();
+        egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
@@ -8056,7 +8059,10 @@ mod tests {
         assert!(h.get_all_by_label("AI").next().is_some(), "the tab is in the strip");
         h.get_by_label("Use a subscription").click();
         h.run_steps(3);
-        assert!(h.query_by_label_contains("Connect Claude Code, Codex or Gemini CLI").is_some());
+        assert!(h.query_by_label("Open in the AI tab").is_some(), "the first choice is a terminal in the tab");
+        h.get_by_label("From your own terminal").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Let AI tools connect").is_some(), "and the commands for the author's own terminal are under it");
         h.get_by_label("What AI may do").click();
         h.run_steps(3);
         assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Let AI tools connect when BrainBend Studio opens").is_some());
@@ -8361,6 +8367,74 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_by_label("Set up AI").is_some() && h.query_by_label("Send").is_none());
         assert_eq!(h.state().assistant.settings.keys[0], "sk-ant-test", "and the Claude key is kept for when it is chosen again");
+    }
+
+    #[test]
+    fn a_tool_can_be_opened_in_the_ai_tab_already_connected_and_it_gets_the_wide_panel() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-terminal");
+        std::env::set_var("SHELL", "/bin/sh");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "k".repeat(64), port: 0, ..Default::default() };
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label("Set up AI").click();
+        h.run_steps(3);
+        h.get_by_label("Use a subscription").click();
+        h.run_steps(3);
+        // The plain shell stands in for a tool, which would be found on the author's PATH.
+        h.state_mut().assistant.term_tool = 3;
+        h.run_steps(2);
+        h.get_by_label("Open in the AI tab").click();
+        h.run_steps(5);
+        assert!(h.state().assistant.terminal.is_some(), "{:?}", h.state().assistant.terminal_error);
+        assert!(h.state().mcp.running(), "the connection was turned on for it");
+        assert!(!h.state().assistant.setup_open, "and the window got out of the way");
+        assert!(h.state().assistant.shows_terminal() && h.state().assistant.view_terminal);
+        assert!(h.query_by_label("Restart").is_some() && h.query_by_label("Close").is_some());
+        // Something coloured, to look at.
+        h.state_mut().assistant.terminal.as_mut().unwrap().send(b"printf '\\033[1;32mReady\\033[0m to build your lesson\\n'\r");
+        for _ in 0..60 { h.step(); std::thread::sleep(std::time::Duration::from_millis(10)); }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("terminal.png")).unwrap(); }
+        h.get_by_label("Close").click();
+        h.run_steps(3);
+        assert!(h.state().assistant.terminal.is_none() && !h.state().assistant.shows_terminal(), "closing it stops it");
+        assert!(h.query_by_label("Set up AI").is_none(), "the connection is still on, so the tab is not the empty one");
+    }
+
+    #[test]
+    fn each_tool_is_connected_in_its_own_way_and_told_what_the_tab_is_for() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = own_home("assistant-tools");
+        std::env::set_var("SHELL", "/bin/sh");
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "t".repeat(64), port: 0, ..Default::default() };
+        let mut h = harness(a);
+        h.run_steps(2);
+        let ctx = h.ctx.clone();
+        let url = { h.state_mut().mcp.start(&ctx); h.state().mcp.url().unwrap() };
+        let work = home.join(".brainbend-studio").join("ai-workspace");
+        for tool in [0, 1, 2] { h.state_mut().start_terminal(tool, &ctx); assert!(h.state().assistant.terminal.is_some(), "tool {tool}"); }
+        let read = |p: std::path::PathBuf| serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))).unwrap();
+        let claude = read(home.join(".brainbend-studio").join("claude-mcp.json"));
+        assert_eq!((claude["mcpServers"]["brainbend"]["url"].as_str(), claude["mcpServers"]["brainbend"]["headers"]["Authorization"].as_str()), (Some(url.as_str()), Some(format!("Bearer {}", "t".repeat(64)).as_str())), "Claude Code reads its connection from a file");
+        let gemini = read(work.join(".gemini").join("settings.json"));
+        assert_eq!((gemini["mcpServers"]["brainbend"]["httpUrl"].as_str(), gemini["mcpServers"]["brainbend"]["headers"]["Authorization"].as_str()), (Some(url.as_str()), Some(format!("Bearer {}", "t".repeat(64)).as_str())), "Gemini CLI reads it from the folder it starts in");
+        for file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md"] {
+            let text = std::fs::read_to_string(work.join(file)).unwrap_or_default();
+            assert!(text.contains("slide deck") && text.contains("brainbend tools"), "{file} tells its tool what the tab is for");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for p in [home.join(".brainbend-studio").join("claude-mcp.json"), work.join(".gemini").join("settings.json")] {
+                assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o077, 0, "{} holds the token, so only the author can read it", p.display());
+            }
+        }
     }
 
     #[test]

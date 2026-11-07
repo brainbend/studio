@@ -140,7 +140,7 @@ impl Mcp {
         let (tx, rx) = channel();
         let c = ctx.clone();
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || c.request_repaint());
-        let config = |port| mcp::Config { token: self.settings.token.clone(), port, version: env!("CARGO_PKG_VERSION").into(), instructions: mcp_tools::INSTRUCTIONS.into() };
+        let config = |port| mcp::Config { token: self.settings.token.clone(), port, version: env!("CARGO_PKG_VERSION").into(), instructions: mcp_tools::INSTRUCTIONS.into(), pickup_ms: mcp::PICKUP_MS };
         let wanted = self.settings.port;
         let handle = mcp::start(config(wanted), mcp_tools::tools(), tx.clone(), wake.clone()).or_else(|first| {
             mcp::start(config(0), mcp_tools::tools(), tx, wake).inspect(|_| {
@@ -183,6 +183,8 @@ impl App {
     pub(super) fn mcp_frame(&mut self, ctx: &egui::Context) {
         if std::mem::take(&mut self.mcp.start_wanted) { self.mcp.start(ctx); }
         while let Some(call) = self.mcp.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            // A call the AI tool was already told had failed (this window was not being drawn) is not run.
+            if !call.claim() { continue; }
             let result = self.mcp_dispatch(&call.name, &call.arguments);
             self.mcp.note(&call.name, &result);
             let _ = call.reply.send(result);
@@ -202,18 +204,27 @@ impl App {
         self.mcp_run(name, args)
     }
 
-    /// The AI tab of the side panel: one button to set AI up, and once it is set up, the chat.
+    /// The AI tab of the side panel: one button to set AI up, and once it is set up, the chat or the terminal.
     pub(super) fn ai_panel(&mut self, ui: &mut egui::Ui) {
         let has_key = self.assistant.settings.key().is_some();
         let connected = self.mcp.running();
-        if !has_key && !connected {
+        let has_terminal = self.assistant.terminal.is_some();
+        if !has_key && !connected && !has_terminal {
             ui.add_space(14.0);
             ui.label("Ask an AI to build and change your lesson while you watch.");
             ui.add_space(8.0);
             if ui.add(egui::Button::new(egui::RichText::new("Set up AI").strong()).min_size(egui::vec2(120.0, 30.0))).clicked() { self.assistant.setup_open = true; }
             return;
         }
-        if has_key {
+        if has_key && has_terminal {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.assistant.view_terminal, false, "Chat");
+                ui.selectable_value(&mut self.assistant.view_terminal, true, "Terminal");
+            });
+        }
+        if self.assistant.shows_terminal() {
+            self.terminal_ui(ui);
+        } else if has_key {
             self.chat_ui(ui);
             if connected { ui.weak(self.mcp.status_line()); }
         } else {
@@ -306,11 +317,29 @@ impl App {
 
     /// Setting up with a subscription: it cannot sign in here, but the company's own tool can connect.
     fn setup_connect_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.weak("A subscription works in the company's own tool, not through this app. Run that tool in the AI tab, already connected to your lesson.");
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("terminal-tool").selected_text(crate::terminal::TOOLS[self.assistant.term_tool.min(3)].name).show_ui(ui, |ui| {
+                for (i, t) in crate::terminal::TOOLS.iter().enumerate() { ui.selectable_value(&mut self.assistant.term_tool, i, t.name); }
+            });
+            if ui.button("Open in the AI tab").clicked() {
+                let tool = self.assistant.term_tool;
+                self.start_terminal(tool, ctx);
+                if self.assistant.terminal.is_some() { self.assistant.setup_open = false; self.right_tab = crate::AI_TAB; }
+            }
+        });
+        ui.weak(crate::terminal::TOOLS[self.assistant.term_tool.min(3)].note);
+        if let Some(e) = &self.assistant.terminal_error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
+        ui.add_space(4.0);
+        egui::CollapsingHeader::new("From your own terminal").show(ui, |ui| self.setup_own_terminal_ui(ui, ctx));
+    }
+
+    /// Connecting a tool that runs in the author's own terminal window.
+    fn setup_own_terminal_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut start = false;
         let mut stop = false;
         let mut new_token = false;
         let mut copy: Option<String> = None;
-        ui.weak("Claude, ChatGPT and Gemini subscriptions work in their own tools, not here. Connect Claude Code, Codex or Gemini CLI to this lesson.");
         let mut on = self.mcp.running();
         if ui.checkbox(&mut on, "Let AI tools connect").changed() { if on { start = true; } else { stop = true; } }
         if let Some(e) = &self.mcp.error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
@@ -342,7 +371,7 @@ impl App {
             });
             ui.label(egui::RichText::new(self.mcp.status_line()).strong());
             if self.mcp.last_call.is_none() {
-                ui.weak("Run the command, then start the tool in any folder and ask it about your lesson. Turning this off, or closing Studio, disconnects it.");
+                ui.weak("Run the command, then start the tool in any folder and ask it about your lesson. Keep this window in view, for example beside the terminal: it cannot act while hidden or covered.");
             }
             ui.weak("Only this computer can reach it, and only with the token.");
         }

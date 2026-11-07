@@ -8,7 +8,7 @@
 //! The server never touches the app's data. A tool call is sent to the app over a channel and the app answers it on its
 //! own thread, one at a time.
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +21,15 @@ use crate::protocol::{self, Action, ToolDef};
 const MAX_BODY: usize = 1024 * 1024;
 /// How long to wait for the app to run a tool before telling the AI tool it is busy.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the app has to pick a call up.
+pub const PICKUP_MS: u64 = 5000;
+
+/// What the AI tool is told when the app did not pick its call up in time.
+const NOT_SHOWN: &str = "BrainBend Studio cannot act while its window is hidden, minimized or covered, because it only works while it is being drawn. Bring its window into view (for example beside this terminal) and try again.";
+
+const QUEUED: u8 = 0;
+const TAKEN: u8 = 1;
+const ABANDONED: u8 = 2;
 
 /// A tool call for the app to run.
 pub struct ToolCall {
@@ -28,6 +37,16 @@ pub struct ToolCall {
     pub arguments: Value,
     /// Where the app sends the text of the answer, or the text of the error.
     pub reply: Sender<Result<String, String>>,
+    state: Arc<AtomicU8>,
+}
+
+impl ToolCall {
+    pub fn new(name: String, arguments: Value, reply: Sender<Result<String, String>>) -> Self { Self { name, arguments, reply, state: Arc::new(AtomicU8::new(QUEUED)) } }
+
+    /// The app calls this before running the call. `false` means the AI tool has already been told it failed (the app was
+    /// not drawing, so it did not pick the call up in time), and the call must not be run: it would change the lesson
+    /// after the AI tool has given up on it.
+    pub fn claim(&self) -> bool { self.state.compare_exchange(QUEUED, TAKEN, Ordering::AcqRel, Ordering::Acquire).is_ok() }
 }
 
 pub struct Config {
@@ -38,6 +57,8 @@ pub struct Config {
     pub version: String,
     /// What the AI tool is told about the controller when it connects.
     pub instructions: String,
+    /// How long the app has to pick up a tool call before the AI tool is told the window is not showing, in milliseconds.
+    pub pickup_ms: u64,
 }
 
 /// A running server. It stops when this is dropped.
@@ -131,11 +152,19 @@ fn serve(mut req: tiny_http::Request, cfg: &Config, port: u16, tools: &[ToolDef]
         Action::Accepted => respond(req, 202, None),
         Action::Call { id, name, arguments } => {
             let (tx, rx) = channel();
-            if calls.send(ToolCall { name, arguments, reply: tx }).is_err() { return respond(req, 200, Some(protocol::error(id, -32000, "BrainBend Studio is closing").to_string())); }
+            let call = ToolCall::new(name, arguments, tx);
+            let state = call.state.clone();
+            if calls.send(call).is_err() { return respond(req, 200, Some(protocol::error(id, -32000, "BrainBend Studio is closing").to_string())); }
             wake();
-            let answer = match rx.recv_timeout(CALL_TIMEOUT) {
+            // The app picks a call up within a moment if its window is being drawn. If it has not, it is not going to, so
+            // the call is withdrawn for good now rather than left to run when the window next appears.
+            let answer = match rx.recv_timeout(Duration::from_millis(cfg.pickup_ms)) {
                 Ok(result) => protocol::tool_result(id, result),
-                Err(_) => protocol::error(id, -32000, "BrainBend Studio did not answer in time; it may be waiting for you to close a window"),
+                Err(_) if state.compare_exchange(QUEUED, ABANDONED, Ordering::AcqRel, Ordering::Acquire).is_ok() => protocol::error(id, -32000, NOT_SHOWN),
+                Err(_) => match rx.recv_timeout(CALL_TIMEOUT) {
+                    Ok(result) => protocol::tool_result(id, result),
+                    Err(_) => protocol::error(id, -32000, "BrainBend Studio did not answer in time; it may be waiting for you to close a window"),
+                },
             };
             respond(req, 200, Some(answer.to_string()));
         }
@@ -213,7 +242,7 @@ mod tests {
     /// A server, with a stand-in for the app that answers tool calls.
     fn running(port: u16) -> (Handle, std::thread::JoinHandle<()>, String) {
         let (tx, rx) = channel::<ToolCall>();
-        let cfg = Config { token: TOKEN.into(), port, version: "0.3.0".into(), instructions: "Use with care.".into() };
+        let cfg = Config { token: TOKEN.into(), port, version: "0.3.0".into(), instructions: "Use with care.".into(), pickup_ms: 5000 };
         let handle = start(cfg, tools(), tx, Arc::new(|| {})).expect("the server starts");
         let app = std::thread::spawn(move || {
             while let Ok(call) = rx.recv() {
@@ -256,6 +285,41 @@ mod tests {
         assert_eq!((v["result"]["isError"].as_bool(), v["result"]["content"][0]["text"].as_str()), (Some(true), Some("it failed on purpose")));
         drop(handle);
         let _ = app.join();
+    }
+
+    #[test]
+    fn a_call_the_app_does_not_pick_up_is_refused_with_a_hint_and_never_runs_later() {
+        let (tx, rx) = channel::<ToolCall>();
+        let cfg = Config { token: TOKEN.into(), port: 0, version: "0.3.0".into(), instructions: String::new(), pickup_ms: 200 };
+        let handle = start(cfg, tools(), tx, Arc::new(|| {})).expect("the server starts");
+        let began = std::time::Instant::now();
+        let (status, body) = post(&handle.url(), Some("Bearer s3cret"), r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"echo","arguments":{"text":"hi"}}}"#);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(status, 200);
+        assert!(v["error"]["message"].as_str().unwrap().contains("hidden, minimized or covered"), "{body}");
+        assert!(began.elapsed() < Duration::from_secs(5), "it does not wait the full minute");
+        // The window comes back and finds the call: it has been withdrawn.
+        let call = rx.try_recv().expect("the call was queued");
+        assert!(!call.claim(), "so it must not be run, or it would change the lesson after the AI tool gave up on it");
+        drop(handle);
+    }
+
+    #[test]
+    fn a_call_the_app_picks_up_in_time_can_take_longer_to_answer() {
+        let (tx, rx) = channel::<ToolCall>();
+        let cfg = Config { token: TOKEN.into(), port: 0, version: "0.3.0".into(), instructions: String::new(), pickup_ms: 200 };
+        let handle = start(cfg, tools(), tx, Arc::new(|| {})).expect("the server starts");
+        let app = std::thread::spawn(move || {
+            let call = rx.recv().unwrap();
+            assert!(call.claim(), "picked up at once");
+            std::thread::sleep(Duration::from_millis(600));
+            let _ = call.reply.send(Ok("slow but done".into()));
+        });
+        let (_, body) = post(&handle.url(), Some("Bearer s3cret"), r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["result"]["content"][0]["text"], "slow but done", "{body}");
+        let _ = app.join();
+        drop(handle);
     }
 
     #[test]

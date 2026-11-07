@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// What Claude is told about its job. The tools tell it the rest.
-const SYSTEM: &str = "You are the assistant built into BrainBend Studio, an app for building interactive lessons (slides with objects, \
+pub(super) const SYSTEM: &str = "You are the assistant built into BrainBend Studio, an app for building interactive lessons (slides with objects, \
 animations, timelines, triggers, questions). The author talks to you in a chat beside their slides and sees the slides change as you work. \
 You change the open lesson with your tools.\n\
 - Look before you change: get_project and list_slides, then get_slide for the slide you will work on. Use describe_model before setting \
@@ -181,7 +181,7 @@ impl ai::Tools for UiTools {
 
     fn call(&mut self, name: &str, input: &serde_json::Value) -> Result<String, String> {
         let (reply, answer) = channel();
-        self.calls.send(ToolCall { name: name.to_string(), arguments: input.clone(), reply }).map_err(|_| "BrainBend Studio is closing.".to_string())?;
+        self.calls.send(ToolCall::new(name.to_string(), input.clone(), reply)).map_err(|_| "BrainBend Studio is closing.".to_string())?;
         self.ctx.request_repaint();
         loop {
             match answer.recv_timeout(Duration::from_millis(200)) {
@@ -220,6 +220,14 @@ pub struct Assistant {
     pub setup_mode: usize,
     /// Which outside AI tool the window shows the command for.
     pub connect_tool: usize,
+    /// A tool running in a terminal in the AI tab.
+    pub terminal: Option<crate::terminal::Terminal>,
+    /// Why a terminal could not be started.
+    pub terminal_error: Option<String>,
+    /// Which tool to start from the setup window, and which one is running.
+    pub term_tool: usize,
+    /// With both a chat and a terminal, the terminal is the one being shown.
+    pub view_terminal: bool,
     convo: Arc<Mutex<ai::Conversation>>,
     run: Option<Run>,
     calls_tx: Sender<ToolCall>,
@@ -231,12 +239,15 @@ pub struct Assistant {
 impl Default for Assistant {
     fn default() -> Self {
         let (calls_tx, calls_rx) = channel();
-        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), model_input: String::new(), setup_open: false, setup_mode: 0, connect_tool: 0, convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
+        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), model_input: String::new(), setup_open: false, setup_mode: 0, connect_tool: 0, terminal: None, terminal_error: None, term_tool: 0, view_terminal: false, convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
     }
 }
 
 impl Assistant {
     pub fn load() -> Self { Self { settings: Settings::load(), ..Self::default() } }
+
+    /// The AI tab shows the terminal: there is one, and either there is no chat to show instead or it was chosen.
+    pub fn shows_terminal(&self) -> bool { self.terminal.is_some() && (self.view_terminal || self.settings.key().is_none()) }
 
     pub fn busy(&self) -> bool { self.run.is_some() }
 
