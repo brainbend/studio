@@ -25,6 +25,7 @@ mod ribbon;
 use ribbon::combo;
 mod states_panel;
 mod update;
+mod video_support;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -266,6 +267,8 @@ struct App {
     allow_close: bool,
     /// Checks GitHub for a newer release.
     updater: update::Updater,
+    /// The window that asks before the video program (ffmpeg) is downloaded.
+    video_support: video_support::VideoSupport,
     font_store: font_store::FontStore,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
@@ -462,7 +465,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(), word_capture: None,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1096,6 +1099,7 @@ impl App {
                 self.redo.clear();
                 self.dirty = ext == "story" || ext == "pptx";
                 self.remember(path);
+                self.offer_video_support_for_open_project();
             }
             Err(e) => self.status = format!("Could not open {}: {e}", file_label(&path)),
         }
@@ -2493,12 +2497,14 @@ impl App {
     fn insert_video_file(&mut self, path: &std::path::Path) -> bool {
         let Some((key, name)) = self.load_media_file(path) else { return false };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Video, 0.0, 0.0, 1280.0, 720.0);
-        // A frame of the video to show before it plays (needs ffmpeg; without it there is none).
+        // A frame of the video to show before it plays (needs the video program; without it there is none).
         let from_file = self.last_media_path.take().and_then(|p| brainbend_import_legacy::still_asset_from_file(&p));
         if let Some(still) = from_file.or_else(|| self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset)) {
             let still_key = format!("{key}-still");
             if let Some(p) = self.project.as_mut() { p.assets.insert(still_key.clone(), still); }
             o.poster = Some(still_key);
+        } else {
+            self.video_support.request("show a picture of the video before it plays", false);
         }
         o.asset = Some(key);
         self.insert(o);
@@ -6136,6 +6142,7 @@ impl App {
             }
         }
         self.update_window(ctx);
+        self.video_support_window(ctx);
         self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.fonts_window(ctx);
@@ -6683,7 +6690,14 @@ impl App {
                     let still = video.and_then(|k| self.project.as_ref().and_then(|p| p.assets.get(&k))).and_then(|v| brainbend_import_legacy::still_asset_at(v, secs));
                     match still {
                         Some(a) => { let k = self.new_id("asset"); self.project.as_mut().map(|p| p.assets.insert(k.clone(), a)); Some(k) }
-                        None => { self.status = "Could not make a frame at that time. Studio needs ffmpeg for this, and the time must be inside the video. You can also choose a picture.".into(); None }
+                        None => {
+                            self.status = if self.video_support.request("make a picture from a frame of the video", true) {
+                                "Studio needs video support to make a frame. Download it, then try again. You can also choose a picture.".into()
+                            } else {
+                                "Could not make a frame at that time. The time must be inside the video. You can also choose a picture.".into()
+                            };
+                            None
+                        }
                     }
                 }
             };
@@ -7977,6 +7991,32 @@ mod tests {
         tx.send(Ok(Some(release))).unwrap();
         h.run_steps(3);
         assert!(h.state().updater.dialog_open && !h.state().updater.notice_open, "the update window opens, not the notice");
+    }
+
+    #[test]
+    fn video_support_asks_before_downloading_and_not_now_is_remembered() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("Not now").is_none(), "nothing asks until a feature needs the program");
+        h.state_mut().video_support.phase = video_support::Phase::Asking;
+        h.state_mut().video_support.why = "make a picture of the video".into();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Studio needs a video program to make a picture of the video").is_some(), "it says what for");
+        assert!(h.query_by_label("Download").is_some() && h.query_by_label("Not now").is_some());
+        h.get_by_label("Not now").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Not now").is_none(), "Not now closes it");
+        assert!(h.state().video_support.declined, "and an import does not ask again this run");
+        // A failed download offers another try.
+        h.state_mut().video_support.phase = video_support::Phase::Failed("no connection".into());
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("no connection").is_some());
+        assert!(h.query_by_label("Try again").is_some());
+        h.get_by_label("Not now").click();
+        h.run_steps(2);
     }
 
     #[test]

@@ -610,6 +610,7 @@ dependencies = [
  "brainbend-import-pptx",
  "brainbend-publish-html",
  "brainbend-spell",
+ "brainbend-video",
  "earcutr",
  "eframe",
  "egui_kittest",

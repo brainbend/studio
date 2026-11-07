@@ -24,6 +24,7 @@ brainbend-export-docx = { path = "../../crates/export-docx" }
 brainbend-export-pdf = { path = "../../crates/export-pdf" }
 brainbend-publish-html = { path = "../../crates/publish-html" }
 brainbend-spell = { path = "../../crates/spell" }
+brainbend-video = { path = "../../crates/video" }
 ureq = "3"
 serde_json = "1.0.154"
 semver = "1.0.28"
