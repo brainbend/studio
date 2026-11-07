@@ -81,7 +81,6 @@ pub struct VideoRun {
 impl VideoRun {
     pub(super) fn waiting(&self) -> bool { matches!(self.phase, Phase::Capturing) && self.waiting }
     pub(super) fn encoding(&self) -> bool { matches!(self.phase, Phase::Encoding { .. }) }
-    pub(super) fn pictures_taken(&self) -> usize { self.pictures.len() }
     pub(super) fn plan(&self) -> &Plan { &self.plan }
     pub(super) fn work_dir(&self) -> &std::path::Path { &self.dir }
     pub(super) fn title(&self) -> &str { &self.title }

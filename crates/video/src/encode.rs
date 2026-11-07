@@ -33,9 +33,12 @@ pub struct Job {
     pub output: PathBuf,
 }
 
+/// A stretch of pictures that is one stream, and the transition that blends it into the one before.
+type Run<'a> = (&'a [(PathBuf, u32)], Option<&'a Blend>);
+
 /// The pictures in runs: a new run starts at each transition, so the run it blends into is a stream of its own.
-fn runs(job: &Job) -> Vec<(&[(PathBuf, u32)], Option<&Blend>)> {
-    let mut out: Vec<(&[(PathBuf, u32)], Option<&Blend>)> = vec![];
+fn runs(job: &Job) -> Vec<Run<'_>> {
+    let mut out: Vec<Run<'_>> = vec![];
     let mut start = 0;
     let mut blend: Option<&Blend> = None;
     for b in &job.blends {

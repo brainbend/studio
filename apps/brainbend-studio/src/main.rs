@@ -27,6 +27,8 @@ mod states_panel;
 mod update;
 mod video_support;
 mod video_export;
+mod mcp_tools;
+mod mcp;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -67,6 +69,7 @@ fn main() -> eframe::Result {
             if let Some(f) = &app.recent_file { app.recent = recent::load_from(f); }
             app.updater = update::Updater::load();
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
+            app.mcp = mcp::Mcp::load();
             app.open_to_story_view = true;
             if let Some(p) = arg {
                 app.open(&p);
@@ -195,6 +198,8 @@ struct App {
     handout_range: publish_dialog::HandoutRange,
     /// A Word handout being made: its slides are shown one at a time while their pictures are taken.
     word_capture: Option<word_export::Capture>,
+    /// AI tools connecting to the app through MCP: the controller's state and its window.
+    mcp: mcp::Mcp,
     /// What the Video page of the Publish dialog is set to.
     video_options: video_export::Options,
     /// A video being made.
@@ -474,7 +479,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1370,6 +1375,13 @@ impl App {
             self.pan = egui::Vec2::ZERO;
         }
         if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
+    }
+
+    /// The window's title: the project's name, a dot while it has unsaved changes, and a note while AI tools can connect.
+    fn window_title(&self) -> String {
+        let name = self.project.as_ref().map(|p| p.name.clone()).unwrap_or_default();
+        if name.is_empty() { return "BrainBend Studio".to_string(); }
+        format!("BrainBend Studio — {name}{}{}", if self.dirty { " •" } else { "" }, if self.mcp.running() { "  ·  AI tools on" } else { "" })
     }
 
     fn new_id(&mut self, prefix: &str) -> String {
@@ -5930,9 +5942,7 @@ impl App {
 
         // Window title, close guard, autosave.
         {
-            let name = self.project.as_ref().map(|p| p.name.clone()).unwrap_or_default();
-            let title = if name.is_empty() { "BrainBend Studio".to_string() } else { format!("BrainBend Studio — {name}{}", if self.dirty { " •" } else { "" }) };
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
             if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
                 if self.dirty && self.project.is_some() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -6143,6 +6153,7 @@ impl App {
         }
         self.update_window(ctx);
         self.video_support_window(ctx);
+        self.mcp_frame(ctx);
         self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.video_export_frame(ctx);
@@ -7997,6 +8008,135 @@ mod tests {
         tx.send(Ok(Some(release))).unwrap();
         h.run_steps(3);
         assert!(h.state().updater.dialog_open && !h.state().updater.notice_open, "the update window opens, not the notice");
+    }
+
+    /// A home folder of the test's own, so that saved AI Tools settings (which include a secret) never touch the real one.
+    fn own_home(name: &str) -> std::path::PathBuf {
+        let home = std::env::temp_dir().join(format!("bb-home-{name}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        std::env::set_var("USERPROFILE", &home);
+        home
+    }
+
+    #[test]
+    fn the_ai_tools_window_turns_the_controller_on_and_off_and_keeps_the_token_hidden() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("mcp-window");
+        let mut a = app();
+        let token = "k".repeat(64);
+        a.mcp.settings = mcp::Settings { token: token.clone(), port: 0, ..Default::default() };
+        a.ribbon_tab = ribbon::HELP_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The group heading and its button share the name; the heading ignores a click.
+        for n in h.get_all_by_label("AI Tools") { n.click(); }
+        h.run_steps(3);
+        assert!(h.state().mcp.open, "the Help tab's button opens the window");
+        assert!(!h.state().mcp.running(), "nothing listens until the author turns it on");
+        assert!(h.query_by_label_contains("Let an AI tool you choose").is_some());
+        assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Turn this on when BrainBend Studio opens").is_some());
+        assert!(h.state().mcp.settings.allow_edit && !h.state().mcp.settings.allow_files, "changes are allowed, files are not");
+        h.get_by_label("Let AI tools connect").click();
+        h.run_steps(3);
+        assert!(h.state().mcp.running(), "it is on");
+        let url = h.state().mcp.url().unwrap();
+        assert!(url.starts_with("http://127.0.0.1:") && url.ends_with("/mcp"), "{url}");
+        assert!(h.query_all_by_label_contains(&url).next().is_some(), "the address is shown");
+        assert!(h.query_all_by_label_contains(&token).next().is_none(), "the token is hidden until Show is pressed, here and in the command");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-tools.png")).unwrap(); }
+        h.get_by_label("Show").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains(&token).next().is_some(), "now it shows");
+        assert!(h.state().window_title().ends_with("AI tools on"), "the window title says so while it is on: {}", h.state().window_title());
+        h.get_by_label("Hide").click();
+        h.run_steps(2);
+        h.get_by_label("Let AI tools connect").click();
+        h.run_steps(3);
+        assert!(!h.state().mcp.running(), "and off again");
+    }
+
+    #[test]
+    fn an_ai_tool_can_read_and_change_the_project_over_the_network_and_only_as_allowed() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("mcp-network");
+        let mut a = app();
+        a.project.as_mut().unwrap().slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
+        let token = "t".repeat(64);
+        a.mcp.settings = mcp::Settings { token: token.clone(), port: 0, ..Default::default() };
+        a.dirty = false;
+        a.undo.clear();
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        let ctx = h.ctx.clone();
+        h.state_mut().mcp.start(&ctx);
+        let url = h.state().mcp.url().expect("it started");
+        // A real HTTP client, on its own thread as an AI tool would be, while the app keeps drawing frames.
+        let call = |auth: Option<String>, body: serde_json::Value| {
+            let url = url.clone();
+            std::thread::spawn(move || {
+                let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+                let mut req = agent.post(&url);
+                if let Some(a) = auth { req = req.header("Authorization", a); }
+                let mut reply = req.send(body.to_string().as_bytes()).expect("the controller answers");
+                (reply.status().as_u16(), reply.body_mut().read_to_string().unwrap_or_default())
+            })
+        };
+        let bearer = Some(format!("Bearer {token}"));
+        let mut ask = |h: &mut egui_kittest::Harness<'static, App>, auth: Option<String>, body: serde_json::Value| -> (u16, serde_json::Value) {
+            let t = call(auth, body);
+            let mut waited = 0;
+            while !t.is_finished() && waited < 2000 { h.step(); std::thread::sleep(std::time::Duration::from_millis(5)); waited += 1; }
+            let (status, text) = t.join().expect("the client finished");
+            (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+        };
+        let tool = |id: u32, name: &str, args: serde_json::Value| serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": args } });
+        let text_of = |v: &serde_json::Value| v["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
+
+        // Connecting, and being refused without the token.
+        let (status, v) = ask(&mut h, bearer.clone(), serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18" } }));
+        assert_eq!((status, v["result"]["serverInfo"]["name"].as_str()), (200, Some("brainbend-studio")));
+        let (status, _) = ask(&mut h, None, tool(2, "list_slides", serde_json::json!({})));
+        assert_eq!(status, 401, "no token");
+        let (status, _) = ask(&mut h, Some("Bearer wrong".into()), tool(2, "list_slides", serde_json::json!({})));
+        assert_eq!(status, 401, "wrong token");
+
+        // Reading.
+        let (_, v) = ask(&mut h, bearer.clone(), tool(3, "list_slides", serde_json::json!({})));
+        assert_eq!(v["result"]["isError"], false);
+        let slides: serde_json::Value = serde_json::from_str(&text_of(&v)).unwrap();
+        assert_eq!(slides.as_array().unwrap().len(), 2);
+        assert!(!h.state().dirty, "looking changes nothing");
+
+        // Changing, as the author allows by default; the author sees it on screen and can undo it.
+        let (_, v) = ask(&mut h, bearer.clone(), tool(4, "add_text", serde_json::json!({ "slide": 2, "text": "From an AI tool", "size": 60 })));
+        assert_eq!(v["result"]["isError"], false, "{v}");
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects[0].text, "From an AI tool");
+        assert!(h.state().dirty && h.state().status.starts_with("AI tool:"), "{}", h.state().status);
+        assert_eq!(h.state().slide, 1, "the slide it worked on is on screen");
+        let (_, v) = ask(&mut h, bearer.clone(), tool(5, "undo", serde_json::json!({})));
+        assert_eq!(v["result"]["isError"], false);
+        assert!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.is_empty(), "undone");
+
+        // With changes switched off, it can still look but not touch.
+        h.state_mut().mcp.settings.allow_edit = false;
+        let (_, v) = ask(&mut h, bearer.clone(), tool(6, "add_text", serde_json::json!({ "slide": 1, "text": "No" })));
+        assert_eq!(v["result"]["isError"], true);
+        assert!(text_of(&v).contains("not allowed AI tools to change the project"), "{}", text_of(&v));
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "nothing changed");
+        let (_, v) = ask(&mut h, bearer.clone(), tool(7, "get_slide", serde_json::json!({ "slide": 1 })));
+        assert_eq!(v["result"]["isError"], false, "reading still works");
+
+        // The activity list says what happened, and failures stand out.
+        let log: Vec<(bool, String)> = h.state().mcp.log.iter().map(|l| (l.ok, l.text.clone())).collect();
+        assert!(log.iter().any(|(ok, t)| *ok && t == "add_text") && log.iter().any(|(ok, t)| !ok && t.starts_with("add_text: The author has not allowed")), "{log:?}");
+
+        // Files are off, and stay off, whatever tool is asked for.
+        assert_eq!(mcp_tools::access("save_project"), None, "no file tools exist yet");
+        h.state_mut().mcp.stop();
+        assert!(!h.state().mcp.running());
     }
 
     #[test]
