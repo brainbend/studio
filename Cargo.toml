@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/doc", "crates/fonts", "crates/spell", "crates/import-legacy", "crates/import-pptx", "crates/export-pptx", "crates/publish-html", "apps/brainbend-studio"]
+members = ["crates/doc", "crates/fonts", "crates/spell", "crates/video", "crates/import-legacy", "crates/import-pptx", "crates/export-pptx", "crates/export-docx", "crates/export-pdf", "crates/publish-html", "apps/brainbend-studio"]
 
 [workspace.package]
 edition = "2021"

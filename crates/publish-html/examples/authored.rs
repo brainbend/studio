@@ -30,7 +30,7 @@ fn main() {
             trig("t5", Owner::Object("btn".into()), Event::Hover, Action::RunJavaScript("GetPlayer().SetVar('Count', 41);".into()), vec![]),
             trig("t3", Owner::Object("btn".into()), Event::Click, Action::RunJavaScript("var p=GetPlayer(); p.SetVar('Count', p.GetVar('Count')+1);".into()), vec![]),
         ],
-        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
+        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, transition: Default::default(), hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
     });
     brainbend_publish_html::export(&p, std::path::Path::new(&out)).unwrap();
 }

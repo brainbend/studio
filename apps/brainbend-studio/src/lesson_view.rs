@@ -641,7 +641,7 @@ impl App {
         let before = Snap::of(self.project.as_ref().unwrap());
         let mut want_cover = false;
         let mut changed = false;
-        egui::Window::new("Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| {
+        crate::dialog_window(ctx, "Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| {
             let p = self.project.as_mut().unwrap();
             changed |= single(ui, "Lesson title", &mut p.name);
             ui.separator();
@@ -670,20 +670,20 @@ impl App {
                 }
             }
             ui.separator();
-            ui.label("Colours and fonts");
+            ui.label("Colors and fonts");
             ui.horizontal_wrapped(|ui| {
                 for t in Theme::presets() {
                     if ui.selectable_label(p.theme.name == t.name, &t.name).clicked() { p.theme = t; changed = true; }
                 }
             });
             if let Some(l) = p.lesson.as_mut() {
-                for (label, slot, idx) in [("Primary colour (buttons, progress)", &mut l.primary, 4usize), ("Secondary colour (highlights)", &mut l.secondary, 5)] {
+                for (label, slot, idx) in [("Primary color (buttons, progress)", &mut l.primary, 4usize), ("Secondary color (highlights)", &mut l.secondary, 5)] {
                     ui.horizontal(|ui| {
                         let theme_c = p.theme.color(idx);
                         let mut c = slot.unwrap_or(theme_c);
                         if crate::ribbon::color_swatch(ui, &mut c) { *slot = Some(c); changed = true; }
                         ui.label(label);
-                        if slot.is_some() && ui.small_button("Use theme colour").clicked() { *slot = None; changed = true; }
+                        if slot.is_some() && ui.small_button("Use theme color").clicked() { *slot = None; changed = true; }
                     });
                 }
             }

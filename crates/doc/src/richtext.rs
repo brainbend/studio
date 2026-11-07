@@ -35,7 +35,7 @@ pub enum Attr {
     /// Remove all character formatting (a link stays).
     Clear,
     ToggleStrike,
-    /// A marker colour behind the text (`None` removes it).
+    /// A marker color behind the text (`None` removes it).
     Highlight(Option<Rgba>),
     /// Letter spacing in px (0 is normal).
     Spacing(f32),

@@ -44,13 +44,13 @@ fn main() {
             trig("t4", Owner::Object("tip".into()), Event::MouseLeave, Action::SetVariable { variable: "v-hover".into(), value: Value::Num(2.0) }),
             trig("t5", Owner::Object("locked".into()), Event::Click, Action::SetVariable { variable: "v-hover".into(), value: Value::Num(9.0) }),
         ],
-        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
+        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, transition: Default::default(), hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
     });
     p.slides.push(Slide {
         id: "s2".into(), name: "Second topic".into(), width: 1920.0, height: 1080.0,
         layers: vec![Layer { id: "base2".into(), name: "Base".into(), objects: vec![next], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] }],
         triggers: vec![trig("n1", Owner::Object("next".into()), Event::Click, Action::JumpToSlide("s1".into()))],
-        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
+        kind: SlideKind::Normal, background: None, layout: None, fade_ms: 0, transition: Default::default(), hide_backdrop: false, auto_advance: false, nav: Default::default(), notes: String::new(), scene: String::new(),
     });
     brainbend_publish_html::export(&p, std::path::Path::new(&out)).unwrap();
 }

@@ -3,7 +3,7 @@
 //! Written from the public ECMA-376 (Office Open XML) specification. It carries over slide size,
 //! the theme, the slide master and layouts (with backgrounds and decorative shapes), slides with
 //! text, shapes, pictures, tables, media, notes, sections and links, resolving the
-//! slide → layout → master inheritance of positions, text styles and colours. What it cannot
+//! slide → layout → master inheritance of positions, text styles and colors. What it cannot
 //! reproduce is listed in the returned project's `notes`.
 mod color;
 mod geom;
@@ -263,7 +263,7 @@ pub(crate) fn fill_to_background(f: &FillSpec, ch: &Chain, cx: &mut Cx) -> Optio
         FillSpec::NoFill => None,
         FillSpec::Solid(c) | FillSpec::Pattern(c) => Some(Background::Solid(ch.color(c, None))),
         FillSpec::Grad { angle, stops } => {
-            Some(Background::Gradient { angle: *angle, stops: stops.iter().map(|(p, c)| (*p, ch.color(c, None))).collect() })
+            Some(Background::Gradient { angle: *angle, stops: stops.iter().map(|(p, c)| (*p, ch.color(c, None))).collect(), kind: Default::default(), geom: Default::default() })
         }
         FillSpec::Blip { embed, crop } => shapes::picture_asset(cx, embed, *crop).map(|asset| Background::Image { asset }),
     }
@@ -282,7 +282,7 @@ fn read_background(root: Node, cx: &mut Cx, ch_theme: &ThemeData, ch: &Chain) ->
     let ctx = ColorCtx { scheme: &ch.theme.scheme, clr_map: &ch.clr_map, ph };
     match spec {
         FillSpec::Solid(c) => Some(Background::Solid(c.resolve(&ctx))),
-        FillSpec::Grad { angle, stops } => Some(Background::Gradient { angle: *angle, stops: stops.iter().map(|(p, c)| (*p, c.resolve(&ctx))).collect() }),
+        FillSpec::Grad { angle, stops } => Some(Background::Gradient { angle: *angle, stops: stops.iter().map(|(p, c)| (*p, c.resolve(&ctx))).collect(), kind: Default::default(), geom: Default::default() }),
         _ => None,
     }
 }
@@ -446,7 +446,7 @@ pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> 
         }
         let notes = shapes::read_notes(&cx);
         let title = objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).map(|o| o.text.lines().next().unwrap_or("").trim().to_string()).filter(|t| !t.is_empty());
-        let fade_ms = shapes::read_transition(sroot, &mut cx);
+        let (fade_ms, transition) = shapes::read_transition(sroot, &mut cx);
         shapes::read_animations(sroot, &mut cx, &mut objects, (width, height));
         let mut slide = Slide::new(&slide_id, &title.map(|t| t.chars().take(60).collect::<String>()).unwrap_or_else(|| format!("Slide {}", converted.len() + 1)), width, height);
         slide.layers[0].objects = objects;
@@ -454,6 +454,7 @@ pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> 
         slide.layout = m.layouts.get(li).map(|l| l.1.id.clone());
         slide.notes = notes;
         slide.fade_ms = fade_ms;
+        slide.transition = transition;
         let links = std::mem::take(&mut cx.links);
         slide_id_of_part.insert(part.clone(), slide_id.clone());
         converted.push((sld_id.clone(), part.clone(), slide, links));

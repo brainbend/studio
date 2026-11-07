@@ -9,7 +9,7 @@
 
 <p align="center">
   <b>A free, open-source authoring tool for interactive e-learning.</b><br>
-  Build slide-based Media Lessons, open PowerPoint and Storyline files, and publish to the web, an LMS or PDF.
+  Build slide-based Media Lessons, open PowerPoint and Storyline files, and publish to the web, an LMS, PDF, Word or PowerPoint.
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@
 </p>
 
 > [!NOTE]
-> BrainBend Studio is a work in progress, heading for its first release (v0.1.0). Web Lessons are not available to create yet.
+> BrainBend Studio is a work in progress. Web Lessons are not available to create yet.
 
 ## Runs where you do
 
@@ -45,12 +45,12 @@ Every change is built and tested on macOS, Windows and Linux. Releases are on th
 
 ## What you can add
 
-**Objects** (Insert tab)
+**Objects** (Objects tab)
 
 | Group | Objects |
 |---|---|
-| Media | Picture · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolour) · Web Object |
 | Text | Text Box · Table · Slide Number |
+| Media | Picture · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolor) · Web Object |
 | Interactive | Button (with Normal, Hover, Down, Visited, Disabled and Selected states) · Slider · Hotspot (rectangle, oval or freeform) · Dial · Input (check box, radio button, text entry, number entry) · Marker |
 
 **Slides** (Slides tab)
@@ -75,10 +75,13 @@ Press **Publish** to choose how the project goes out:
 
 - **Web**: an HTML5 folder named for the project, ready for any web server.
 - **Other LMS**: a SCORM package (`.zip`) for SCORM 1.2 or SCORM 2004 4th Edition, reporting completion, score and pass/fail.
-- **PDF**: a handout in portrait or landscape, with 1, 2 or 3 slides per page, optional correct answers, space for notes, slide notes and alt text.
+- **PDF**: a PDF file saved directly (no print dialog): a handout in portrait or landscape, with 1, 2 or 3 slides per page, optional correct answers, space for notes, slide notes and alt text.
+- **Print**: the same handout in your browser's print dialog, for a printer or its own "Save as PDF".
+- **Word**: an editable .docx handout with a picture of each slide (questions as they look in the lesson), on a portrait page: one slide with its notes and alt text, or two slides to a page.
 - **PowerPoint**: a `.pptx` file.
+- **Video**: an MP4 of the lesson. Each slide shows for its timeline's length or as long as its sound plays, slide transitions are blended in, and sound that starts by itself is mixed in. Effects and motion paths are not played yet, and a report afterwards lists what the video leaves out. Making video needs the free ffmpeg program: the first time, Studio asks and downloads it once from [studio-components](https://github.com/brainbend/studio-components).
 
-BrainBend Review, BrainBend LMS, Video and Word are marked Coming soon.
+BrainBend Review and BrainBend LMS are marked Coming soon.
 
 ## License
 

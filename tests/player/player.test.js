@@ -30,7 +30,7 @@ test('keyboard activation works on click-trigger objects', () => {
 
 test('quiz: navigation is gated, answers are scored, results and retry work', () => {
   const { w, errors } = boot(fixture('quiz'));
-  const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+  const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   assert.equal(currentSlide(w), 0);
   click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
   assert.equal(currentSlide(w), 1);
@@ -69,7 +69,7 @@ for (const mode of ['1.2', '2004']) {
     const { w, store, log, errors } = boot(dir(), mode);
     assert.ok(log.some((l) => l === `${key('cmi.core.lesson_status', 'cmi.completion_status')}=incomplete`));
     click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
-    const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+    const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
     const q1 = $$(w, '.slide')[1];
     q1.querySelector('input[value=a]').checked = true; click(w, q1.querySelector('.q-submit')); click(w, next());
     const q2 = $$(w, '.slide')[2];
@@ -89,7 +89,7 @@ for (const mode of ['1.2', '2004']) {
     click(first.w, $$(first.w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
     const q1 = $$(first.w, '.slide')[1];
     q1.querySelector('input[value=b]').checked = true; click(first.w, q1.querySelector('.q-submit'));
-    click(first.w, $$(first.w, '#nav button').find((b) => b.textContent === 'Next'));
+    click(first.w, $$(first.w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
     await sleep(700);
     const init = {
       'cmi.suspend_data': first.store['cmi.suspend_data'],
@@ -104,7 +104,7 @@ for (const mode of ['1.2', '2004']) {
 test('failing score is reported as failed', () => {
   const { w, store } = boot(fixture('quiz12'), '1.2');
   click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
-  const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+  const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   const q1 = $$(w, '.slide')[1];
   q1.querySelector('input[value=b]').checked = true; click(w, q1.querySelector('.q-submit')); click(w, next());
   const q2 = $$(w, '.slide')[2];
@@ -174,7 +174,7 @@ test('timeline: objects appear and leave on schedule, the end event fires, auto-
 
 test('timeline timers are cleared when the slide is left', async () => {
   const { w } = boot(fixture('timeline'));
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next')); // Next, before A's timeline ends
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next')); // Next, before A's timeline ends
   assert.equal(currentSlide(w), 1);
   await sleep(450);
   assert.equal(currentSlide(w), 1, 'a stale A timer must not push the course forward');
@@ -185,7 +185,7 @@ test('timeline timers are cleared when the slide is left', async () => {
 const slideEl = (w, i) => $$(w, '.slide')[i];
 const submit = (w, i) => click(w, slideEl(w, i).querySelector('.q-submit'));
 const feedback = (w, i) => slideEl(w, i).querySelector('.q-feedback').textContent;
-const nextBtn = (w) => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+const nextBtn = (w) => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
 
 function sortSequence(w, i, wanted) {
   // Bubble the shuffled list into `wanted` order by pressing the move buttons, as a learner would.
@@ -268,7 +268,7 @@ test('slide menu: lists slides, blocks skipping past unanswered questions, marks
   const menu = w.document.getElementById('menu');
   assert.ok(menu && menu.hidden, 'the menu starts closed');
   const menuBtn = $$(w, '#nav button')[0];
-  assert.equal(menuBtn.textContent, 'Menu');
+  assert.equal(menuBtn.getAttribute('aria-label'), 'Menu');
   click(w, menuBtn);
   assert.equal(menu.hidden, false);
   assert.equal(menuBtn.getAttribute('aria-expanded'), 'true');
@@ -309,7 +309,7 @@ test('lines are drawn as SVG strokes, rising or falling', () => {
   assert.deepEqual(errors, []);
 });
 
-test('slides follow the master: gradient, colour and picture backgrounds, and master shapes underneath', () => {
+test('slides follow the master: gradient, color and picture backgrounds, and master shapes underneath', () => {
   const { w, errors } = boot(fixture('master'));
   const slides = $$(w, '.slide');
   assert.match(slides[0].style.background, /linear-gradient\(90deg/);
@@ -442,7 +442,7 @@ test('slide navigation rules: next after the timeline, no way back, resume or st
   click(w, nextBtn(w));
   // B: no way back; it resumes where it was left.
   assert.equal(currentSlide(w), 1);
-  assert.equal($$(w, '#nav button').find((b) => b.textContent === 'Previous').disabled, true, 'Previous is off');
+  assert.equal($$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous').disabled, true, 'Previous is off');
   assert.equal(box('b').style.display, 'none');
   reveal('b');
   assert.equal(box('b').style.display, '');
@@ -661,7 +661,7 @@ test('click steps: each click plays the effects numbered for it before the slide
   click(w, nextBtn(w));
   assert.equal(currentSlide(w), 1);
   // Coming back starts the steps over.
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous'));
   assert.equal(currentSlide(w), 0);
   assert.equal(hidden('one'), true);
   assert.equal(hidden('three'), false);
@@ -960,7 +960,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const audit = async (w) => {
   w.eval(axe.source);
-  // jsdom does no layout, so colour contrast is checked from the stylesheets elsewhere.
+  // jsdom does no layout, so color contrast is checked from the stylesheets elsewhere.
   const r = await w.axe.run(w.document, { rules: { 'color-contrast': { enabled: false } } });
   return Array.from(r.violations, (v) => `${v.id}: ${v.nodes[0].html.slice(0, 120)}`);
 };
@@ -988,8 +988,10 @@ test('accessibility: landmarks, a heading and a spoken announcement name each sl
   assert.equal(main.getAttribute('aria-label'), 'Access');
   assert.equal($(w, 'nav#nav').getAttribute('aria-label'), 'Course navigation');
   assert.equal($(w, '#slide-title').textContent, 'First topic');
-  assert.equal($(w, '#slide-title').getAttribute('role'), 'heading', 'the hidden slide title is a level 1 heading');
-  assert.equal($(w, '#slide-title').getAttribute('aria-level'), '1');
+  assert.equal($(w, '#slide-title').getAttribute('role'), 'heading', 'the hidden slide title is a heading');
+  assert.equal($(w, '#slide-title').getAttribute('aria-level'), '2', 'level 2: the project name is the page\'s one level 1 heading');
+  assert.equal($$(w, 'h1').length, 1, 'one level 1 heading on the page');
+  assert.ok($(w, 'main#stage h1.sr-only'), 'the project name heading sits inside the main landmark, so no content is outside a landmark');
   assert.equal($(w, '#announce').textContent, 'First topic, slide 1 of 2');
   assert.equal($(w, '#announce').getAttribute('aria-live'), 'polite');
   assert.equal($(w, '.nav-count').getAttribute('aria-label'), 'Slide 1 of 2');
@@ -1072,7 +1074,7 @@ test('accessibility: a key a control handled does not also play a click step', (
   assert.equal(hidden('one'), false, 'an unused space bar plays the step');
 });
 
-test('accessibility: questions - results are written as well as coloured, and answering moves focus to the feedback', () => {
+test('accessibility: questions - results are written as well as colored, and answering moves focus to the feedback', () => {
   const { w } = boot(fixture('quiz2'));
   // The first question in this fixture is typed; answer it wrong, then see the written mark and the focus.
   const input = $(w, '.q-text');
@@ -1237,7 +1239,7 @@ test('list items hang: the marker sits in the margin and wrapped lines line up w
   assert.deepEqual(errors, []);
 });
 
-test('headings are published as real heading elements, and a Heading 1 replaces the hidden slide title as the slide heading', () => {
+test('headings are published as real heading elements, and the slide title stays a level 2 heading beside them', () => {
   const { w, errors } = boot(fixture('richtext'));
   const h2 = $(w, 'h2.label');
   assert.ok(h2, 'a Heading 2 text object is an h2');
@@ -1245,8 +1247,8 @@ test('headings are published as real heading elements, and a Heading 1 replaces 
   const h1 = $(w, 'h1.label');
   assert.equal(h1.textContent, 'Main heading');
   const title = $(w, '#slide-title');
-  assert.equal(title.getAttribute('role'), 'group', 'the hidden slide title steps aside for an author-made Heading 1');
-  assert.equal(title.getAttribute('aria-label'), 'A');
+  assert.equal(title.getAttribute('role'), 'heading', 'the hidden slide title is still the slide heading');
+  assert.equal(title.getAttribute('aria-level'), '2');
   assert.equal($$(w, '.obj .label').filter((l) => l.tagName === 'DIV').length > 0, true, 'ordinary text stays a block');
   assert.deepEqual(errors, []);
 });
@@ -1490,7 +1492,7 @@ test('tabs: a real press on a two-line tab shows its layer, one at a time, and h
 
 test('a button with a Visited state shows it after the first press, and Hover still applies while the pointer is on it', () => {
   const { w, errors } = boot(fixture('tabs'));
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   const v = $$(w, '.obj').find((o) => o.textContent === 'Visit me');
   const look = () => (v.style.background.match(/\d+, \d+, \d+/) || [''])[0];
   assert.equal(look(), '10, 20, 30', 'Normal at first');
@@ -1505,8 +1507,8 @@ test('a button with a Visited state shows it after the first press, and Hover st
 
 test('layers that do not hide the others stack; the Previous button runs its slide trigger instead of moving back', () => {
   const { w, errors } = boot(fixture('tabs'));
-  const next = $$(w, '#nav button').find((b) => b.textContent === 'Next');
-  const prev = $$(w, '#nav button').find((b) => b.textContent === 'Previous');
+  const next = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
+  const prev = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous');
   click(w, next);
   assert.equal(currentSlide(w), 1);
   const btn = (text) => $$(w, '.obj').find((o) => o.textContent === text);
@@ -1575,7 +1577,7 @@ test('button styles: a state can be a gradient, so a button keeps its look when 
   assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(110,179,215,1\) 0%,rgba\(47,78,162,1\) 100%\)/, 'the resting face is the gradient');
   assert.match(btn.style.boxShadow, /^0px 4px 3\.5px 0px /, 'with its drop shadow');
   btn.dispatchEvent(new w.MouseEvent('mouseenter'));
-  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat colour');
+  assert.match(btn.style.background, /linear-gradient\(180deg,rgba\(121,198,225,1\) 0%,rgba\(35,59,152,1\) 100%\)/, 'hover is a different gradient, not a flat color');
   btn.dispatchEvent(new w.MouseEvent('mouseleave'));
   assert.match(btn.style.background, /rgba\(110,179,215,1\)/, 'and it goes back');
   assert.deepEqual(errors, []);
@@ -1685,10 +1687,10 @@ test('player controls: replay starts the slide again, and slides with nothing to
   assert.ok(Number(t.seek.value) < 500);
   assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'and playing');
   // The second slide has no timeline and no media.
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.equal(currentSlide(w), 1);
   assert.equal(t.play.disabled && t.replay.disabled && t.seek.disabled, true, 'nothing to play: all three are greyed out');
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous'));
   assert.equal(t.play.disabled || t.replay.disabled || t.seek.disabled, false, 'and back on the timed slide they work again');
   assert.deepEqual(errors, []);
 });
@@ -1701,7 +1703,7 @@ test('player controls: a slide with a video is driven through the video', () => 
     Object.defineProperty(win.HTMLMediaElement.prototype, 'duration', { configurable: true, get() { return 90; } });
   });
   const t = transport(w);
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   const slide = $$(w, '.slide')[1];
   const v = w.document.createElement('video'); slide.querySelector('.layer').appendChild(v);
   w.document.dispatchEvent(new w.Event('loadedmetadata'));
@@ -1728,6 +1730,24 @@ test('player controls: icons, icon-only buttons keep their names, and the contro
   assert.equal(t.replay.getAttribute('aria-label'), 'Replay');
   const { w: plain } = boot(fixture('playerui-icons'));
   assert.equal($(plain, '.ctl-play') || $(plain, '.ctl-replay') || $(plain, '.ctl-seek'), null, 'not shown unless chosen');
+});
+
+test('player controls: K plays and pauses, and leaves typing alone', () => {
+  const { w, errors } = boot(fixture('transport'));
+  const t = transport(w);
+  const key = (target, k, opts = {}) => { const ev = new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }); target.dispatchEvent(ev); return ev; };
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause');
+  assert.ok(key(w.document.body, 'k').defaultPrevented);
+  assert.equal(t.play.getAttribute('aria-label'), 'Play', 'K paused it');
+  key(w.document.body, 'K');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'and K again plays it');
+  key(w.document.body, 'k', { ctrlKey: true });
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'a shortcut with Ctrl is left to the browser');
+  const input = w.document.createElement('input'); w.document.body.appendChild(input);
+  key(input, 'k');
+  assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'typing a k in a field does not pause');
+  assert.deepEqual(errors, []);
+  w.close();
 });
 
 test('player layout: the sidebar slides in and out, the top bar moves at once, and the menu hides when the slide ends', () => {
@@ -1791,9 +1811,9 @@ test('player sidebar: menu and notes tabs, the title and the logo, a toggle that
   // Notes: the current slide's, and a hint when it has none.
   click(w, tab('Notes'));
   assert.match($(w, '#menu .notes').textContent, /Greet the learners/);
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.equal($(w, '#menu .notes').textContent, 'No notes for this slide.');
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.match($(w, '#menu .notes').textContent, /Summarise the three rules/);
   // The glossary has its own tab (alphabetical); resources sit at the right of the top bar, web links only.
   click(w, tab('Glossary'));
@@ -1829,25 +1849,44 @@ test('player sidebar: menu and notes tabs, the title and the logo, a toggle that
   assert.ok($(right, '#menu').classList.contains('side-right'));
 });
 
-test('player buttons and controls: text by default, icons with words on request; volume, captions and speed; the theme colours', () => {
+test('player buttons and controls: icons by default, icons with words on request; volume, captions and speed; the theme colors', () => {
   const plain = boot(fixture('playerui')).w;
-  assert.deepEqual($$(plain, '#nav button').map((b) => b.textContent), ['Previous', 'Next'], 'text buttons by default');
+  assert.deepEqual($$(plain, '#nav button').map((b) => b.getAttribute('aria-label')), ['Previous', 'Next'], 'the buttons keep their names');
+  assert.ok($$(plain, '#nav button').every((b) => b.querySelector('svg') && b.textContent === ''), 'icons by default, without words');
   assert.equal($(plain, '#nav .nav-controls'), null, 'no controls unless asked for');
   const { w, errors } = boot(fixture('playerui-icons'));
   const next = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   assert.ok(next.querySelector('svg') && next.textContent === 'Next', 'icon and words');
   assert.ok($(w, '#menu').hidden && !$(w, '#menu').classList.contains('sidebar'), 'no sidebar was asked for: the slide menu is a drawer, closed');
   const ctl = (id) => $(w, `#nav .ctl-${id}`);
-  assert.ok(ctl('volume') && ctl('captions') && ctl('speed'), 'the chosen controls are in the bar');
+  assert.ok(ctl('volume') && ctl('settings'), 'the chosen controls are in the bar');
+  assert.equal($(w, '#nav > .nav-controls > .ctl-captions'), null, 'captions and speed live in the settings menu, not on the bar');
   click(w, ctl('volume'));
   assert.equal(ctl('volume').getAttribute('aria-pressed'), 'true');
   assert.equal(ctl('volume').getAttribute('aria-label'), 'Unmute');
+  // The gear opens a menu with captions and the speeds.
+  const menu = $(w, '#nav .ctl-menu');
+  assert.ok(menu.hidden && ctl('settings').getAttribute('aria-expanded') === 'false');
+  click(w, ctl('settings'));
+  assert.ok(!menu.hidden && ctl('settings').getAttribute('aria-expanded') === 'true');
+  assert.equal(w.document.activeElement.getAttribute('role'), 'menuitemcheckbox', 'focus goes into the menu');
   click(w, ctl('captions'));
-  assert.equal(ctl('captions').getAttribute('aria-pressed'), 'false', 'captions can be turned off');
-  assert.equal(ctl('speed').textContent, '1x');
-  click(w, ctl('speed'));
-  assert.equal(ctl('speed').textContent, '1.25x');
-  // A light theme with the author's accent colour reaches the page as custom properties.
+  assert.equal(ctl('captions').getAttribute('aria-checked'), 'false', 'captions can be turned off');
+  const speeds = $$(w, '#nav .ctl-speed');
+  assert.deepEqual(speeds.map((b) => b.textContent), ['1x', '1.25x', '1.5x', '2x', '0.75x']);
+  assert.equal(speeds[0].getAttribute('aria-checked'), 'true');
+  click(w, speeds[1]);
+  assert.equal(speeds[1].getAttribute('aria-checked'), 'true');
+  assert.equal(speeds[0].getAttribute('aria-checked'), 'false');
+  const key = (el, k) => el.dispatchEvent(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  key(w.document.activeElement, 'ArrowDown');
+  assert.ok(menu.contains(w.document.activeElement), 'arrow keys move within the menu');
+  key(w.document.activeElement, 'Escape');
+  assert.ok(menu.hidden && w.document.activeElement === ctl('settings'), 'Escape closes it and returns to the gear');
+  click(w, ctl('settings'));
+  w.document.body.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+  assert.ok(menu.hidden, 'a click elsewhere closes it');
+  // A light theme with the author's accent color reaches the page as custom properties.
   const css = $$(w, 'style').map((s) => s.textContent).join('');
   assert.match(css, /--p-panel:#f4f6f9/);
   assert.match(css, /--p-accent:#e87722/);
@@ -1874,9 +1913,9 @@ test('a question slide carries its own shapes, buttons and triggers beside the q
   assert.equal(area.style.left, '100px');
   assert.equal(area.querySelector('.q').style.background, 'transparent', 'the slide shows around it');
   assert.ok($$(w, '.obj').length >= 3, 'the slide objects are built next to it');
-  assert.equal(obj('Think about the colour of the sky').style.display, 'none', 'the note starts hidden');
+  assert.equal(obj('Think about the color of the sky').style.display, 'none', 'the note starts hidden');
   click(w, obj('Hint'));
-  assert.notEqual(obj('Think about the colour of the sky').style.display, 'none', 'the button shows the note');
+  assert.notEqual(obj('Think about the color of the sky').style.display, 'none', 'the button shows the note');
   assert.ok($(w, '.q'), 'the question was not wiped');
   assert.deepEqual(errors, []);
 });
@@ -1991,12 +2030,12 @@ test('an annotation set to be a button runs its triggers and opens no card', asy
   assert.deepEqual(errors, []);
 });
 
-test('a marker has its colour and icon, a hotspot is a shaded area, and each pulses until it is visited', async () => {
+test('a marker has its color and icon, a hotspot is a shaded area, and each pulses until it is visited', async () => {
   const { w, errors } = panoBoot();
   const tour = panoNode(w, 'A teaching laboratory');
   await sleep(60);
   const door = [...tour.querySelectorAll(':scope > button')].find((b) => b.getAttribute('aria-label') === 'Door');
-  assert.match(door.style.background, /rgb\(79, 129, 189\)/, 'the default marker colour');
+  assert.match(door.style.background, /rgb\(79, 129, 189\)/, 'the default marker color');
   assert.match(door.querySelector('svg path').getAttribute('d'), /^M0\.25 0\.25L0\.75 0\.25/, 'its icon');
   assert.ok(door.classList.contains('pano-pulse'), 'unvisited pulses');
   const poly = tour.querySelector('svg polygon');
@@ -2098,5 +2137,38 @@ test('accessibility: a 360° image passes the automated audit with and without W
   for (const before of [withGL, null]) {
     const { w } = boot(fixture('panorama'), null, {}, before);
     assert.deepEqual(await audit(w), [], before ? 'with WebGL' : 'flat');
+  }
+});
+
+test('slide transitions: each kind moves the new slide (and the old one, when it should) and clears up afterwards', () => {
+  const os = require('node:os');
+  const src = fs.readFileSync(path.join(fixture('a11y'), 'index.html'), 'utf8');
+  const kinds = [
+    ['Push', { from: 'Right' }, 2, 'transform'],
+    ['Cover', { from: 'Left' }, 1, 'transform'],
+    ['Uncover', { from: 'Top' }, 1, 'transform'],
+    ['Wipe', { from: 'Bottom' }, 1, 'clipPath'],
+    ['Split', { from: 'Left', inward: false }, 1, 'clipPath'],
+    ['Split', { from: 'Top', inward: true }, 1, 'clipPath'],
+    ['Zoom', { inward: true }, 1, 'transform'],
+    ['Zoom', { inward: false }, 1, 'transform'],
+    ['Dissolve', {}, 1, 'opacity'],
+  ];
+  for (const [kind, opts, count, prop] of kinds) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-transition-'));
+    let n = 0;
+    const html = src.replace(/"fade_ms":0/g, (m) => (n++ === 1 ? `"fade_ms":400,"transition":${JSON.stringify({ kind, from: 'Right', inward: false, ...opts })}` : m));
+    assert.ok(n >= 2);
+    fs.writeFileSync(path.join(dir, 'index.html'), html);
+    const { w, errors } = boot(dir);
+    w.__animations.length = 0;
+    click(w, nextBtn(w));
+    assert.equal(currentSlide(w), 1);
+    const mine = w.__animations.filter((a) => a.keyframes.some((k) => prop in k));
+    assert.equal(mine.length, count, `${kind} ${JSON.stringify(opts)} plays ${count} animation(s) of ${prop}`);
+    const [oldEl, newEl] = $$(w, '.slide');
+    assert.equal(newEl.style.display, 'block');
+    if (kind !== 'Dissolve') assert.equal(oldEl.style.display, 'block', `${kind}: the old slide stays in view while the new one arrives`);
+    assert.deepEqual(errors, [], kind);
   }
 });

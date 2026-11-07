@@ -1,4 +1,4 @@
-//! How the published player looks and what it offers: its colours, font, sidebar, title, logo and controls.
+//! How the published player looks and what it offers: its colors, font, sidebar, title, logo and controls.
 //!
 //! The defaults reproduce the player as it was before these settings existed (a dark bar along the bottom and a slide
 //! menu that opens over the slide), so projects saved earlier look the same until something is changed.
@@ -10,7 +10,7 @@ pub enum PlayerTheme {
     #[default]
     Dark,
     Light,
-    /// The author's own background colour; text and lines follow from it.
+    /// The author's own background color; text and lines follow from it.
     Custom,
 }
 
@@ -26,9 +26,9 @@ pub enum SidebarSide {
 /// How the player's buttons are drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ButtonStyle {
+    #[default]
     Icon,
     IconText,
-    #[default]
     Text,
 }
 
@@ -117,7 +117,7 @@ impl Default for PlayerSettings {
             accent: Rgba(3, 83, 158, 255),
             font: "Open Sans".into(),
             font_scale: 100,
-            buttons: ButtonStyle::Text,
+            buttons: ButtonStyle::Icon,
             show_title: false,
             title: String::new(),
             sidebar: SidebarSide::Off,
@@ -133,7 +133,7 @@ impl Default for PlayerSettings {
     }
 }
 
-/// The colours the player is drawn with, worked out from the theme.
+/// The colors the player is drawn with, worked out from the theme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerPalette {
     /// Behind the slide.

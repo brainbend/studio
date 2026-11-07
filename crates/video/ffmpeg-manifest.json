@@ -1,0 +1,24 @@
+{
+  "version": "9.0.2",
+  "base": "https://github.com/brainbend/studio-components/releases/download/ffmpeg-9.0.2/",
+  "files": {
+    "windows-x86_64": {
+      "file": "ffmpeg-9.0.2-windows-x86_64.zip",
+      "sha256": "02a09e93f05cec9753aca0aa69ce18fba9faf15d143d3df6a1cb15e993444143",
+      "size": 64349123,
+      "program": "ffmpeg.exe"
+    },
+    "linux-x86_64": {
+      "file": "ffmpeg-9.0.2-linux-x86_64.zip",
+      "sha256": "c62d648f47bdd10534a8b67e8517cb8449d4e52b6450cabbe9e270e2ca8c2fed",
+      "size": 68407376,
+      "program": "ffmpeg"
+    },
+    "macos-x86_64": {
+      "file": "ffmpeg-9.0.2-macos-x86_64.zip",
+      "sha256": "9ff0e6f023b9a991a624d4f80a57530084325881f6110ff59392fc9c76b97dc5",
+      "size": 26969819,
+      "program": "ffmpeg"
+    }
+  }
+}

@@ -584,7 +584,7 @@ mod tests {
         let mut slides = slides_with(o);
         let swap = begin(&mut slides, 0, "a", "Hover").unwrap();
         assert_eq!(obj(&slides).fill, Some(Rgba(200, 0, 0, 255)), "the object shows Hover");
-        // The ribbon recolours the object.
+        // The ribbon recolors the object.
         slides[0].layers[0].objects[0].fill = Some(Rgba(0, 200, 0, 255));
         slides[0].layers[0].objects[0].text = "Over".into();
         end(&mut slides, swap);

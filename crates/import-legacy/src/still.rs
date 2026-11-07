@@ -1,18 +1,11 @@
 //! A still picture for a video that has none, so the editor and the player can show something before it plays.
 //!
-//! The frame comes from `ffmpeg` when it is installed; without it a video simply has no still, as before.
-use std::path::{Path, PathBuf};
+//! The frame comes from the `ffmpeg` that ships with the app (or, failing that, one installed on the machine); without
+//! either a video simply has no still, as before.
+use std::path::Path;
 use std::process::{Command, Stdio};
 use brainbend_doc::{Asset, Kind, Project};
-
-/// Where `ffmpeg` might live: on the PATH, or where Homebrew and the common installers put it (an app started
-/// from the Finder does not inherit the shell's PATH).
-fn ffmpeg() -> Option<PathBuf> {
-    let candidates = ["ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"];
-    candidates.iter().map(PathBuf::from).find(|p| {
-        Command::new(p).arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
-    })
-}
+use brainbend_video::ffmpeg;
 
 /// A frame from a video file on disk, read by ffmpeg directly (no copy of the video is made). `None` without ffmpeg.
 pub fn video_still_from_file(path: &Path) -> Option<Vec<u8>> {

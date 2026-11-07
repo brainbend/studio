@@ -23,7 +23,7 @@ single responsive page.
 - `WebLesson { sections: Vec<Section>, cover: Option<Cover>, nav: LessonNav, look: LessonLook }`
 - `Section { id, title, blocks: Vec<Block> }` (a section is a lesson chapter; the menu lists them)
 - `Block { id, kind: BlockKind, hidden_title?: .., width/align options per kind }`
-- Rich text reuses `Paragraph`/`Run`, so links, bold, colours and the spell checker carry over.
+- Rich text reuses `Paragraph`/`Run`, so links, bold, colors and the spell checker carry over.
 - Knowledge-check blocks hold a `Question`, so every question type already built works unchanged,
   including banks, scoring, feedback and the print handout.
 - Images, video, audio use the existing asset store and alt text / captions fields.
@@ -51,8 +51,8 @@ Attachment download, Chart.
 - Centre: a single-column preview of the lesson. Each block draws a simplified native preview and
   edits in place (text, captions, items). Fidelity is close, not exact, because egui cannot embed a
   web view; **Preview in browser** shows the real page.
-- Right: Properties for the selected block (layout options, colours, alt text, question editor).
-- Theme: reuse `Theme` for colours and fonts, plus a cover image / title block and dark mode option.
+- Right: Properties for the selected block (layout options, colors, alt text, question editor).
+- Theme: reuse `Theme` for colors and fonts, plus a cover image / title block and dark mode option.
 
 ## Player
 

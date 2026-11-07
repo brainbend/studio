@@ -10,13 +10,34 @@
   stage.style.height = slides[0].height + 'px';
 
   function unwrap(v) { return v === undefined || v === null ? v : Object.values(v)[0]; }
-  // Slide background: a bare [r,g,b,a] colour, a {angle, stops} gradient or an {asset} picture.
+  // Slide background: a bare [r,g,b,a] color, a {angle, stops} gradient or an {asset} picture.
   function gradCss(g) {
     return 'linear-gradient(' + g.angle + 'deg,' + g.stops.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100) + '%'; }).join(',') + ')';
   }
-  function bgCss(b) {
+  function bgCss(b, w, h) {
     if (Array.isArray(b)) return css(b);
-    if (b.stops) return 'linear-gradient(' + b.angle + 'deg,' + b.stops.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100) + '%'; }).join(',') + ')';
+    if (b.stops) {
+      var list = function (st) { return st.map(function (s) { return css(s[1]) + ' ' + (s[0] * 100).toFixed(2) + '%'; }).join(','); };
+      var kind = b.kind || 'Linear';
+      var g = b.geom || {};
+      var ctr = g.center || [0.5, 0.5];
+      var cx = (ctr[0] * 100).toFixed(2) + '%', cy = (ctr[1] * 100).toFixed(2) + '%';
+      if (kind === 'Radial') {
+        if (!b.geom) return 'radial-gradient(ellipse farthest-corner at 50% 50%,' + list(b.stops) + ')';
+        var r = g.radius === undefined ? Math.SQRT1_2 : g.radius;
+        return 'radial-gradient(ellipse ' + (r * w).toFixed(1) + 'px ' + (r * h).toFixed(1) + 'px at ' + cx + ' ' + cy + ',' + list(b.stops) + ')';
+      }
+      if (kind === 'Angular') return 'conic-gradient(from ' + b.angle + 'deg at ' + cx + ' ' + cy + ',' + list(b.stops) + ')';
+      var st = b.stops;
+      if (kind === 'Reflected') st = st.map(function (s) { return [s[0] / 2, s[1]]; }).concat(st.slice().reverse().map(function (s) { return [1 - s[0] / 2, s[1]]; }));
+      if (!g.line) return 'linear-gradient(' + b.angle + 'deg,' + list(st) + ')';
+      var x0 = g.line[0] * w, y0 = g.line[1] * h, dx = g.line[2] * w - x0, dy = g.line[3] * h - y0;
+      var l = Math.max(1, Math.sqrt(dx * dx + dy * dy)), th = Math.atan2(dx, -dy);
+      var ux = Math.sin(th), uy = -Math.cos(th), len = Math.abs(w * Math.sin(th)) + Math.abs(h * Math.cos(th));
+      var off = (x0 - w / 2) * ux + (y0 - h / 2) * uy + len / 2;
+      var deg = ((th * 180 / Math.PI) % 360 + 360) % 360;
+      return 'linear-gradient(' + deg.toFixed(2) + 'deg,' + list(st.map(function (s) { return [(off + s[0] * l) / Math.max(1, len), s[1]]; })) + ')';
+    }
     if (b.asset && P.assetUrls[b.asset]) return 'url("' + P.assetUrls[b.asset] + '")';
     return 'transparent';
   }
@@ -31,7 +52,7 @@
 
   // ---- accessibility plumbing: a heading naming the slide, a spoken announcement on each change, and
   // a note of when the learner last used the keyboard or pointer (so focus only moves for their actions)
-  var titleEl = el('div', 'sr-only'); titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '1'); titleEl.id = 'slide-title'; titleEl.tabIndex = -1; stage.appendChild(titleEl);
+  var titleEl = el('div', 'sr-only'); titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '2'); titleEl.id = 'slide-title'; titleEl.tabIndex = -1; stage.appendChild(titleEl);
   var announcer = el('div', 'sr-only'); announcer.id = 'announce';
   announcer.setAttribute('role', 'status'); announcer.setAttribute('aria-live', 'polite'); document.body.appendChild(announcer);
   var lastInput = 0;
@@ -185,7 +206,7 @@
     var sEl = el('div', 'slide');
     sEl.style.display = 'none';
     if (slide.background) {
-      sEl.style.background = bgCss(slide.background);
+      sEl.style.background = bgCss(slide.background, slide.width, slide.height);
       if (slide.background.asset) { sEl.style.backgroundSize = 'cover'; sEl.style.backgroundPosition = 'center'; sEl.style.backgroundRepeat = 'no-repeat'; }
     }
     stage.appendChild(sEl);
@@ -1282,7 +1303,7 @@
           if (r === markerRun) { sp.style.display = 'inline-block'; sp.style.minWidth = hang + 'em'; sp.style.textIndent = '0'; }
           if (r.link && /^(https?:|mailto:)/i.test(r.link)) {
             sp = el('a', null, subst(r.text)); sp.href = r.link; sp.target = '_blank'; sp.rel = 'noopener noreferrer';
-            // A link is the theme's hyperlink colour, underlined; the run's own colour and underline, applied below, win.
+            // A link is the theme's hyperlink color, underlined; the run's own color and underline, applied below, win.
             var lc = P.theme && P.theme.colors && P.theme.colors[4];
             if (lc) sp.style.color = css(lc);
             sp.style.textDecoration = 'underline';
@@ -1820,10 +1841,11 @@
     volume: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5c1.4 1.4 1.4 3.6 0 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     muted: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5l4 5M17 7.5l-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     captions: '<rect x="2" y="4" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="13" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" font-family="Arial,sans-serif">CC</text>',
+    settings: '<circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
     fullscreen: '<path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
   };
   function setButton(btn, label, icon) {
-    var style = PL.buttons || 'Text';
+    var style = PL.buttons || 'Icon';
     btn.textContent = '';
     if (style !== 'Text' && icon && ICONS[icon]) {
       var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -1899,7 +1921,7 @@
       topbar.appendChild(sideToggle);
     }
     if (logoUrl) { var tl = el('img', 'logo'); tl.src = logoUrl; tl.alt = ''; topbar.appendChild(tl); }
-    if (PL.show_title) { var tt = el('span', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
+    if (PL.show_title) { var tt = el('h1', 'tb-title', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); topbar.appendChild(tt); }
     if (showResources) {
       var rb = el('button', 'tb-resources', 'Resources'); rb.type = 'button'; rb.setAttribute('aria-expanded', 'false'); rb.setAttribute('aria-controls', 'resources');
       var rp = el('div'); rp.id = 'resources'; rp.hidden = true; rp.setAttribute('role', 'dialog'); rp.setAttribute('aria-label', 'Resources');
@@ -1916,6 +1938,8 @@
     }
     document.body.appendChild(topbar);
   }
+  // Whether or not it is shown, the project's name is the page's one Heading 1.
+  if (!PL.show_title) { var h1 = el('h1', 'sr-only', (PL.title && PL.title.trim()) ? PL.title : (P.name || '')); stage.insertBefore(h1, stage.firstChild); }
   if ((nav && P.show_menu) || sidebarOn) {
     menu = el('nav'); menu.id = 'menu'; menu.setAttribute('aria-label', sidebarOn ? 'Sidebar' : 'Slides');
     var list = el('ol');
@@ -2111,6 +2135,13 @@
         }
       };
       controlUpdaters.push(tRefresh);
+      // K plays and pauses (Space already advances click steps).
+      if (PC.play_pause) document.addEventListener('keydown', function (ev) {
+        if (ev.defaultPrevented || ev.ctrlKey || ev.metaKey || ev.altKey || (ev.key !== 'k' && ev.key !== 'K')) return;
+        var t = ev.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || (t.closest && t.closest('[role=textbox],[role=slider]')))) return;
+        ev.preventDefault(); tToggle();
+      });
       ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange'].forEach(function (n) { document.addEventListener(n, tRefresh, true); });
       tRefresh();
     }
@@ -2122,18 +2153,48 @@
         setButton(vb, playerMuted ? 'Unmute' : 'Mute', playerMuted ? 'muted' : 'volume'); vb.setAttribute('aria-pressed', String(playerMuted));
       });
     }
-    if (PC.captions) {
-      var cb = control('captions', 'Captions', 'captions'); cb.setAttribute('aria-pressed', 'true');
-      cb.addEventListener('click', function () {
-        captionsOn = !captionsOn; medias().forEach(applyMedia); cb.setAttribute('aria-pressed', String(captionsOn));
+    var setSpeed = function (i) { speedAt = i; medias().forEach(applyMedia); };
+    var setCaptions = function (on) { captionsOn = on; medias().forEach(applyMedia); };
+    if (PC.captions && PC.speed) {
+      // With both on, they share one settings menu so the bar stays short.
+      var gb = control('settings', 'Settings', 'settings'); gb.setAttribute('aria-haspopup', 'menu'); gb.setAttribute('aria-expanded', 'false');
+      var gm = el('div', 'ctl-menu'); gm.setAttribute('role', 'menu'); gm.setAttribute('aria-label', 'Settings'); gm.hidden = true; cbox.appendChild(gm);
+      var gItems = function () { return Array.prototype.slice.call(gm.querySelectorAll('[role^=menuitem]')); };
+      var gMark = function (b, on) { b.setAttribute('aria-checked', String(on)); };
+      var capItem = el('button', 'ctl-item ctl-captions'); capItem.type = 'button'; capItem.setAttribute('role', 'menuitemcheckbox'); capItem.textContent = 'Captions'; gMark(capItem, true);
+      capItem.addEventListener('click', function () { setCaptions(!captionsOn); gMark(capItem, captionsOn); });
+      gm.appendChild(capItem);
+      gm.appendChild(el('div', 'ctl-menu-head', 'Speed'));
+      var speedItems = SPEEDS.map(function (v, i) {
+        var b = el('button', 'ctl-item ctl-speed'); b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.textContent = v + 'x'; b.setAttribute('aria-label', 'Playback speed ' + v + 'x'); gMark(b, i === speedAt);
+        b.addEventListener('click', function () { setSpeed(i); speedItems.forEach(function (o, j) { gMark(o, j === i); }); });
+        gm.appendChild(b); return b;
       });
-    }
-    if (PC.speed) {
-      var sb = control('speed', 'Speed', null); sb.textContent = '1x'; sb.setAttribute('aria-label', 'Playback speed 1x');
-      sb.addEventListener('click', function () {
-        speedAt = (speedAt + 1) % SPEEDS.length; medias().forEach(applyMedia);
-        sb.textContent = SPEEDS[speedAt] + 'x'; sb.setAttribute('aria-label', 'Playback speed ' + SPEEDS[speedAt] + 'x');
+      var gClose = function (back) { gm.hidden = true; gb.setAttribute('aria-expanded', 'false'); if (back) gb.focus(); };
+      var gOpen = function () { gm.hidden = false; gb.setAttribute('aria-expanded', 'true'); var f = gItems()[0]; if (f) f.focus(); };
+      gb.addEventListener('click', function () { if (gm.hidden) gOpen(); else gClose(true); });
+      gm.addEventListener('keydown', function (ev) {
+        var items = gItems(), at = items.indexOf(document.activeElement);
+        if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); gClose(true); }
+        else if (ev.key === 'ArrowDown') { ev.preventDefault(); items[(at + 1) % items.length].focus(); }
+        else if (ev.key === 'ArrowUp') { ev.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+        else if (ev.key === 'Home') { ev.preventDefault(); items[0].focus(); }
+        else if (ev.key === 'End') { ev.preventDefault(); items[items.length - 1].focus(); }
+        else if (ev.key === 'Tab') gClose(false);
       });
+      document.addEventListener('click', function (ev) { if (!gm.hidden && !cbox.contains(ev.target)) gClose(false); });
+    } else {
+      if (PC.captions) {
+        var cb = control('captions', 'Captions', 'captions'); cb.setAttribute('aria-pressed', 'true');
+        cb.addEventListener('click', function () { setCaptions(!captionsOn); cb.setAttribute('aria-pressed', String(captionsOn)); });
+      }
+      if (PC.speed) {
+        var sb = control('speed', 'Speed', null); sb.textContent = '1x'; sb.setAttribute('aria-label', 'Playback speed 1x');
+        sb.addEventListener('click', function () {
+          setSpeed((speedAt + 1) % SPEEDS.length);
+          sb.textContent = SPEEDS[speedAt] + 'x'; sb.setAttribute('aria-label', 'Playback speed ' + SPEEDS[speedAt] + 'x');
+        });
+      }
     }
     if (PC.fullscreen && document.fullscreenEnabled !== false && document.documentElement.requestFullscreen) {
       var fb = control('fullscreen', 'Full screen', 'fullscreen');
@@ -2195,11 +2256,80 @@
     lms.commit();
   }
 
+  // ---- slide transitions: the new slide arrives over, beside or instead of the old one ----------
+  var endTransitionNow = null;
+  function endTransition() { if (endTransitionNow) { var f = endTransitionNow; endTransitionNow = null; f(); } }
+  function runTransition(tr, ms, oldEl, newEl) {
+    var kind = tr.kind, edge = tr.from || 'Right', inward = !!tr.inward;
+    // Without a canvas to make the mask with, a dissolve is a fade.
+    if (kind === 'Dissolve' && !document.createElement('canvas').getContext('2d')) kind = 'Fade';
+    // Where things come from, as a move of the whole slide (percent of its size), and as an edge to reveal.
+    var vec = { Right: [100, 0], Left: [-100, 0], Bottom: [0, 100], Top: [0, -100] }[edge] || [100, 0];
+    var shift = function (k) { return 'translate(' + (vec[0] * k) + '%,' + (vec[1] * k) + '%)'; };
+    var clip = { Right: 'inset(0 0 0 100%)', Left: 'inset(0 100% 0 0)', Bottom: 'inset(100% 0 0 0)', Top: 'inset(0 0 100% 0)' }[edge] || 'inset(0 0 0 100%)';
+    var vertical = edge === 'Left' || edge === 'Right';
+    var band = vertical ? 'inset(0 50% 0 50%)' : 'inset(50% 0 50% 0)';
+    var opts = { duration: ms, easing: 'ease-in-out' };
+    var anims = [], undo = [];
+    function play(el, frames) { var a = el.animate(frames, opts); if (a) anims.push(a); }
+    function over(el, z) { el.style.zIndex = z; undo.push(function () { el.style.zIndex = ''; }); }
+    oldEl.style.display = 'block'; oldEl.style.pointerEvents = 'none';
+    undo.push(function () { oldEl.style.display = 'none'; oldEl.style.pointerEvents = ''; });
+    var raf = 0;
+    if (kind === 'Push') {
+      play(newEl, [{ transform: shift(1) }, { transform: 'none' }]); play(oldEl, [{ transform: 'none' }, { transform: shift(-1) }]);
+    } else if (kind === 'Cover') {
+      over(newEl, 2); over(oldEl, 1);
+      play(newEl, [{ transform: shift(1) }, { transform: 'none' }]);
+    } else if (kind === 'Uncover') {
+      over(oldEl, 2); over(newEl, 1);
+      play(oldEl, [{ transform: 'none' }, { transform: shift(-1) }]);
+    } else if (kind === 'Wipe') {
+      over(newEl, 2); over(oldEl, 1);
+      play(newEl, [{ clipPath: clip }, { clipPath: 'inset(0 0 0 0)' }]);
+    } else if (kind === 'Split') {
+      if (inward) { over(oldEl, 2); over(newEl, 1); play(oldEl, [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: band }]); }
+      else { over(newEl, 2); over(oldEl, 1); play(newEl, [{ clipPath: band }, { clipPath: 'inset(0 0 0 0)' }]); }
+    } else if (kind === 'Zoom') {
+      if (inward) { over(newEl, 2); over(oldEl, 1); play(newEl, [{ transform: 'scale(0.15)', opacity: 0 }, { transform: 'none', opacity: 1 }]); }
+      else { over(oldEl, 2); over(newEl, 1); play(oldEl, [{ transform: 'none', opacity: 1 }, { transform: 'scale(0.15)', opacity: 0 }]); }
+    } else if (kind === 'Dissolve') {
+      // The new slide shows through a mask of small squares that fill in, in a scattered order.
+      over(newEl, 2); over(oldEl, 1);
+      var cols = 64, rows = 36, total = cols * rows, order = [];
+      for (var q = 0; q < total; q++) order.push(q);
+      for (var r = total - 1; r > 0; r--) { var j = Math.floor(Math.random() * (r + 1)), t = order[r]; order[r] = order[j]; order[j] = t; }
+      var canvas = document.createElement('canvas'); canvas.width = cols; canvas.height = rows;
+      var g = canvas.getContext('2d'), t0 = performance.now(), shown = 0;
+      var mask = function (url) { newEl.style.webkitMaskImage = url; newEl.style.maskImage = url; };
+      newEl.style.webkitMaskSize = newEl.style.maskSize = '100% 100%';
+      undo.push(function () { mask(''); newEl.style.webkitMaskSize = newEl.style.maskSize = ''; });
+      var step = function (now) {
+        var p = Math.min(1, (now - t0) / ms), n = Math.floor(p * total);
+        if (n > shown) { g.fillStyle = '#000'; for (var k = shown; k < n; k++) g.fillRect(order[k] % cols, Math.floor(order[k] / cols), 1, 1); shown = n; mask('url(' + canvas.toDataURL() + ')'); }
+        if (p < 1) raf = requestAnimationFrame(step); else endTransition();
+      };
+      mask('url(' + canvas.toDataURL() + ')');
+      raf = requestAnimationFrame(step);
+    } else {
+      play(newEl, [{ opacity: 0 }, { opacity: 1 }]);
+    }
+    var done = false;
+    endTransitionNow = function () {
+      if (done) return; done = true;
+      if (raf) cancelAnimationFrame(raf);
+      anims.forEach(function (a) { try { a.cancel(); } catch (e) { /* already finished */ } });
+      undo.forEach(function (f) { f(); });
+    };
+    if (anims.length) anims[0].onfinish = function () { endTransition(); };
+  }
+
   function goto(i) {
     markerClosers.forEach(function (f) { f(false); });
     if (i < 0 || i >= slides.length || i === cur || posOf[i] < 0) return;
     if (cur >= 0) slides[cur].layers.forEach(function (layer) { stopLayer(layer.id); });
     var held = document.activeElement, heldInSlide = !!held && held !== document.body && slideEls.some(function (e) { return e.contains(held); });
+    var from = cur;
     cur = i;
     slideEls.forEach(function (e, k) { if (k !== i) pauseMedia(e); e.style.display = k === i ? 'block' : 'none'; });
     var slide = slides[i], kind = kindOf(slide);
@@ -2212,17 +2342,18 @@
     steps = { si: i, order: computeSteps(i), done: 0 };
     if (pausing[i] && pausing[i].__user) { delete pausing[i].__user; if (!Object.keys(pausing[i]).length) layers[slide.layers[0].id].paused = false; }
     startLayer(slide.layers[0].id);
+    endTransition();
     if (slide.fade_ms > 0 && !reduceMotion && slideEls[i].animate) {
-      slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });
+      var tr = slide.transition || {};
+      if (from >= 0 && from !== i && tr.kind && tr.kind !== 'Fade') runTransition(tr, slide.fade_ms, slideEls[from], slideEls[i]);
+      else slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });
     }
     controlUpdaters.forEach(function (f) { f(); });
     updateNav();
     var name = slide.name || ('Slide ' + (posOf[i] + 1));
     titleEl.textContent = name;
-    // A slide has one top-level heading: the visually hidden slide title, unless the author made a Heading 1.
-    if (slide.layers.some(function (l) { return l.objects.some(function (o) { return o.role === 'H1'; }); })) {
-      titleEl.setAttribute('role', 'group'); titleEl.removeAttribute('aria-level'); titleEl.setAttribute('aria-label', name);
-    } else { titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '1'); titleEl.removeAttribute('aria-label'); }
+    // The project's name is the page's one Heading 1; each slide's (visually hidden) title is a Heading 2 under it.
+    titleEl.setAttribute('role', 'heading'); titleEl.setAttribute('aria-level', '2'); titleEl.removeAttribute('aria-label');
     announcer.textContent = name + ', slide ' + (posOf[i] + 1) + ' of ' + seq.length;
     if (heldInSlide) focusIt(titleEl);   // what had focus is no longer on screen
     if (lms) lms.set(lms.locationKey, i);

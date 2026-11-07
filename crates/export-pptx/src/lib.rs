@@ -46,6 +46,38 @@ fn solid(c: Rgba) -> String {
     format!("<a:solidFill>{}</a:solidFill>", color_xml(c))
 }
 
+/// A background gradient: radial uses a circular path; reflected is spelled out as stops; angular has no equivalent in
+/// PowerPoint and falls back to linear.
+/// `<p:transition>` for a slide: none for a cut, else the kind PowerPoint calls the same.
+fn transition_xml(ms: u32, t: brainbend_doc::Transition) -> String {
+    use brainbend_doc::TransitionKind::*;
+    if ms == 0 { return String::new(); }
+    let spd = if ms >= 900 { "slow" } else if ms <= 550 { "fast" } else { "med" };
+    let inner = match t.kind {
+        Fade => "<p:fade/>".to_string(),
+        Dissolve => "<p:dissolve/>".to_string(),
+        Push => format!("<p:push dir=\"{}\"/>", t.from.ooxml()),
+        Wipe => format!("<p:wipe dir=\"{}\"/>", t.from.ooxml()),
+        Cover => format!("<p:cover dir=\"{}\"/>", t.from.ooxml()),
+        Uncover => format!("<p:pull dir=\"{}\"/>", t.from.ooxml()),
+        Split => format!("<p:split orient=\"{}\" dir=\"{}\"/>", if matches!(t.from, brainbend_doc::Edge::Left | brainbend_doc::Edge::Right) { "vert" } else { "horz" }, if t.inward { "in" } else { "out" }),
+        Zoom => format!("<p:zoom dir=\"{}\"/>", if t.inward { "in" } else { "out" }),
+    };
+    format!("<p:transition spd=\"{spd}\">{inner}</p:transition>")
+}
+
+fn background_gradient_xml(kind: brainbend_doc::GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &brainbend_doc::GradientGeom) -> String {
+    use brainbend_doc::GradientKind::*;
+    match kind {
+        Radial => {
+            let gs: String = stops.iter().map(|(p, c)| format!("<a:gs pos=\"{}\">{}</a:gs>", (p * 100000.0).round() as i32, color_xml(*c))).collect();
+            format!("<a:gradFill rotWithShape=\"1\"><a:gsLst>{gs}</a:gsLst><a:path path=\"circle\"><a:fillToRect l=\"{l}\" t=\"{t}\" r=\"{r}\" b=\"{b}\"/></a:path></a:gradFill>", l = (geom.center.0 * 100000.0).round() as i32, t = (geom.center.1 * 100000.0).round() as i32, r = ((1.0 - geom.center.0) * 100000.0).round() as i32, b = ((1.0 - geom.center.1) * 100000.0).round() as i32)
+        }
+        Reflected => gradient_xml(angle, &brainbend_doc::reflect_stops(stops)),
+        _ => gradient_xml(angle, stops),
+    }
+}
+
 fn gradient_xml(angle: f32, stops: &[(f32, Rgba)]) -> String {
     let gs: String = stops.iter().map(|(p, c)| format!("<a:gs pos=\"{}\">{}</a:gs>", (p * 100000.0).round() as i32, color_xml(*c))).collect();
     // CSS 90deg points right; DrawingML 0 points right.
@@ -155,9 +187,9 @@ struct Part<'a> {
 
 fn ph_idx(kind: PlaceholderKind, n: u32) -> (Option<&'static str>, Option<u32>) {
     match kind {
-        PlaceholderKind::Title => (Some("title"), None),
-        PlaceholderKind::Subtitle => (Some("subTitle"), Some(20 + n)),
-        PlaceholderKind::Body => (Some("body"), Some(10 + n)),
+        PlaceholderKind::Title | PlaceholderKind::Heading2 => (Some("title"), None),
+        PlaceholderKind::Subtitle | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 => (Some("subTitle"), Some(20 + n)),
+        PlaceholderKind::Body | PlaceholderKind::Text => (Some("body"), Some(10 + n)),
     }
 }
 
@@ -182,7 +214,7 @@ impl Part<'_> {
     fn background(&mut self, bg: &Background) -> String {
         let fill = match bg {
             Background::Solid(c) => solid(*c),
-            Background::Gradient { angle, stops } => gradient_xml(*angle, stops),
+            Background::Gradient { angle, stops, kind, geom } => background_gradient_xml(*kind, *angle, stops, geom),
             Background::Image { asset } => match self.blip(asset) {
                 Some(rid) => format!("<a:blipFill dpi=\"0\" rotWithShape=\"1\"><a:blip r:embed=\"{rid}\"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"),
                 None => solid(Rgba(255, 255, 255, 255)),
@@ -287,7 +319,7 @@ impl Part<'_> {
         let hl = run.and_then(|r| r.highlight).map(|c| format!("<a:highlight><a:srgbClr val=\"{:02X}{:02X}{:02X}\"/></a:highlight>", c.0, c.1, c.2)).unwrap_or_default();
         let font = run.and_then(|r| r.font_family.clone()).unwrap_or_else(|| base.font_family.clone());
         let link = match run.and_then(|r| r.link.as_deref()).filter(|u| u.starts_with("http://") || u.starts_with("https://") || u.starts_with("mailto:")) {
-            // PowerPoint draws links in the theme's hyperlink colour unless the click asks for the text's own colour.
+            // PowerPoint draws links in the theme's hyperlink color unless the click asks for the text's own color.
             Some(url) if run.is_some_and(|r| r.color.is_some()) => { let rid = self.rels.add("hyperlink", url, true); format!("<a:hlinkClick r:id=\"{rid}\"><a:extLst><a:ext uri=\"{{A12FA001-AC4F-418D-AE19-62706E023703}}\"><ahyp:hlinkClr xmlns:ahyp=\"http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor\" val=\"tx\"/></a:ext></a:extLst></a:hlinkClick>") }
             Some(url) => { let rid = self.rels.add("hyperlink", url, true); format!("<a:hlinkClick r:id=\"{rid}\"/>") }
             None => String::new(),
@@ -390,7 +422,7 @@ impl Part<'_> {
         let cnv = self.cnv_pr(o);
         let ph = match o.placeholder {
             Some(k) => {
-                let slot = match k { PlaceholderKind::Title => 0, PlaceholderKind::Subtitle => 1, PlaceholderKind::Body => 2 };
+                let slot = match k { PlaceholderKind::Title | PlaceholderKind::Heading2 => 0, PlaceholderKind::Subtitle | PlaceholderKind::Heading3 | PlaceholderKind::Heading4 => 1, PlaceholderKind::Body | PlaceholderKind::Text => 2 };
                 let n = self.ph_count[slot];
                 self.ph_count[slot] += 1;
                 let (ty, idx) = ph_idx(k, n);
@@ -545,6 +577,7 @@ fn layers_to_slides(project: &mut Project) -> std::collections::BTreeSet<String>
             s.notes = String::new();
             s.auto_advance = false;
             s.fade_ms = 0;
+            s.transition = Default::default();
             let mut objects = slide.layers[0].objects.clone();
             objects.extend(layer.objects.iter().cloned());
             s.layers = vec![Layer { id: slide.layers[0].id.clone(), name: slide.layers[0].name.clone(), objects, duration_ms: layer.duration_ms, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] }];
@@ -660,7 +693,7 @@ pub fn export(project: &Project) -> Result<(Vec<u8>, Vec<String>), String> {
         let bg = slide.background.clone().map(|b| part.background(&b)).unwrap_or_default();
         let tree = part.tree(&objects, false);
         let timing = anim::timing_xml(&objects, slide.layers[0].duration_ms, &part.spids, sw, sh).unwrap_or_default();
-        let transition = if slide.fade_ms > 0 { format!("<p:transition spd=\"{}\"><p:fade/></p:transition>", if slide.fade_ms >= 900 { "slow" } else if slide.fade_ms <= 550 { "fast" } else { "med" }) } else { String::new() };
+        let transition = transition_xml(slide.fade_ms, slide.transition);
         if slide.notes.trim().is_empty() == false {
             part.rels.add("notesSlide", &format!("../notesSlides/notesSlide{n}.xml"), false);
         }

@@ -18,6 +18,7 @@ fn project() -> Project {
         p.slides.push(Slide::new(&format!("s{}", i + 1), name, 1920.0, 1080.0));
     }
     p.sanitize();
+    p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
     p.scenes = vec![Scene { id: "a".into(), name: "Part A".into(), bank: None }, Scene { id: "b".into(), name: "Part B".into(), bank: None }];
     p.slides[0].scene = "a".into();
     p.slides[1].scene = "b".into();
@@ -438,4 +439,22 @@ fn a_picture_cropped_to_a_shape_keeps_it_through_powerpoint() {
     let back = brainbend_import_pptx::import(Cursor::new(bytes), "Shape").unwrap();
     let masks: Vec<_> = back.slides[0].layers[0].objects.iter().filter(|o| matches!(o.kind, Kind::Image)).map(|o| o.mask).collect();
     assert_eq!(masks, PictureShape::ALL.map(Some).to_vec());
+}
+
+#[test]
+fn every_slide_transition_survives_export_and_import() {
+    for kind in TransitionKind::ALL {
+        for t in Transition::variants(kind) {
+            let mut p = project();
+            p.slides[0].fade_ms = 700;
+            p.slides[0].transition = t;
+            let (bytes, _) = brainbend_export_pptx::export(&p).unwrap();
+            let back = brainbend_import_pptx::import(Cursor::new(bytes), "back").unwrap();
+            let got = back.slides[0].transition;
+            // A split only remembers whether its lines are vertical or horizontal, so compare what the choice looks like.
+            assert_eq!(got.variant_label(), t.variant_label(), "{kind:?} {t:?} came back as {got:?}");
+            assert_eq!(got.kind, t.kind);
+            assert_eq!(back.slides[0].fade_ms, 700, "{kind:?}");
+        }
+    }
 }

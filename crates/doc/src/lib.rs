@@ -5,12 +5,13 @@ pub mod lesson;
 pub mod master;
 pub mod pano;
 pub mod passage;
+pub mod handout_text;
 pub mod player;
 pub mod shapes;
 pub mod tables;
 pub mod variables;
 pub mod richtext;
-pub use master::{Background, Master, PlaceholderKind, SlideLayout, Theme};
+pub use master::{gradient_css, reflect_stops, Background, GradientGeom, GradientKind, Master, PlaceholderKind, SlideLayout, Theme};
 pub use player::{ButtonStyle, GlossaryTerm, PlayerControls, PlayerPalette, PlayerSettings, PlayerTheme, Resource, SidebarSide};
 pub use richtext::{Attr, Fmt, ListStyle};
 
@@ -26,7 +27,7 @@ impl Rgba {
         format!("#{:02X}{:02X}{:02X}", self.0, self.1, self.2)
     }
 
-    /// A colour typed by hand: "#4f81bd", "4f81bd", "#48b", "79, 129, 189" or "rgb(79,129,189)" (opaque).
+    /// A color typed by hand: "#4f81bd", "4f81bd", "#48b", "79, 129, 189" or "rgb(79,129,189)" (opaque).
     pub fn parse(text: &str) -> Option<Rgba> {
         let t = text.trim().to_ascii_lowercase();
         let inner = t.strip_prefix("rgb(").and_then(|r| r.strip_suffix(')')).unwrap_or(&t);
@@ -71,6 +72,16 @@ pub enum TextRole {
 impl TextRole {
     pub const ALL: [TextRole; 5] = [TextRole::Normal, TextRole::H1, TextRole::H2, TextRole::H3, TextRole::H4];
 
+    /// What authors can pick. Heading 1 is the project's name (the player publishes it as the page's one `h1`), so it is
+    /// not offered; text saved as Heading 1 by an older version becomes Heading 2 when the project loads.
+    pub const CHOICES: [TextRole; 4] = [TextRole::Normal, TextRole::H2, TextRole::H3, TextRole::H4];
+
+    /// What the style looks like when applied: size in px and whether it uses the theme's heading font. The point is
+    /// the element the text is published as; the look is a starting point the author can change.
+    pub fn look(self) -> (f32, bool) {
+        match self { TextRole::Normal => (36.0, false), TextRole::H1 => (64.0, true), TextRole::H2 => (52.0, true), TextRole::H3 => (44.0, true), TextRole::H4 => (38.0, true) }
+    }
+
     /// The name authors see.
     pub fn label(self) -> &'static str {
         match self { TextRole::Normal => "Normal Text", TextRole::H1 => "Heading 1", TextRole::H2 => "Heading 2", TextRole::H3 => "Heading 3", TextRole::H4 => "Heading 4" }
@@ -105,7 +116,92 @@ pub struct TextStyle {
     pub valign: VAlign,
 }
 
-/// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, colour)`.
+/// The way one slide gives way to the next.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransitionKind {
+    #[default]
+    Fade,
+    /// The new slide pushes the old one out.
+    Push,
+    /// The new slide is uncovered by a moving edge.
+    Wipe,
+    /// The new slide opens from the middle (out) or closes in from the edges (in).
+    Split,
+    /// The new slide slides over the old one.
+    Cover,
+    /// The old slide slides away, showing the new one.
+    Uncover,
+    /// The new slide grows from the middle (in) or the old one shrinks away (out).
+    Zoom,
+    /// The new slide appears in scattered pieces.
+    Dissolve,
+}
+
+impl TransitionKind {
+    pub const ALL: [TransitionKind; 8] = [Self::Fade, Self::Push, Self::Wipe, Self::Split, Self::Cover, Self::Uncover, Self::Zoom, Self::Dissolve];
+    pub fn label(self) -> &'static str {
+        match self { Self::Fade => "Fade", Self::Push => "Push", Self::Wipe => "Wipe", Self::Split => "Split", Self::Cover => "Cover", Self::Uncover => "Uncover", Self::Zoom => "Zoom", Self::Dissolve => "Dissolve" }
+    }
+    /// Whether the kind has a direction to choose (an edge it comes from).
+    pub fn has_edge(self) -> bool { matches!(self, Self::Push | Self::Wipe | Self::Cover | Self::Uncover) }
+}
+
+/// The edge a transition comes from, as PowerPoint's "From Right" says it. For a split, left or right means vertical
+/// lines and top or bottom horizontal ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Edge { Left, Right, Top, Bottom }
+
+impl Edge {
+    pub const ALL: [Edge; 4] = [Edge::Right, Edge::Left, Edge::Bottom, Edge::Top];
+    pub fn label(self) -> &'static str { match self { Edge::Left => "From Left", Edge::Right => "From Right", Edge::Top => "From Top", Edge::Bottom => "From Bottom" } }
+    /// PowerPoint names the way things move, which is the opposite of the edge they come from.
+    pub fn ooxml(self) -> &'static str { match self { Edge::Left => "r", Edge::Right => "l", Edge::Top => "d", Edge::Bottom => "u" } }
+    pub fn from_ooxml(dir: &str) -> Option<Edge> { match dir { "r" => Some(Edge::Left), "l" => Some(Edge::Right), "d" => Some(Edge::Top), "u" => Some(Edge::Bottom), _ => None } }
+}
+
+/// A slide transition: its kind, the edge it comes from, and (for a split or zoom) whether it goes in or out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transition {
+    pub kind: TransitionKind,
+    #[serde(default = "Transition::default_edge")]
+    pub from: Edge,
+    #[serde(default)]
+    pub inward: bool,
+}
+
+impl Default for Transition {
+    fn default() -> Self { Transition { kind: TransitionKind::Fade, from: Edge::Right, inward: false } }
+}
+
+impl Transition {
+    fn default_edge() -> Edge { Edge::Right }
+    pub fn is_default(&self) -> bool { *self == Transition::default() }
+    /// The usual choice when a kind is picked: the one PowerPoint opens on.
+    pub fn of(kind: TransitionKind) -> Transition {
+        Transition { kind, from: Edge::Right, inward: kind == TransitionKind::Zoom }
+    }
+    /// What the options of this transition are called, for a choice among a kind's variants.
+    pub fn variant_label(&self) -> String {
+        match self.kind {
+            TransitionKind::Split => format!("{} {}", if matches!(self.from, Edge::Left | Edge::Right) { "Vertical" } else { "Horizontal" }, if self.inward { "In" } else { "Out" }),
+            TransitionKind::Zoom => if self.inward { "Zoom In".into() } else { "Zoom Out".into() },
+            k if k.has_edge() => self.from.label().into(),
+            _ => String::new(),
+        }
+    }
+    /// All the variants of a kind.
+    pub fn variants(kind: TransitionKind) -> Vec<Transition> {
+        let t = |from, inward| Transition { kind, from, inward };
+        match kind {
+            TransitionKind::Split => vec![t(Edge::Left, false), t(Edge::Left, true), t(Edge::Top, false), t(Edge::Top, true)],
+            TransitionKind::Zoom => vec![t(Edge::Right, true), t(Edge::Right, false)],
+            k if k.has_edge() => Edge::ALL.iter().map(|&e| t(e, false)).collect(),
+            _ => vec![t(Edge::Right, false)],
+        }
+    }
+}
+
+/// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, color)`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gradient {
     pub angle: f32,
@@ -169,7 +265,7 @@ pub struct Shadow {
     pub color: Rgba,
 }
 
-/// A soft halo of colour around an object.
+/// A soft halo of color around an object.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Glow {
     /// How far the halo reaches, in pixels.
@@ -382,7 +478,7 @@ pub struct Run {
     pub link: Option<String>,
     #[serde(default)]
     pub strike: Option<bool>,
-    /// A marker-pen colour behind the text.
+    /// A marker-pen color behind the text.
     #[serde(default)]
     pub highlight: Option<Rgba>,
     /// Extra space between letters, in px (negative pulls them together).
@@ -489,7 +585,7 @@ impl MarkerInfo {
     }
 }
 
-/// A data-entry field. Its look comes from the object's own style (font, text colour), fill and outline.
+/// A data-entry field. Its look comes from the object's own style (font, text color), fill and outline.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputField {
     /// The id of the variable that holds what is typed: a text variable, or a number variable for a number field.
@@ -552,7 +648,7 @@ pub struct Slider {
     pub thumb_color: Rgba,
     /// The thumb's height as a fraction of the frame's height.
     pub thumb_height: f32,
-    /// The track line's colour; `None` leaves the track invisible.
+    /// The track line's color; `None` leaves the track invisible.
     pub track: Option<Rgba>,
 }
 
@@ -679,7 +775,7 @@ pub struct Object {
     pub w: f32,
     pub h: f32,
     pub fill: Option<Rgba>,
-    /// A gradient drawn instead of `fill` (which then holds a representative flat colour).
+    /// A gradient drawn instead of `fill` (which then holds a representative flat color).
     #[serde(default)]
     pub gradient: Option<Gradient>,
     /// Clockwise turn about the frame's centre, in degrees.
@@ -713,7 +809,7 @@ pub struct Object {
     pub stroke: Option<Stroke>,
     #[serde(default)]
     pub shadow: Option<Shadow>,
-    /// A halo of colour around the object.
+    /// A halo of color around the object.
     #[serde(default)]
     pub glow: Option<Glow>,
     /// Fades the object's edges inward over this many pixels (0 is off). A softened object shows no shadow or glow.
@@ -901,7 +997,7 @@ pub struct ObjectState {
     pub size: Option<(f32, f32)>,
     #[serde(default)]
     pub shine: Option<Shine>,
-    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat colour).
+    /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat color).
     #[serde(default)]
     pub gradient: Option<Gradient>,
 }
@@ -1430,9 +1526,12 @@ pub struct Slide {
     /// Id of the layout this slide follows, if any.
     #[serde(default)]
     pub layout: Option<String>,
-    /// Fade-in time when navigating to this slide; 0 = cut.
+    /// How long the transition into this slide takes; 0 = cut.
     #[serde(default)]
     pub fade_ms: u32,
+    /// Which transition it is (a fade unless said otherwise, which is what files from before had).
+    #[serde(default, skip_serializing_if = "Transition::is_default")]
+    pub transition: Transition,
     /// Do not draw the master's and layout's shapes on this slide (Hide Background Graphics).
     #[serde(default)]
     pub hide_backdrop: bool,
@@ -1484,6 +1583,20 @@ impl Default for SlideNav {
 }
 
 impl Slide {
+    /// Layers shown when the slide starts: the base layer plus any a slide-start trigger shows, in layer order.
+    pub fn start_layers(&self) -> Vec<usize> {
+        let mut out = vec![0];
+        for t in &self.triggers {
+            if let (Event::SlideStart, Action::ShowLayer(id), Owner::Slide) = (&t.event, &t.action, &t.owner) {
+                if let Some(i) = self.layers.iter().position(|l| &l.id == id) {
+                    if !out.contains(&i) { out.push(i); }
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
     /// The distinct click numbers the base layer's animations use, in order (empty = nothing waits for a click).
     pub fn click_steps(&self) -> Vec<u32> {
         let mut v: Vec<u32> = self.layers.first().into_iter().flat_map(|l| l.objects.iter())
@@ -1505,7 +1618,7 @@ impl Slide {
             kind: SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -1670,12 +1783,31 @@ impl Question {
     }
 }
 
+thread_local! {
+    /// While set, an asset's bytes are left out of its serialized form (see `Project::fonts_used`).
+    static LEAVE_OUT_BYTES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn serialize_bytes<S: serde::Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    if LEAVE_OUT_BYTES.with(|f| f.get()) { s.serialize_seq(Some(0))?.end() } else { serde::Serialize::serialize(bytes, s) }
+}
+
+/// Sets `LEAVE_OUT_BYTES` for as long as it lives.
+struct LeaveOutBytes;
+impl LeaveOutBytes {
+    fn new() -> Self { LEAVE_OUT_BYTES.with(|f| f.set(true)); LeaveOutBytes }
+}
+impl Drop for LeaveOutBytes {
+    fn drop(&mut self) { LEAVE_OUT_BYTES.with(|f| f.set(false)); }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub name: String,
     pub mime: String,
     /// Raw bytes. In a `.brainbend` package these live in `assets/<file>` rather than in the JSON.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "serialize_bytes")]
     pub bytes: Vec<u8>,
     /// Package member holding the bytes (set when writing a package).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1716,10 +1848,10 @@ pub struct Project {
     pub assets: BTreeMap<String, Asset>,
     #[serde(default)]
     pub variables: Vec<Variable>,
-    /// The author's brand colours, offered first in every colour menu. Empty until the author makes one.
+    /// The author's brand colors, offered first in every color menu. Empty until the author makes one.
     #[serde(default)]
     pub palette: Vec<Rgba>,
-    /// Colours picked lately that are not in the palette, newest first.
+    /// Colors picked lately that are not in the palette, newest first.
     #[serde(default)]
     pub recent_colors: Vec<Rgba>,
     /// Percent of quiz points needed to pass.
@@ -1747,7 +1879,7 @@ pub struct Project {
     /// Terms listed in the player's Notes tab.
     #[serde(default)]
     pub glossary: Vec<GlossaryTerm>,
-    /// Colours and fonts new content starts from.
+    /// Colors and fonts new content starts from.
     #[serde(default)]
     pub theme: Theme,
     #[serde(default)]
@@ -1780,12 +1912,12 @@ const MAX_PACKAGE_ENTRY: u64 = 512 * 1024 * 1024;
 const MAX_PACKAGE_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
 
 impl Project {
-    /// The most recent colours kept.
+    /// The most recent colors kept.
     pub const RECENT_COLORS: usize = 10;
-    /// The most colours a palette holds.
+    /// The most colors a palette holds.
     pub const PALETTE_MAX: usize = 24;
 
-    /// Remember a colour the author just used (opaque colours only matter: the colour, not its see-through amount).
+    /// Remember a color the author just used (opaque colors only matter: the color, not its see-through amount).
     pub fn note_color(&mut self, c: Rgba) {
         let c = Rgba(c.0, c.1, c.2, 255);
         if self.palette.contains(&c) { return; }
@@ -1794,7 +1926,7 @@ impl Project {
         self.recent_colors.truncate(Self::RECENT_COLORS);
     }
 
-    /// Add a colour to the palette (once); it leaves the recent colours.
+    /// Add a color to the palette (once); it leaves the recent colors.
     pub fn add_to_palette(&mut self, c: Rgba) {
         let c = Rgba(c.0, c.1, c.2, 255);
         if self.palette.contains(&c) || self.palette.len() >= Self::PALETTE_MAX { return; }
@@ -1820,6 +1952,8 @@ impl Project {
             }
         }
         let mut out = std::collections::BTreeSet::new();
+        // The pictures, video and audio hold no font names and, written out as JSON numbers, would make this take seconds.
+        let _leave_out = LeaveOutBytes::new();
         if let Ok(v) = serde_json::to_value(self) { walk(&v, &mut out); }
         out
     }
@@ -1904,12 +2038,21 @@ impl Project {
         (0..self.slides.len()).filter(|&i| self.slides[i].scene == sc.id).collect()
     }
 
+    /// Heading 1 belongs to the project's name, so text an older version saved as Heading 1 becomes Heading 2.
+    fn retire_heading_one(&mut self) {
+        let fix = |objs: &mut Vec<Object>| for o in objs.iter_mut() { if o.role == TextRole::H1 { o.role = TextRole::H2; } };
+        for s in self.slides.iter_mut() { for l in s.layers.iter_mut() { fix(&mut l.objects); } }
+        for l in self.layouts.iter_mut() { fix(&mut l.objects); }
+        fix(&mut self.master.objects);
+    }
+
     pub fn sanitize(&mut self) {
         if self.slides.is_empty() {
             self.slides.push(Slide::new("slide-1", "Slide 1", 1920.0, 1080.0));
         }
         self.normalize_scenes();
         self.ensure_layouts();
+        self.retire_heading_one();
         for s in self.slides.iter_mut() {
             if s.layers.is_empty() {
                 s.layers.push(Layer { id: format!("{}-base", s.id), name: "Base layer".into(), objects: vec![], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] });
@@ -2031,6 +2174,39 @@ mod tests {
         let used = p.fonts_used();
         for f in ["Lora", "Poppins", "Oswald"] { assert!(used.contains(f), "{f}"); }
         assert!(!used.contains("Nothing"));
+    }
+
+    #[test]
+    fn heading_one_is_not_offered_and_old_heading_ones_become_heading_two_on_load() {
+        assert_eq!(TextRole::CHOICES, [TextRole::Normal, TextRole::H2, TextRole::H3, TextRole::H4]);
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s1", "S1", 1920.0, 1080.0));
+        p.sanitize();
+        let mut h = Object::new("h", "Head", Kind::Text, 0.0, 0.0, 10.0, 10.0);
+        h.role = TextRole::H1;
+        p.slides[0].layers[0].objects.push(h.clone());
+        p.master.objects.push(h.clone());
+        p.layouts[0].objects.push(h);
+        let mut back = Project::from_json(&p.to_json().unwrap()).unwrap();
+        assert_eq!(back.slides[0].layers[0].objects[0].role, TextRole::H1, "reading a file does not change it by itself");
+        back.sanitize();
+        assert_eq!(back.slides[0].layers[0].objects[0].role, TextRole::H2);
+        assert_eq!(back.master.objects[0].role, TextRole::H2);
+        assert_eq!(back.layouts[0].objects[0].role, TextRole::H2);
+    }
+
+    #[test]
+    fn finding_the_fonts_does_not_write_out_the_media_and_leaves_saving_alone() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        p.theme.heading_font = "Oswald".into();
+        p.assets.insert("big".into(), Asset { name: "big.mp4".into(), mime: "video/mp4".into(), bytes: vec![7u8; 4_000_000], file: None });
+        let t = std::time::Instant::now();
+        assert!(p.fonts_used().contains("Oswald"));
+        assert!(t.elapsed() < std::time::Duration::from_millis(500), "4 MB of media must not slow it down: {:?}", t.elapsed());
+        // The bytes are still written when the project is serialized afterwards.
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("[7,7,7"), "the bytes are not lost from the saved form");
     }
 
     #[test]
@@ -2367,7 +2543,7 @@ mod marker_tests {
     }
 
     #[test]
-    fn colours_typed_by_hand_are_understood() {
+    fn colors_typed_by_hand_are_understood() {
         let blue = Some(Rgba(79, 129, 189, 255));
         for t in ["#4F81BD", "4f81bd", " #4f81bd ", "79,129,189", "79, 129, 189", "rgb(79,129,189)", "RGB(79, 129, 189)"] { assert_eq!(Rgba::parse(t), blue, "{t}"); }
         assert_eq!(Rgba::parse("#48b"), Some(Rgba(68, 136, 187, 255)));
@@ -2376,7 +2552,7 @@ mod marker_tests {
     }
 
     #[test]
-    fn recent_colours_skip_the_palette_and_the_palette_takes_from_them() {
+    fn recent_colors_skip_the_palette_and_the_palette_takes_from_them() {
         let mut p = Project::new("t");
         let (a, b, c) = (Rgba(1, 2, 3, 255), Rgba(4, 5, 6, 255), Rgba(7, 8, 9, 255));
         p.note_color(a);
@@ -2385,9 +2561,9 @@ mod marker_tests {
         assert_eq!(p.recent_colors, vec![a, b], "newest first, no repeats");
         p.add_to_palette(b);
         assert_eq!(p.palette, vec![b]);
-        assert_eq!(p.recent_colors, vec![a], "a colour in the palette is not also recent");
+        assert_eq!(p.recent_colors, vec![a], "a color in the palette is not also recent");
         p.note_color(b);
-        assert_eq!(p.recent_colors, vec![a], "using a palette colour adds nothing to the recent ones");
+        assert_eq!(p.recent_colors, vec![a], "using a palette color adds nothing to the recent ones");
         p.add_to_palette(b);
         assert_eq!(p.palette.len(), 1, "once");
         for i in 0..40u8 { p.note_color(Rgba(100, i, 0, 255)); }
@@ -2424,6 +2600,28 @@ mod object_effects_tests {
 #[cfg(test)]
 mod streamed_package_tests {
     use super::*;
+
+    #[test]
+    fn a_transition_is_saved_only_when_not_the_default_fade_and_older_slides_read_as_fades() {
+        let mut s = Slide::new("a", "A", 1920.0, 1080.0);
+        s.fade_ms = 500;
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("transition"), "a plain fade writes nothing new");
+        let old: Slide = serde_json::from_str(&json).unwrap();
+        assert_eq!(old.transition, Transition::default());
+        s.transition = Transition { kind: TransitionKind::Push, from: Edge::Bottom, inward: false };
+        let back: Slide = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.transition, s.transition);
+        // Every kind offers at least one variant and names them distinctly.
+        for k in TransitionKind::ALL {
+            let v = Transition::variants(k);
+            assert!(!v.is_empty());
+            let mut names: Vec<String> = v.iter().map(|t| t.variant_label()).collect();
+            names.sort();
+            names.dedup();
+            assert_eq!(names.len(), v.len(), "{k:?}");
+        }
+    }
 
     #[test]
     fn a_streamed_package_reads_back_like_the_buffered_one_and_leaves_the_project_whole() {

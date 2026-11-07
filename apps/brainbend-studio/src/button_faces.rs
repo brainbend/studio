@@ -1,11 +1,11 @@
-//! The looks of the Button Styles gallery, nine colours by four looks, each in its resting, hover and pressed face.
+//! The looks of the Button Styles gallery, nine colors by four looks, each in its resting, hover and pressed face.
 //!
 //! These are Storyline's own values, read from the drawing data of a published Storyline project that had every gallery
 //! style applied to a button, so they match it exactly. Nothing here is calculated.
 use crate::button_styles::{c, Face, Faces};
 use brainbend_doc::Rgba;
 
-/// `FACES[colour][look]`: the colours in the order of `HUES`, the looks in the order of `Look::GALLERY`.
+/// `FACES[color][look]`: the colors in the order of `HUES`, the looks in the order of `Look::GALLERY`.
 pub const FACES: [[Faces; 4]; 9] = [
     [  // column 0
         Faces { normal: Face { fill: c(38, 38, 38), angle: 0.0, stops: &[], stroke: Some(c(25, 25, 25)) },

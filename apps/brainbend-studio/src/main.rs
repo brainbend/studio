@@ -9,6 +9,7 @@ mod markers;
 mod backstage;
 mod recent;
 mod publish_dialog;
+mod word_export;
 mod controls;
 mod doc_tabs;
 mod font_store;
@@ -24,6 +25,8 @@ mod ribbon;
 use ribbon::combo;
 mod states_panel;
 mod update;
+mod video_support;
+mod video_export;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -106,7 +109,9 @@ struct App {
     pan: egui::Vec2,
     fit_scale: f32,
     theme_colors_open: bool,
-    /// A colour just picked, to be remembered as recent once the pointer is released.
+    background_open: bool,
+    theme_fonts_open: bool,
+    /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
     /// The issue count in the status bar, when it was counted and what it was.
     status_issues: (f64, usize),
@@ -188,6 +193,14 @@ struct App {
     /// How the PDF handout is laid out (Publish > PDF).
     handout: brainbend_publish_html::HandoutOptions,
     handout_range: publish_dialog::HandoutRange,
+    /// A Word handout being made: its slides are shown one at a time while their pictures are taken.
+    word_capture: Option<word_export::Capture>,
+    /// What the Video page of the Publish dialog is set to.
+    video_options: video_export::Options,
+    /// A video being made.
+    video_run: Option<video_export::VideoRun>,
+    /// Painting a slide for a picture (a video), not for the editor: no play marks or placeholder names on media.
+    paint_clean: bool,
     player_pane: usize,
     /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Story View).
     tabs: Vec<doc_tabs::SlideTab>,
@@ -195,12 +208,16 @@ struct App {
     /// Open a project into the Story View (the app turns this on; tests keep the slide view).
     open_to_story_view: bool,
     scene_rename: Option<usize>,
+    /// The slide whose name is being edited in the slide list.
+    slide_rename: Option<usize>,
     /// Ids of further selected slides (besides the current one): ⌘-click toggles, ⇧-click selects a range.
     slide_multi: Vec<String>,
     /// Notes from the last import, shown once in a dialog.
     import_report: Vec<String>,
     /// What the last PowerPoint export could not carry over.
     export_report: Vec<String>,
+    /// Which export the report is about (it names the window): "PowerPoint" or "Video".
+    export_report_for: &'static str,
     ribbon_tab: usize,
     /// Dim the base layer while another layer is active ("Dim").
     dim_base: bool,
@@ -259,6 +276,8 @@ struct App {
     allow_close: bool,
     /// Checks GitHub for a newer release.
     updater: update::Updater,
+    /// The window that asks before the video program (ffmpeg) is downloaded.
+    video_support: video_support::VideoSupport,
     font_store: font_store::FontStore,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
@@ -268,13 +287,13 @@ struct App {
     hot_drag: Option<((f32, f32), (f32, f32))>,
     /// Far corner of a block of table cells chosen with shift-click (the near corner is the selected cell).
     range_end: Option<(String, (u16, u16))>,
-    /// Colour and width the Table panel's border buttons apply.
+    /// Color and width the Table panel's border buttons apply.
     border_color: Rgba,
     border_width: f32,
     /// The look the Table panel applies, and which parts of it.
     table_style: brainbend_doc::tables::TableStyle,
     table_opts: brainbend_doc::tables::StyleOptions,
-    /// Set while the Slide Master view is open.
+    /// Set while the Layout Builder view is open.
     master_stash: Option<master_view::MasterStash>,
 }
 
@@ -402,6 +421,30 @@ impl Snap {
     }
 }
 
+/// The proportions (width over height) a picture or video has in its file: for a picture, the part that is not cropped away;
+/// for a video, its still picture. `None` for anything else, or when the file cannot be measured.
+fn natural_ratio(project: &Project, o: &Object) -> Option<f32> {
+    let key = match o.kind { Kind::Image => o.asset.as_ref()?, Kind::Video => o.poster.as_ref()?, _ => return None };
+    let asset = project.assets.get(key)?;
+    let (iw, ih) = image::ImageReader::new(std::io::Cursor::new(&asset.bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
+    let [l, t, r, b] = if matches!(o.kind, Kind::Image) { o.crop.unwrap_or([0.0; 4]) } else { [0.0; 4] };
+    let (vw, vh) = (iw as f32 * (1.0 - l - r), ih as f32 * (1.0 - t - b));
+    if vw <= 0.0 || vh <= 0.0 { return None; }
+    Some(vw / vh)
+}
+
+/// Holding Shift while dragging a handle keeps the shape of the `w` x `h` box. `(gx, gy)` is how much the width and height
+/// would grow (negative to shrink) with the handle `(hx, hy)`; this returns the growth that keeps the proportions, never
+/// shrinking either side below `min`. A corner follows whichever side the pointer moved further; a side handle sets the
+/// scale itself, and the other side grows to match (the caller spreads that half and half, so it grows about the middle).
+fn keep_proportions(w: f32, h: f32, (hx, hy): (i8, i8), (gx, gy): (f32, f32), min: f32) -> (f32, f32) {
+    if w <= 0.0 || h <= 0.0 || (hx == 0 && hy == 0) { return (gx, gy); }
+    let (kx, ky) = ((w + gx) / w, (h + gy) / h);
+    let k = if hy == 0 { kx } else if hx == 0 { ky } else if (kx - 1.0).abs() >= (ky - 1.0).abs() { kx } else { ky };
+    let k = k.max(min / w).max(min / h);
+    (w * k - w, h * k - h)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum DragMode {
     Move,
@@ -430,8 +473,8 @@ impl Default for App {
             project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), font_store: Default::default(),
+            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -580,7 +623,7 @@ fn text_job(o: &Object, scale: f32, max_width: f32, link: egui::Color32) -> egui
                     if run.bold.is_some() || run.font_family.is_some() {
                         f.font_id.family = font_store::family_styled(run.font_family.as_deref().unwrap_or(&o.style.font_family), run.bold.unwrap_or(o.style.bold));
                     }
-                    // A link is the theme's hyperlink colour, underlined, unless the author set its colour or underline.
+                    // A link is the theme's hyperlink color, underlined, unless the author set its color or underline.
                     if run.link.is_some() {
                         f.color = run.color.map(color).unwrap_or(link);
                         f.underline = if run.underline.unwrap_or(true) { egui::Stroke::new(1.0, f.color) } else { egui::Stroke::NONE };
@@ -616,7 +659,7 @@ fn g_is_empty(g: &Option<Gradient>) -> bool {
     g.as_ref().is_none_or(|g| g.stops.is_empty())
 }
 
-/// Colour of a gradient at position `t` (0..1 along its axis).
+/// Color of a gradient at position `t` (0..1 along its axis).
 fn gradient_at(stops: &[(f32, Rgba)], t: f32) -> egui::Color32 {
     let t = t.clamp(0.0, 1.0);
     let mut prev = stops[0];
@@ -633,6 +676,98 @@ fn gradient_at(stops: &[(f32, Rgba)], t: f32) -> egui::Color32 {
 }
 
 /// Where along a CSS-angle gradient over `rect` the point `p` lies (0..1).
+/// A window that changes how the slide looks (Background, Fonts, Brand Colors): it opens at the right of the slide area,
+/// beside the inspector, so most of the slide stays in view while it is used.
+pub(crate) fn side_window(ctx: &egui::Context, title: &str) -> egui::Window<'static> {
+    let mut keep_in = ctx.content_rect();
+    keep_in.min.y = (keep_in.min.y + 44.0).min(keep_in.max.y);
+    egui::Window::new(title.to_string())
+        .pivot(egui::Align2::RIGHT_TOP)
+        .default_pos(egui::pos2(keep_in.max.x - 326.0 - 24.0, keep_in.min.y + 190.0))
+        .constrain_to(keep_in)
+}
+
+thread_local! {
+    /// Which of the app's windows had the keyboard focus when they were last drawn, and which were drawn since the main one was.
+    static FOCUS: std::cell::RefCell<(std::collections::HashMap<egui::ViewportId, bool>, std::collections::HashSet<egui::ViewportId>)> = Default::default();
+}
+
+/// Record whether a window has the keyboard focus, and say whether any of the app's windows (the main one or a tool window) does:
+/// a tool window stays in front of the app while the app is in use and steps back when another program is.
+fn app_has_focus(me: egui::ViewportId, mine: bool) -> bool {
+    FOCUS.with(|f| {
+        let mut f = f.borrow_mut();
+        if me == egui::ViewportId::ROOT {
+            // A new round: forget the tool windows that were not drawn since the last one (they are closed).
+            let seen = std::mem::take(&mut f.1);
+            f.0.retain(|id, _| *id == egui::ViewportId::ROOT || seen.contains(id));
+        } else {
+            f.1.insert(me);
+        }
+        f.0.insert(me, mine);
+        f.0.values().any(|&b| b)
+    })
+}
+
+/// A tool window (settings, spelling, search, project check...). On a desktop it is its own window: it can be moved out of
+/// the app and onto another screen, and it stays in front of the app while the app is in use. Where windows cannot be
+/// separate, it is a window inside the app.
+pub(crate) fn tool_window(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    tool_window_at(ctx, id, title, size, false, open, content)
+}
+
+/// `tool_window`, optionally opening (inside the app) beside the inspector instead of in the middle: for windows that change
+/// how the slide looks, so the slide stays in view.
+pub(crate) fn tool_window_at(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], beside: bool, open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    if ctx.embed_viewports() {
+        (if beside { side_window(ctx, title) } else { dialog_window(ctx, title) }).id(egui::Id::new(id)).open(open).collapsible(false).resizable(true).default_size(size).show(ctx, content);
+        return;
+    }
+    let vid = egui::ViewportId::from_hash_of(id);
+    let builder = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_inner_size(size)
+        .with_min_inner_size([260.0, 160.0])
+        .with_window_level(egui::viewport::WindowLevel::AlwaysOnTop);
+    let mut content = Some(content);
+    ctx.show_viewport_immediate(vid, builder, |ui, _class| {
+        let level = if app_has_focus(vid, ui.input(|i| i.viewport().focused.unwrap_or(false))) { egui::viewport::WindowLevel::AlwaysOnTop } else { egui::viewport::WindowLevel::Normal };
+        let last: Option<bool> = ui.data(|d| d.get_temp(egui::Id::new(("tool-window-front", id))));
+        if last != Some(level == egui::viewport::WindowLevel::AlwaysOnTop) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+            ui.data_mut(|d| d.insert_temp(egui::Id::new(("tool-window-front", id)), level == egui::viewport::WindowLevel::AlwaysOnTop));
+        }
+        if ui.input(|i| i.viewport().close_requested()) { *open = false; }
+        egui::CentralPanel::default().show(ui, |ui| {
+            let out = egui::ScrollArea::vertical().auto_shrink([false, beside]).show(ui, |ui| { if let Some(f) = content.take() { f(ui); } });
+            if beside {
+                // These windows are exactly as tall as what is in them (and follow it as it changes), with no empty strip below.
+                let margin = egui::Frame::central_panel(ui.style()).inner_margin;
+                let want = (out.content_size.y + margin.sum().y + 2.0).clamp(120.0, 900.0).round();
+                let key = egui::Id::new(("tool-window-height", id));
+                let last: Option<f32> = ui.data(|d| d.get_temp(key));
+                if last.is_none_or(|l| (l - want).abs() > 1.0) {
+                    let width = ui.ctx().input(|i| i.viewport().inner_rect.map(|r| r.width())).unwrap_or(size[0]);
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(width, want)));
+                    ui.data_mut(|d| d.insert_temp(key, want));
+                }
+            }
+        });
+    });
+}
+
+/// A dialog window: it opens in the middle of the app (whatever its size), below the title bar and its window buttons,
+/// and can then be dragged anywhere in the app.
+pub(crate) fn dialog_window(ctx: &egui::Context, title: &str) -> egui::Window<'static> {
+    let screen = ctx.content_rect();
+    let mut keep_in = screen;
+    keep_in.min.y = (screen.min.y + 44.0).min(screen.max.y);
+    egui::Window::new(title.to_string())
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(screen.center())
+        .constrain_to(keep_in)
+}
+
 fn gradient_t(rect: egui::Rect, angle: f32, p: egui::Pos2) -> f32 {
     let a = angle.to_radians();
     let dir = egui::vec2(a.sin(), -a.cos());
@@ -664,28 +799,78 @@ fn hit_object(slide: &Slide, shown: &[usize], p: egui::Vec2, scale: f32) -> Opti
     None
 }
 
-/// Linear gradient over `rect` (CSS angle: 0 = towards the top, clockwise), as a vertex-coloured grid.
+/// Linear gradient over `rect` (CSS angle: 0 = towards the top, clockwise), as a vertex-colored grid.
 pub(crate) fn paint_gradient(painter: &egui::Painter, rect: egui::Rect, angle: f32, stops: &[(f32, Rgba)]) {
+    paint_gradient_kind(painter, rect, brainbend_doc::GradientKind::Linear, angle, stops, &Default::default());
+}
+
+/// A background gradient of any kind over `rect`, as a vertex-colored grid (finer for the curved kinds).
+pub(crate) fn paint_gradient_kind(painter: &egui::Painter, rect: egui::Rect, kind: brainbend_doc::GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &brainbend_doc::GradientGeom) {
+    use brainbend_doc::GradientKind::*;
     if stops.is_empty() { return; }
-    const N: usize = 16;
+    let reflected;
+    let stops = if kind == Reflected { reflected = brainbend_doc::reflect_stops(stops); &reflected[..] } else { stops };
+    if kind == Angular {
+        // Thin wedges from the centre, each one flat color: a grid would show a ragged seam where the colors wrap.
+        const WEDGES: usize = 720;
+        let c = rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height());
+        let r = rect.size().length() * 3.0;
+        let clipped = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+        let mut mesh = egui::epaint::Mesh::default();
+        for k in 0..WEDGES {
+            let (a0, a1) = (k as f32 / WEDGES as f32, (k + 1) as f32 / WEDGES as f32);
+            let col = gradient_at(stops, (a0 + a1) / 2.0);
+            let pt = |t: f32| { let a = (angle + t * 360.0).to_radians(); c + egui::vec2(a.sin(), -a.cos()) * r };
+            let i = mesh.vertices.len() as u32;
+            mesh.colored_vertex(c, col);
+            mesh.colored_vertex(pt(a0), col);
+            mesh.colored_vertex(pt(a1 + 0.0015), col);
+            mesh.add_triangle(i, i + 1, i + 2);
+        }
+        clipped.add(egui::Shape::mesh(mesh));
+        return;
+    }
+    let n: usize = if kind == Radial { 64 } else { 16 };
+    let t_at = |p: egui::Pos2| -> f32 {
+        match kind {
+            Linear | Reflected => match geom.line {
+                None => gradient_t(rect, angle, p),
+                Some(_) => {
+                    let (a, b) = geom.line_px(angle, rect.width(), rect.height());
+                    let (a, b) = (rect.min + egui::vec2(a.0, a.1), rect.min + egui::vec2(b.0, b.1));
+                    let d = b - a;
+                    (p - a).dot(d) / d.length_sq().max(1.0)
+                }
+            },
+            Radial => {
+                let d = p - (rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height()));
+                ((d.x / rect.width().max(1.0)).powi(2) + (d.y / rect.height().max(1.0)).powi(2)).sqrt() / geom.radius.max(0.01)
+            }
+            Angular => {
+                let d = p - (rect.min + egui::vec2(geom.center.0 * rect.width(), geom.center.1 * rect.height()));
+                let deg = d.x.atan2(-d.y).to_degrees() - angle;
+                deg.rem_euclid(360.0) / 360.0
+            }
+        }
+    };
     let mut mesh = egui::epaint::Mesh::default();
-    for j in 0..=N {
-        for i in 0..=N {
-            let p = rect.min + egui::vec2(rect.width() * i as f32 / N as f32, rect.height() * j as f32 / N as f32);
-            mesh.colored_vertex(p, gradient_at(stops, gradient_t(rect, angle, p)));
+    for j in 0..=n {
+        for i in 0..=n {
+            let p = rect.min + egui::vec2(rect.width() * i as f32 / n as f32, rect.height() * j as f32 / n as f32);
+            mesh.colored_vertex(p, gradient_at(stops, t_at(p)));
         }
     }
-    for j in 0..N {
-        for i in 0..N {
-            let k = (j * (N + 1) + i) as u32;
-            mesh.add_triangle(k, k + 1, k + N as u32 + 1);
-            mesh.add_triangle(k + 1, k + N as u32 + 2, k + N as u32 + 1);
+    for j in 0..n {
+        for i in 0..n {
+            let k = (j * (n + 1) + i) as u32;
+            mesh.add_triangle(k, k + 1, k + n as u32 + 1);
+            mesh.add_triangle(k + 1, k + n as u32 + 2, k + n as u32 + 1);
         }
     }
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// Fill a polygon (given in `rect`'s unrotated frame) with a gradient or a flat colour; `map` places each
+/// Fill a polygon (given in `rect`'s unrotated frame) with a gradient or a flat color; `map` places each
 /// vertex on screen (used to rotate).
 fn fill_polygon(painter: &egui::Painter, poly: &[egui::Pos2], map: &dyn Fn(egui::Pos2) -> egui::Pos2, shade: &dyn Fn(egui::Pos2) -> egui::Color32) {
     if poly.len() < 3 { return; }
@@ -806,7 +991,7 @@ fn figure_triangles(figs: &[Vec<egui::Pos2>]) -> Vec<(Vec<egui::Pos2>, Vec<usize
     out
 }
 
-/// Fill the figures of a path (see [`figure_triangles`]). `map` places each point on screen and `shade` colours it.
+/// Fill the figures of a path (see [`figure_triangles`]). `map` places each point on screen and `shade` colors it.
 fn fill_figures(painter: &egui::Painter, figs: &[Vec<egui::Pos2>], map: &dyn Fn(egui::Pos2) -> egui::Pos2, shade: &dyn Fn(egui::Pos2) -> egui::Color32) {
     let mut mesh = egui::epaint::Mesh::default();
     for (pts, tris) in figure_triangles(figs) {
@@ -923,6 +1108,7 @@ impl App {
                 self.redo.clear();
                 self.dirty = ext == "story" || ext == "pptx";
                 self.remember(path);
+                self.offer_video_support_for_open_project();
             }
             Err(e) => self.status = format!("Could not open {}: {e}", file_label(&path)),
         }
@@ -1102,6 +1288,7 @@ impl App {
                 Ok(()) => {
                     self.status = format!("Exported PowerPoint file to {}", path.display());
                     self.export_report = notes;
+                    self.export_report_for = "PowerPoint";
                 }
                 Err(e) => self.status = format!("Could not write {}: {e}", path.display()),
             },
@@ -1170,6 +1357,9 @@ impl App {
                         if ui.add(egui::Slider::new(&mut pct, 10.0..=800.0).logarithmic(true).show_value(false)).changed() { zoom_to = Some(pct / 100.0); }
                         if ui.add(egui::Button::new("−").frame(false)).on_hover_text("Zoom out").clicked() { zoom_to = Some(scale / 1.25); }
                         if ui.add(egui::Button::new(format!("{:.0}%", scale * 100.0)).frame(false)).on_hover_text("Actual size").clicked() { zoom_to = Some(1.0); }
+                        // A view setting, with the zoom: it only changes how the canvas draws, and is not saved with the project.
+                        ui.separator();
+                        ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
                     });
                 }
             });
@@ -1201,7 +1391,7 @@ impl App {
             kind: SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -1397,7 +1587,12 @@ impl App {
 
     fn load_image_asset_titled(&mut self, title: &str) -> Option<(String, String, f32, f32)> {
         let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg"]).pick_file()?;
-        let bytes = match std::fs::read(&path) {
+        self.load_image_file(&path)
+    }
+
+    /// Add the picture in `path` to the project; returns its asset key, name and size.
+    fn load_image_file(&mut self, path: &std::path::Path) -> Option<(String, String, f32, f32)> {
+        let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
         };
@@ -1426,11 +1621,56 @@ impl App {
     }
 
     fn insert_image(&mut self) {
-        let Some((key, name, w, h)) = self.load_image_asset() else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else { return };
+        self.insert_image_file(&path);
+    }
+
+    /// What dropping `files` on the window does. A project file opens (the first one). Pictures, video and audio are added
+    /// to the current slide, each as its own object, when a project is open and showing its slides.
+    fn handle_dropped(&mut self, files: Vec<PathBuf>) {
+        #[derive(PartialEq)]
+        enum Kind { Project, Image, Video, Audio, Other }
+        let kind = |p: &PathBuf| match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+            Some("story" | "brainbend" | "storyapp" | "pptx") => Kind::Project,
+            Some("png" | "jpg" | "jpeg") => Kind::Image,
+            Some("mp4" | "m4v" | "webm") => Kind::Video,
+            Some("mp3" | "m4a" | "ogg" | "wav") => Kind::Audio,
+            _ => Kind::Other,
+        };
+        if let Some(path) = files.iter().find(|p| kind(p) == Kind::Project) {
+            self.drop_path = Some(path.clone());
+            self.guard(Pending::OpenDropped);
+            return;
+        }
+        let editing = self.project.is_some() && !self.file_view;
+        let (mut added, mut failed, mut unsupported, mut no_project) = (0, 0, 0, false);
+        for path in &files {
+            let k = kind(path);
+            if !editing && matches!(k, Kind::Image | Kind::Video | Kind::Audio) { no_project = true; continue; }
+            let ok = match k {
+                Kind::Image => self.insert_image_file(path),
+                Kind::Video => self.insert_video_file(path),
+                Kind::Audio => self.insert_audio_file(path),
+                _ => { unsupported += 1; continue; }
+            };
+            if ok { added += 1 } else { failed += 1 }
+        }
+        // A file that could not be added leaves its own message (too large, not readable); say the rest only when all went well.
+        if failed > 0 { return; }
+        self.status = if added == 1 { "Added the dropped file to the slide".into() }
+            else if added > 1 { format!("Added {added} dropped files to the slide") }
+            else if no_project { "Open or start a project first, then drop the file onto a slide".into() }
+            else if unsupported > 0 { "Drop a picture (PNG or JPEG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
+            else { return };
+    }
+
+    fn insert_image_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name, w, h)) = self.load_image_file(path) else { return false };
         let fit = (900.0 / w).min(700.0 / h).min(1.0);
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Image, 0.0, 0.0, (w * fit).round(), (h * fit).round());
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
     fn add_slide(&mut self, kind: SlideKind) {
@@ -1696,6 +1936,7 @@ impl App {
         }
         let numbers = self.scene_numbers(si);
         let (mut select, mut open) = (None, None);
+        let mut start_slide_rename: Option<usize> = None;
         // Jumps that are not a tree connector (back-links, sideways jumps, jumps out of the scene) show as a chip on the slide.
         let mut hover_line: Option<(egui::Pos2, egui::Rect)> = None;
         let mut chips: Vec<(usize, Vec<usize>)> = Vec::new();
@@ -1744,9 +1985,23 @@ impl App {
                         select = Some(i);
                     }
                 }
-                let p = self.project.as_ref().unwrap();
                 let n = numbers.get(&i).copied().unwrap_or(0);
-                ui.add(egui::Label::new(egui::RichText::new(format!("{}.{} {}", si + 1, n, p.slides[i].name)).size(11.5)).truncate());
+                if self.slide_rename == Some(i) {
+                    let mut name = self.project.as_ref().unwrap().slides[i].name.clone();
+                    let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(tw));
+                    if !r.has_focus() && !r.lost_focus() { r.request_focus(); }
+                    // A space typed at the end stays while typing; the name is trimmed when the box is left.
+                    if r.changed() && !name.trim().is_empty() { self.project.as_mut().unwrap().slides[i].name = name; self.dirty = true; }
+                    if r.lost_focus() {
+                        self.slide_rename = None;
+                        let t = self.project.as_ref().unwrap().slides[i].name.trim().to_string();
+                        self.project.as_mut().unwrap().slides[i].name = t;
+                    }
+                } else {
+                    let p = self.project.as_ref().unwrap();
+                    let l = ui.add(egui::Label::new(egui::RichText::new(format!("{}.{} {}", si + 1, n, p.slides[i].name)).size(11.5)).truncate().sense(egui::Sense::click()));
+                    if l.double_clicked() { start_slide_rename = Some(i); }
+                }
             });
             if let Some((_, targets)) = chips.iter().find(|c| c.0 == i) {
                 let p = self.project.as_ref().unwrap();
@@ -1768,6 +2023,10 @@ impl App {
             let c = ribbon::ACCENT;
             ui.painter().line_segment([from, to.center()], egui::Stroke::new(2.0, c));
             ui.painter().rect_stroke(to, 3.0, egui::Stroke::new(2.0, c), egui::StrokeKind::Outside);
+        }
+        if let Some(i) = start_slide_rename {
+            self.snapshot();
+            self.slide_rename = Some(i);
         }
         (select, open)
     }
@@ -2075,6 +2334,8 @@ impl App {
                 if ui.button("Send backward").clicked() { self.reorder_step(false); ui.close(); }
                 if ui.button("Send to back").clicked() { self.reorder_selected(false); ui.close(); }
             });
+            let can_restore = self.project.as_ref().is_some_and(|p| self.selection().iter().any(|&(li, oi)| p.slides.get(self.slide).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| natural_ratio(p, o).is_some())));
+            if can_restore && ui.button("Restore Aspect Ratio").on_hover_text("Put a stretched picture or video back to the proportions of its file").clicked() { self.restore_aspect_ratio(); ui.close(); }
             ui.menu_button(if n > 1 { "Align to each other" } else { "Align to the slide" }, |ui| {
                 for (label, axis, mode) in [("Left", 0u8, 0u8), ("Center", 0, 1), ("Right", 0, 2), ("Top", 1, 0), ("Middle", 1, 1), ("Bottom", 1, 2)] {
                     if ui.button(label).clicked() { self.align_selected_or_slide(axis, mode); ui.close(); }
@@ -2090,7 +2351,7 @@ impl App {
         if !has_sel {
             // On empty canvas: put something on the slide.
             ui.separator();
-            ui.menu_button("Insert", |ui| {
+            ui.menu_button("Objects", |ui| {
                 if ui.button("Text box").clicked() { self.insert_text(); ui.close(); }
                 if ui.button("Rectangle").clicked() { self.insert_rect(); ui.close(); }
                 if ui.button("Ellipse").clicked() { self.insert_ellipse(); ui.close(); }
@@ -2205,6 +2466,12 @@ impl App {
     /// Add a media asset (video/audio/captions) from a file; returns its asset key.
     fn load_media(&mut self, filters: &[&str], label: &str) -> Option<(String, String)> {
         let path = rfd::FileDialog::new().add_filter(label, filters).pick_file()?;
+        self.load_media_file(&path)
+    }
+
+    /// Add the media file at `path` to the project; returns its asset key and name.
+    fn load_media_file(&mut self, path: &std::path::Path) -> Option<(String, String)> {
+        let path = path.to_path_buf();
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if size > MAX_MEDIA_BYTES {
             self.status = format!("{} is {}, which is too large to add (the limit is {}). Compress it first, for example with HandBrake, and add it again.", path.file_name().and_then(|n| n.to_str()).unwrap_or("That file"), megabytes(size), megabytes(MAX_MEDIA_BYTES));
@@ -2233,20 +2500,28 @@ impl App {
     }
 
     fn insert_video(&mut self) {
-        let Some((key, name)) = self.load_media(&["mp4", "m4v", "webm"], "Video") else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("Video", &["mp4", "m4v", "webm"]).pick_file() else { return };
+        self.insert_video_file(&path);
+    }
+
+    fn insert_video_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name)) = self.load_media_file(path) else { return false };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Video, 0.0, 0.0, 1280.0, 720.0);
-        // A frame of the video to show before it plays (needs ffmpeg; without it there is none).
+        // A frame of the video to show before it plays (needs the video program; without it there is none).
         let from_file = self.last_media_path.take().and_then(|p| brainbend_import_legacy::still_asset_from_file(&p));
         if let Some(still) = from_file.or_else(|| self.project.as_ref().and_then(|p| p.assets.get(&key)).and_then(brainbend_import_legacy::still_asset)) {
             let still_key = format!("{key}-still");
             if let Some(p) = self.project.as_mut() { p.assets.insert(still_key.clone(), still); }
             o.poster = Some(still_key);
+        } else {
+            self.video_support.request("show a picture of the video before it plays", false);
         }
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
-    /// An icon from the gallery as a freeform vector shape in the theme's text colour, named and described for screen
+    /// An icon from the gallery as a freeform vector shape in the theme's text color, named and described for screen
     /// readers by the icon's name (the author can change both).
     fn insert_icon(&mut self, icon: &icons::Icon) {
         let Some((cmds, aspect)) = icons::outline(icon) else { return };
@@ -2410,7 +2685,7 @@ impl App {
     }
 
     /// A caption (a speech or thought bubble) with its own text: shape `i` of `shapes::CAPTIONS` in the theme's accent
-    /// colour with readable text, the text kept clear of the pointer.
+    /// color with readable text, the text kept clear of the pointer.
     fn insert_caption(&mut self, i: usize) {
         use brainbend_doc::shapes::{caption, CAPTIONS, Preset};
         let accent = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255));
@@ -2443,10 +2718,16 @@ impl App {
     }
 
     fn insert_audio(&mut self) {
-        let Some((key, name)) = self.load_media(&["mp3", "m4a", "ogg", "wav"], "Audio") else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("Audio", &["mp3", "m4a", "ogg", "wav"]).pick_file() else { return };
+        self.insert_audio_file(&path);
+    }
+
+    fn insert_audio_file(&mut self, path: &std::path::Path) -> bool {
+        let Some((key, name)) = self.load_media_file(path) else { return false };
         let mut o = blank_object(self.new_id("obj"), &name, Kind::Audio, 0.0, 0.0, 800.0, 90.0);
         o.asset = Some(key);
         self.insert(o);
+        true
     }
 
     /// Timeline of the active layer: one row per object, a bar from its start to its end.
@@ -2502,7 +2783,8 @@ impl App {
     fn timeline_panel(&mut self, ui: &mut egui::Ui, slide_idx: usize) {
         const ROW_H: f32 = 22.0;
         const LABEL_W: f32 = 170.0;
-        const SNAP_MS: f32 = 50.0;
+        // Times snap to a tenth of a second, so a drag moves in clear steps; hold Shift for fine control.
+        let snap_ms: f32 = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 100.0 };
         let Some(proj) = self.project.as_ref() else { return };
         let slide = &proj.slides[slide_idx];
         let li = self.layer.min(slide.layers.len() - 1);
@@ -2531,14 +2813,39 @@ impl App {
             }
         }
         let max_end = layer.objects.iter().filter_map(|o| o.timing).map(|t| t.start_ms + t.dur_ms.unwrap_or(0)).max().unwrap_or(0);
-        let total = layer.duration_ms.unwrap_or(((max_end.max(4000) as f32 / 1000.0).ceil() as u32 + 1) * 1000) as f32;
+        let mut total = layer.duration_ms.unwrap_or(((max_end.max(4000) as f32 / 1000.0).ceil() as u32 + 1) * 1000) as f32;
+        // An automatic timeline grows with its objects. While a bar is being dragged its scale is held, so the bar stays under the pointer.
+        let frozen_id = egui::Id::new("timeline-frozen-total");
+        if self.tl_drag.is_some() || self.tl_gdrag.is_some() {
+            if let Some(t) = ui.data(|d| d.get_temp::<f32>(frozen_id)) { total = t; }
+        } else {
+            ui.data_mut(|d| d.insert_temp(frozen_id, total));
+        }
         let layer_name = layer.name.clone();
         let timed_layer = layer.duration_ms.is_some();
 
+        let mut len_edit: Option<Option<u32>> = None;
+        let mut len_snap = false;
         ui.horizontal(|ui| {
             ui.strong(format!("Timeline: {layer_name}"));
-            if timed_layer { ui.label(format!("{:.1} s", total / 1000.0)); } else { ui.weak("no length set (Slide/Layer, Timeline, in Properties)"); }
+            ui.label("Length");
+            let mut secs = total / 1000.0;
+            let r = ui.add(egui::DragValue::new(&mut secs).range(1.0..=3600.0).speed(0.1).max_decimals(1).suffix(" s"))
+                .on_hover_text("How long this timeline runs. Objects can start and leave anywhere along it");
+            if r.drag_started() || r.gained_focus() { len_snap = true; }
+            if r.changed() { len_edit = Some(Some((secs * 1000.0).round() as u32)); }
+            // Shorten (or lengthen) the timeline to where the last object leaves.
+            let fit = ((max_end as f32 / 100.0).ceil() * 100.0).max(1000.0) as u32;
+            if max_end > 0 && (total - fit as f32).abs() > 1.0 && ui.small_button("Fit to objects").on_hover_text("Make the timeline as long as the last object to leave. Objects that last until the end simply stay").clicked() {
+                len_edit = Some(Some(fit));
+                len_snap = true;
+            }
         });
+        if len_snap { self.snapshot(); }
+        if let Some(v) = len_edit {
+            if let Some(l) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)) { l.duration_ms = v; }
+            self.dirty = true;
+        }
         let avail = ui.available_width();
         let track_w = (avail - LABEL_W - 24.0).max(120.0);
         let px = track_w / total;
@@ -2628,11 +2935,14 @@ impl App {
                         let (a, b) = if spans.is_empty() { (0.0, total) } else { (spans.iter().map(|s| s.0).fold(f32::MAX, f32::min), spans.iter().map(|s| s.1).fold(0.0, f32::max)) };
                         let bar = egui::Rect::from_min_max(egui::pos2(left + a * px, track.top()), egui::pos2((left + b * px).max(left + a * px + 4.0), track.bottom()));
                         ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { ribbon::ACCENT });
-                        let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
+                        let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 10.0, bar.top()), bar.right_bottom());
+                // A grip on the end of the bar shows that it can be dragged: that is where the object leaves.
+                for dx in [3.0, 6.0] { ui.painter().vline(bar.right() - dx, bar.shrink2(egui::vec2(0.0, 5.0)).y_range(), egui::Stroke::new(1.0, egui::Color32::from_white_alpha(150))); }
                         let gid_id = ui.id().with(("tlg", gid.as_str()));
                         let edge_resp = ui.interact(edge, gid_id.with("edge"), egui::Sense::drag());
                         let body_resp = ui.interact(bar, gid_id.with("body"), egui::Sense::click_and_drag());
                         if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
+                let edge_resp = edge_resp.on_hover_text("Drag to set when it leaves (hold Shift for fine steps). An exit effect plays just before");
                         if body_resp.clicked() || edge_resp.clicked() { self.selected = Some((li, top)); self.multi.clear(); }
                         let begun = if edge_resp.drag_started() { Some(1u8) } else if body_resp.drag_started() { Some(0u8) } else { None };
                         if let Some(kind) = begun {
@@ -2644,15 +2954,15 @@ impl App {
                             if let Some((g, kind, originals, acc)) = self.tl_gdrag.as_mut().filter(|d| d.0 == gid) {
                                 let _ = g;
                                 *acc += if *kind == 1 { edge_resp.drag_delta().x } else { body_resp.drag_delta().x };
-                                let ms = ((*acc / px) / SNAP_MS).round() * SNAP_MS;
+                                let ms = ((*acc / px) / snap_ms).round() * snap_ms;
                                 let group_end = b;
                                 let writes: Vec<(usize, Timing)> = originals.iter().map(|(m, t)| {
                                     let (s0, d0) = t.map(|t| (t.start_ms as f32, t.dur_ms.map(|d| d as f32))).unwrap_or((0.0, None));
                                     if *kind == 0 {
                                         (*m, Timing { start_ms: (s0 + ms).max(0.0) as u32, dur_ms: d0.map(|d| d as u32) })
                                     } else {
-                                        let end = (group_end + ms).max(SNAP_MS);
-                                        (*m, Timing { start_ms: s0 as u32, dur_ms: Some((end - s0).max(SNAP_MS) as u32) })
+                                        let end = (group_end + ms).max(snap_ms);
+                                        (*m, Timing { start_ms: s0 as u32, dur_ms: Some((end - s0).max(snap_ms) as u32) })
                                     }
                                 }).collect();
                                 if let Some(l) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)) {
@@ -2727,8 +3037,9 @@ impl App {
                 // Interaction: right-edge handle (duration) first, then the body (move / select).
                 let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
                 let id = ui.id().with(("tl", oi));
-                let edge_resp = ui.interact(edge, id.with("edge"), egui::Sense::drag());
+                // Registered last, so where they overlap the end handle wins over the body of the bar.
                 let body_resp = ui.interact(bar, id.with("body"), egui::Sense::click_and_drag());
+                let edge_resp = ui.interact(edge, id.with("edge"), egui::Sense::drag());
                 if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
                 if body_resp.clicked() || edge_resp.clicked() || body_resp.secondary_clicked() { self.selected = Some((li, oi)); }
                 let timed_now = timing.is_some();
@@ -2736,8 +3047,9 @@ impl App {
                     if timed_now {
                         if ui.button("Show for the whole timeline").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.timing = None; } self.dirty = true; ui.close(); }
                         if ui.button("Start at the beginning").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.start_ms = 0; } } self.dirty = true; ui.close(); }
+                        if timing.is_some_and(|t| t.dur_ms.is_none()) && ui.button("Leave after 2 seconds").on_hover_text("Gives it an end, so an exit effect can play. Drag the end of its bar to change it").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.dur_ms = Some(2000); } } self.dirty = true; ui.close(); }
                         if ui.button("Last until the end").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.dur_ms = None; } } self.dirty = true; ui.close(); }
-                    } else if ui.button("Set start and length").clicked() {
+                    } else if ui.button("Show for part of the timeline").on_hover_text("Gives it a start and an end (2 seconds to begin with). Drag the bar to move it, and drag its end to change when it leaves").clicked() {
                         self.snapshot();
                         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.timing = Some(Timing { start_ms: 0, dur_ms: Some(2000) }); }
                         self.dirty = true;
@@ -2758,12 +3070,12 @@ impl App {
                 if moving {
                     if let Some((doi, kind, s0, d0, acc)) = self.tl_drag.as_mut().filter(|d| d.0 == oi) {
                         *acc += if *kind == 1 { edge_resp.drag_delta().x } else { body_resp.drag_delta().x };
-                        let ms = ((*acc / px) / SNAP_MS).round() * SNAP_MS;
+                        let ms = ((*acc / px) / snap_ms).round() * snap_ms;
                         let (new_start, new_dur) = if *kind == 0 {
-                            ((*s0 as f32 + ms).max(0.0) as u32, *d0)
+                            ((*s0 as f32 + ms).clamp(0.0, (total - d0.map_or(snap_ms, |d| d as f32)).max(0.0)) as u32, *d0)
                         } else {
-                            let base = d0.map(|d| d as f32).unwrap_or((total - *s0 as f32).max(SNAP_MS));
-                            (*s0, Some((base + ms).max(SNAP_MS) as u32))
+                            let base = d0.map(|d| d as f32).unwrap_or((total - *s0 as f32).max(snap_ms));
+                            (*s0, Some((base + ms).clamp(snap_ms, (total - *s0 as f32).max(snap_ms)) as u32))
                         };
                         let _ = doi;
                         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
@@ -2948,7 +3260,7 @@ impl App {
         if ui.button("Open Home").clicked() { self.ribbon_tab = ribbon::HOME_TAB; }
     }
 
-    /// What a hyperlink looks like in text: the theme's hyperlink colour (accent 1), as the PowerPoint export sets it.
+    /// What a hyperlink looks like in text: the theme's hyperlink color (accent 1), as the PowerPoint export sets it.
     fn link_color(&self) -> egui::Color32 {
         color(self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255)))
     }
@@ -2959,6 +3271,36 @@ impl App {
     }
 
     /// Every selected object (primary plus shift-selected), in stacking order, all on one layer.
+    /// Put each selected picture and video back to the proportions of its file, keeping its width (and, unless it is turned, its
+    /// top-left corner; a turned one keeps its centre).
+    fn restore_aspect_ratio(&mut self) {
+        let Some(proj) = self.project.as_ref() else { return };
+        let sel = self.selection();
+        let fixes: Vec<(usize, usize, f32)> = sel.iter().filter_map(|&(li, oi)| {
+            let o = proj.slides.get(self.slide)?.layers.get(li)?.objects.get(oi)?;
+            let ratio = natural_ratio(proj, o)?;
+            ((o.w / o.h - ratio).abs() > 0.0005 && o.w > 0.0).then_some((li, oi, ratio))
+        }).collect();
+        if fixes.is_empty() {
+            self.status = if sel.iter().any(|&(li, oi)| self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| matches!(o.kind, Kind::Image | Kind::Video))) { "Already the original proportions, or they cannot be measured".into() } else { "Select a picture or video".into() };
+            return;
+        }
+        self.snapshot();
+        let slide = self.slide;
+        let n = fixes.len();
+        if let Some(p) = self.project.as_mut() {
+            for (li, oi, ratio) in fixes {
+                if let Some(o) = p.slides[slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+                    let nh = (o.w / ratio).max(4.0);
+                    if o.rotation != 0.0 { o.y += (o.h - nh) / 2.0; }
+                    o.h = nh;
+                }
+            }
+        }
+        self.dirty = true;
+        self.status = format!("Restored the original proportions of {n} {}", if n == 1 { "object" } else { "objects" });
+    }
+
     fn selection(&self) -> Vec<(usize, usize)> {
         let Some((li, oi)) = self.selected else { return vec![] };
         let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)) else { return vec![] };
@@ -3472,7 +3814,7 @@ impl App {
         let mut skip: Option<usize> = None;
         let mut pick: Option<usize> = None;
         let mut reset = false;
-        egui::Window::new("Focus Order").id(egui::Id::new("focus-order")).open(&mut open).collapsible(false).resizable(true).default_size([340.0, 360.0]).default_pos(ctx.content_rect().center() - egui::vec2(170.0, 180.0)).show(ctx, |ui| {
+        crate::tool_window(ctx, "focus-order", "Focus Order", [340.0, 360.0], &mut open, |ui| {
             ui.weak(format!("The order the Tab key and screen readers move through \"{title}\", first to last."));
             ui.add_space(4.0);
             let last = rows.len().saturating_sub(1);
@@ -3519,7 +3861,7 @@ impl App {
         if !self.variables_open { return; }
         if self.project.is_none() { self.variables_open = false; return; }
         let mut open = true;
-        egui::Window::new("Variables").id(egui::Id::new("project-variables")).open(&mut open).collapsible(false).resizable(true).default_size([420.0, 360.0]).default_pos(ctx.content_rect().center() - egui::vec2(210.0, 180.0)).show(ctx, |ui| {
+        crate::tool_window(ctx, "project-variables", "Variables", [420.0, 360.0], &mut open, |ui| {
             ui.weak("Variables belong to the whole project. Triggers read and change them.");
             ui.add_space(4.0);
             self.variables_panel(ui, ctx);
@@ -3937,6 +4279,142 @@ impl App {
         self.reset_visibility_keep();
     }
 
+    /// Draw a question or results slide the way the player lays it out (the editor canvas and the handouts both use this).
+    /// Returns where the picture of a Hotspot or Label question was drawn, so the editor can let the author draw areas on it.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_player_slide(&mut self, ctx: &egui::Context, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide: &Slide, label: bool, answers: bool) -> Option<egui::Rect> {
+        let size = egui::vec2(slide.width, slide.height) * scale;
+        let mut hot: Option<egui::Rect> = None;
+        let rect = egui::Rect::from_min_size(origin, size);
+        let qarea = match &slide.kind { SlideKind::Question(q) => q.area, _ => None };
+        if qarea.is_none() { painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(244, 246, 249)); }
+        // With its own area the question is laid out at the player's scaled size, from the area's top-left.
+        let qk = qarea.map(|a| (a.w / 1560.0).min(a.h / 860.0).clamp(0.3, 1.0)).unwrap_or(1.0);
+        let (origin, scale) = match qarea {
+            Some(a) => (origin + egui::vec2(a.x + 30.0, a.y + 24.0) * scale - egui::vec2(180.0, 110.0) * scale * qk, scale * qk),
+            None => (origin, scale),
+        };
+        let at = |x: f32, y: f32| origin + egui::vec2(x, y) * scale;
+        let txt = |painter: &egui::Painter, x: f32, y: f32, text: String, px: f32, weight: f32, col: egui::Color32, width: f32| -> f32 {
+            let fmt = egui::text::TextFormat {
+                font_id: egui::FontId::new((px * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())),
+                color: col,
+                coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
+                ..Default::default()
+            };
+            let mut job = egui::text::LayoutJob::single_section(text, fmt);
+            job.wrap.max_width = (width * scale).max(1.0);
+            let g = painter.layout_job(job);
+            let h = g.size().y / scale;
+            painter.galley(at(x, y), g, col);
+            h
+        };
+        let ink = egui::Color32::from_rgb(27, 42, 58);
+        let blue = egui::Color32::from_rgb(3, 83, 158);
+        let content_w = match qarea { Some(a) => (a.w - 60.0) / qk, None => slide.width - 360.0 };
+        match &slide.kind {
+            SlideKind::Question(q) => {
+                txt(&painter, 180.0, 110.0, "QUESTION 1 OF 1".into(), 30.0, 400.0, egui::Color32::from_rgb(91, 107, 126), content_w);
+                let ph = txt(&painter, 180.0, 164.0, q.prompt.clone(), 58.0, 700.0, ink, content_w);
+                let mut y = 164.0 + ph + 48.0;
+                // Non-choice styles: one row per input, in the player's look.
+                let rows: Vec<String> = match &q.style {
+                    QuestionStyle::TextEntry { .. } => vec!["Type your answer here".to_string()],
+                    QuestionStyle::Matching { pairs } => pairs.iter().map(|(l, _)| format!("{l}      [ Choose… ]")).collect(),
+                    QuestionStyle::Sequence { items } => { let mut shown: Vec<&String> = items.iter().collect(); if !answers { let by = 1.min(shown.len()); shown.rotate_left(by); } shown.iter().enumerate().map(|(i, t)| format!("{}.  {}", i + 1, t)).collect() }
+                    QuestionStyle::FillBlanks { text, .. } => vec![brainbend_doc::passage::with_gaps(text)],
+                    QuestionStyle::DragWords { text, distractors } => {
+                        let mut bank: Vec<String> = brainbend_doc::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
+                        bank.extend(distractors.iter().cloned());
+                        vec![brainbend_doc::passage::with_gaps(text), format!("Word bank:  {}", bank.join("   "))]
+                    }
+                    QuestionStyle::MarkWords { text } => vec![if answers { brainbend_doc::passage::answered(text) } else { brainbend_doc::passage::with_gaps(text) }],
+                    QuestionStyle::Numeric { .. } => vec!["Type a number".to_string()],
+                    QuestionStyle::Categorize { categories } => if answers { categories.iter().map(|(n, items)| format!("{n}:  {}", items.join(",  "))).collect() } else { let mut v: Vec<String> = categories.iter().map(|(n, _)| format!("{n}:")).collect(); v.push(format!("Items:  {}", categories.iter().flat_map(|(_, items)| items.iter().cloned()).collect::<Vec<_>>().join(",  "))); v },
+                    QuestionStyle::Hotspot { .. } | QuestionStyle::LabelPicture { .. } => vec![],
+                    QuestionStyle::Likert { statements, scale, .. } => statements.iter().map(|t| format!("{t}      {}", scale.iter().map(|_| "( )").collect::<Vec<_>>().join("  "))).collect(),
+                    QuestionStyle::Reflection { .. } => vec!["Type your answer here".to_string()],
+                    QuestionStyle::Dictation { .. } => vec!["[ play audio ]".to_string(), "Type what you hear".to_string()],
+                    QuestionStyle::Dropdowns { text } => vec![brainbend_doc::passage::parse(text).into_iter().map(|p| match p { brainbend_doc::passage::Part::Text(t) => t, brainbend_doc::passage::Part::Blank(_) => "[ Choose… ]".to_string() }).collect::<String>()],
+                    QuestionStyle::Choice => vec![],
+                };
+                for r in &rows {
+                    let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
+                    painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
+                    painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), egui::Color32::from_rgb(184, 196, 214)), egui::StrokeKind::Inside);
+                    txt(&painter, 180.0 + 34.0, y + 26.0, r.clone(), 40.0, 400.0, ink, content_w - 80.0);
+                    y += 122.0;
+                }
+                for c in &q.choices {
+                    let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
+                    painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
+                    let edge = if c.correct && answers { egui::Color32::from_rgb(30, 142, 62) } else { egui::Color32::from_rgb(184, 196, 214) };
+                    painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), edge), egui::StrokeKind::Inside);
+                    let mark = at(180.0 + 34.0 + 20.0, y + 50.0);
+                    if q.multiple {
+                        painter.rect_stroke(egui::Rect::from_center_size(mark, egui::Vec2::splat(40.0 * scale)), 6.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue), egui::StrokeKind::Inside);
+                    } else {
+                        painter.circle_stroke(mark, 20.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue));
+                    }
+                    if c.correct && answers {
+                        painter.circle_filled(mark, 9.0 * scale, egui::Color32::from_rgb(30, 142, 62));
+                    }
+                    txt(&painter, 180.0 + 34.0 + 40.0 + 28.0, y + 26.0, c.text.clone(), 40.0, 400.0, ink, content_w - 140.0);
+                    y += 122.0;
+                }
+                let picture: Option<(&Option<String>, Vec<(HotRegion, String)>)> = match &q.style {
+                    QuestionStyle::Hotspot { asset, regions, .. } => Some((asset, regions.iter().map(|r| (*r, String::new())).collect())),
+                    QuestionStyle::LabelPicture { asset, zones, .. } => Some((asset, zones.iter().map(|z| (z.region, z.label.clone())).collect())),
+                    _ => None,
+                };
+                if let Some((asset, regions)) = picture {
+                    // The picture, with its correct areas; dragging on it draws a new area.
+                    let tex = asset.as_ref().and_then(|k| self.texture(ctx, k));
+                    let room = egui::vec2(content_w, (slide.height - y - 190.0).clamp(160.0, 560.0));
+                    let img = match &tex {
+                        Some(t) => { let sz = t.size_vec2(); let k = (room.x / sz.x).min(room.y / sz.y); sz * k }
+                        None => egui::vec2(room.x.min(900.0), room.y.min(420.0)),
+                    };
+                    let rect = egui::Rect::from_min_size(at(180.0, y), img * scale);
+                    hot = Some(rect);
+                    match &tex {
+                        Some(t) => { painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); }
+                        None => {
+                            painter.rect_filled(rect, 8.0 * scale, egui::Color32::from_gray(225));
+                            painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Choose a picture in the panel on the right", egui::FontId::proportional((30.0 * scale).max(10.0)), egui::Color32::from_gray(90));
+                        }
+                    }
+                    let green = egui::Color32::from_rgb(30, 142, 62);
+                    let to_rect = |r: &HotRegion| egui::Rect::from_min_size(rect.min + egui::vec2(r.x, r.y) * rect.size(), egui::vec2(r.w, r.h) * rect.size());
+                    for (r, label) in regions.iter().filter(|_| answers) {
+                        let rr = to_rect(r);
+                        if !label.is_empty() { painter.text(rr.left_top() + egui::vec2(4.0, 2.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional((26.0 * scale).max(9.0)), green); }
+                        if r.ellipse {
+                            painter.add(egui::epaint::EllipseShape { center: rr.center(), radius: rr.size() / 2.0, fill: green.gamma_multiply(0.25), stroke: egui::Stroke::new(2.0, green), angle: 0.0 });
+                        } else {
+                            painter.rect(rr, 0.0, green.gamma_multiply(0.25), egui::Stroke::new(2.0, green), egui::StrokeKind::Inside);
+                        }
+                    }
+                    y += img.y + 24.0;
+                }
+                let b = egui::Rect::from_min_size(at(180.0, y + 8.0), egui::vec2(300.0, 90.0) * scale);
+                painter.rect_filled(b, 14.0 * scale, blue);
+                painter.text(b.center(), egui::Align2::CENTER_CENTER, "Submit", egui::FontId::new((38.0 * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())), egui::Color32::WHITE);
+            }
+            _ => {
+                txt(&painter, 180.0, 110.0, "Results".into(), 58.0, 700.0, ink, content_w);
+                txt(&painter, 180.0, 230.0, "86%".into(), 200.0, 800.0, blue, content_w);
+                txt(&painter, 180.0, 470.0, "6 of 7 points. Pass mark: 80%.".into(), 42.0, 400.0, ink, content_w);
+                txt(&painter, 180.0, 540.0, "You passed.".into(), 52.0, 700.0, egui::Color32::from_rgb(30, 142, 62), content_w);
+            }
+        }
+        if label {
+            painter.text(rect.right_bottom() - egui::vec2(12.0, 12.0), egui::Align2::RIGHT_BOTTOM,
+                "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
+        }
+        hot
+    }
+
     #[allow(clippy::too_many_arguments)]
     /// Paint the given layers of `slide` (the same drawing the canvas and the thumbnails use).
     fn paint_slide(&mut self, ctx: &egui::Context, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide: &Slide, shown: &[usize], selected: Option<(usize, usize)>) {
@@ -3970,7 +4448,7 @@ impl App {
         match bg {
             None => {}
             Some(Background::Solid(c)) => { painter.rect_filled(rect, 0.0, color(c)); }
-            Some(Background::Gradient { angle, stops }) => paint_gradient(painter, rect, angle, &stops),
+            Some(Background::Gradient { angle, stops, kind, geom }) => paint_gradient_kind(painter, rect, kind, angle, &stops, &geom),
             Some(Background::Image { asset }) => {
                 if let Some(t) = self.texture(ctx, &asset) {
                     // Cover: scale to fill, cropping the overflow evenly.
@@ -4149,12 +4627,13 @@ impl App {
                 if let Some(t) = &poster {
                     painter.image(t.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
-                if matches!(o.kind, Kind::Video) {
+                let (play_mark, name_label) = media_decor(self.paint_clean, matches!(o.kind, Kind::Video), poster.is_some());
+                if play_mark {
                     let d = (r.height().min(r.width()) * 0.16).clamp(10.0, 48.0);
                     let c = r.center();
                     painter.add(egui::Shape::convex_polygon(vec![c + egui::vec2(-d * 0.35, -d * 0.5), c + egui::vec2(-d * 0.35, d * 0.5), c + egui::vec2(d * 0.6, 0.0)], egui::Color32::from_white_alpha(if poster.is_some() { 190 } else { 150 }), egui::Stroke::NONE));
                 }
-                if poster.is_none() {
+                if name_label {
                     let label = format!("{}  {}", if matches!(o.kind, Kind::Video) { "VIDEO" } else { "AUDIO" }, o.name);
                     let at = if matches!(o.kind, Kind::Video) { r.center_bottom() - egui::vec2(0.0, 14.0 * scale.max(0.5)) } else { r.center() };
                     painter.text(at, if matches!(o.kind, Kind::Video) { egui::Align2::CENTER_BOTTOM } else { egui::Align2::CENTER_CENTER }, label, egui::FontId::proportional((20.0 * scale).clamp(11.0, 32.0)), egui::Color32::from_gray(210));
@@ -4736,18 +5215,7 @@ fn question_editor(ui: &mut egui::Ui, q: &mut Question, new_id: &mut dyn FnMut()
 }
 
 /// Layers shown when a slide starts: the base layer plus any a slide-start trigger shows.
-fn start_layers(slide: &Slide) -> Vec<usize> {
-    let mut out = vec![0];
-    for t in &slide.triggers {
-        if let (Event::SlideStart, Action::ShowLayer(id), Owner::Slide) = (&t.event, &t.action, &t.owner) {
-            if let Some(i) = slide.layers.iter().position(|l| &l.id == id) {
-                if !out.contains(&i) { out.push(i); }
-            }
-        }
-    }
-    out.sort_unstable();
-    out
-}
+fn start_layers(slide: &Slide) -> Vec<usize> { slide.start_layers() }
 
 fn effect_label(k: EffectKind) -> &'static str {
     match k {
@@ -4769,38 +5237,11 @@ fn effect_label(k: EffectKind) -> &'static str {
     }
 }
 
-/// Entrance/exit effect: none or a kind plus a duration (and a delay for entrances).
-fn effect_picker(ui: &mut egui::Ui, salt: &str, effect: &mut Option<Entrance>, with_delay: bool) -> bool {
-    let mut changed = false;
-    const ALL: [EffectKind; 15] = [
-        EffectKind::Fade, EffectKind::SlideLeft, EffectKind::SlideRight, EffectKind::SlideUp, EffectKind::SlideDown, EffectKind::Zoom, EffectKind::Wipe,
-        EffectKind::SpinQuarter, EffectKind::SpinHalf, EffectKind::SpinFull, EffectKind::Wheel,
-        EffectKind::SplitVerticalOut, EffectKind::SplitVerticalIn, EffectKind::SplitHorizontalOut, EffectKind::SplitHorizontalIn,
-    ];
-    ui.horizontal(|ui| {
-        ui.label(salt);
-        let text = effect.map(|e| effect_label(e.kind)).unwrap_or("none");
-        combo(("effect", salt)).selected_text(text).show_ui(ui, |ui| {
-            if ui.selectable_label(effect.is_none(), "none").clicked() { *effect = None; changed = true; }
-            for k in ALL {
-                if ui.selectable_label(effect.map(|e| e.kind) == Some(k), effect_label(k)).clicked() {
-                    let prev = *effect;
-                    *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) });
-                    changed = true;
-                }
-            }
-        });
-        if let Some(en) = effect.as_mut() {
-            if with_delay {
-                ui.label("delay");
-                changed |= ui.add(egui::DragValue::new(&mut en.delay_ms).range(0..=20000).speed(10.0).suffix(" ms")).changed();
-            }
-            ui.label("for");
-            changed |= ui.add(egui::DragValue::new(&mut en.duration_ms).range(50..=10000).speed(10.0).suffix(" ms")).changed();
-        }
-    });
-    changed
-}
+pub(crate) const EFFECT_KINDS: [EffectKind; 15] = [
+    EffectKind::Fade, EffectKind::SlideLeft, EffectKind::SlideRight, EffectKind::SlideUp, EffectKind::SlideDown, EffectKind::Zoom, EffectKind::Wipe,
+    EffectKind::SpinQuarter, EffectKind::SpinHalf, EffectKind::SpinFull, EffectKind::Wheel,
+    EffectKind::SplitVerticalOut, EffectKind::SplitVerticalIn, EffectKind::SplitHorizontalOut, EffectKind::SplitHorizontalIn,
+];
 
 fn owner_eq(a: &Owner, b: &Owner) -> bool {
     match (a, b) {
@@ -4855,7 +5296,7 @@ fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash + std::fmt::Debug, current
     changed
 }
 
-/// A colour button for an optional colour (with a "none" tick). Returns true when it changed.
+/// A color button for an optional color (with a "none" tick). Returns true when it changed.
 fn value_editor(ui: &mut egui::Ui, v: &mut Value) -> bool {
     match v {
         Value::Bool(b) => ui.checkbox(b, if *b { "true" } else { "false" }).changed(),
@@ -5381,6 +5822,7 @@ impl App {
     /// One frame of the whole UI (separate from `eframe::App::ui` so tests can drive it).
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
+        app_has_focus(egui::ViewportId::ROOT, root.input(|i| i.viewport().focused.unwrap_or(false)));
         // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
         font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
@@ -5478,19 +5920,13 @@ impl App {
         self.focus_order_window(ctx);
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
+        self.background_window(ctx);
+        self.theme_fonts_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
-        // A .story/.brainbend dropped onto the window opens like File ▸ Open.
-        let dropped = ctx.input(|i| i.raw.dropped_files.iter().next().map(|f| f.path().to_path_buf()));
-        if let Some(path) = dropped {
-            let ok = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("story") || e.eq_ignore_ascii_case("brainbend") || e.eq_ignore_ascii_case("storyapp") || e.eq_ignore_ascii_case("pptx"));
-            if ok {
-                self.drop_path = Some(path);
-                self.guard(Pending::OpenDropped);
-            } else {
-                self.status = "Only .brainbend, .story and .pptx files can be opened".into();
-            }
-        }
+        // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
+        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        if !dropped.is_empty() { self.handle_dropped(dropped); }
 
         // Window title, close guard, autosave.
         {
@@ -5518,7 +5954,7 @@ impl App {
             let mut change: Option<(brainbend_spell::Misspelling, String)> = None;
             let mut add: Option<String> = None;
             let mut ignore: Option<String> = None;
-            egui::Window::new("Spelling").open(&mut open).default_width(460.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "spelling", "Spelling", [460.0, 440.0], &mut open, |ui| {
                 if found.is_empty() {
                     ui.label("No misspelled words found.");
                 } else {
@@ -5582,7 +6018,7 @@ impl App {
             let web = self.project.as_ref().unwrap().is_web();
             let mut st = self.find.take().unwrap();
             let hits = self.project.as_ref().unwrap().find_text(&st.query, st.opts);
-            egui::Window::new("Find and Replace").open(&mut open).default_width(420.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "find-replace", "Find and Replace", [420.0, 320.0], &mut open, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Find     ");
                     let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(f32::INFINITY));
@@ -5646,7 +6082,7 @@ impl App {
             let mut open = true;
             let mut jump: Option<brainbend_doc::check::Location> = None;
             let web_check = self.project.as_ref().is_some_and(|p| p.is_web());
-            egui::Window::new("Project check").open(&mut open).default_width(520.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "project-check", "Project check", [520.0, 440.0], &mut open, |ui| {
                 if issues.is_empty() {
                     ui.label("No problems found.");
                 } else {
@@ -5706,7 +6142,10 @@ impl App {
             }
         }
         self.update_window(ctx);
+        self.video_support_window(ctx);
         self.publish_window(ctx);
+        self.word_export_frame(ctx);
+        self.video_export_frame(ctx);
         self.fonts_window(ctx);
         if self.updater.restarting { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
         if self.recovery_offer {
@@ -5835,8 +6274,9 @@ impl App {
 
         if !self.export_report.is_empty() {
             let mut close = false;
-            egui::Window::new("PowerPoint export").collapsible(false).resizable(true).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).default_width(460.0).show(ctx, |ui| {
-                ui.label("The file was saved. These things have no PowerPoint equivalent and were left out or simplified:");
+            let video = self.export_report_for == "Video";
+            egui::Window::new(format!("{} export", self.export_report_for)).collapsible(false).resizable(true).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).default_width(460.0).show(ctx, |ui| {
+                ui.label(if video { "The video was saved. These things are not in it, or are not as they are in the lesson:" } else { "The file was saved. These things have no PowerPoint equivalent and were left out or simplified:" });
                 ui.add_space(4.0);
                 for n in &self.export_report { ui.label(format!("• {n}")); }
                 ui.add_space(6.0);
@@ -5852,6 +6292,7 @@ impl App {
         let mut want_equation: Option<(usize, usize)> = None;
         let mut want_pano: Option<(usize, usize)> = None;
         let mut want_thumb: Option<(usize, usize)> = None;
+        let mut restore_ratio = false;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
         egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
@@ -5917,6 +6358,10 @@ impl App {
                     ui.label("Name");
                     changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
                 });
+                // The master's and layout's shapes only exist for a slide that uses a layout.
+                if proj.slides[slide_idx].layout.is_some() {
+                    changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
+                }
                 let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
                 match &mut proj.slides[slide_idx].kind {
                     SlideKind::Question(q) => {
@@ -6056,7 +6501,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label("Read as");
                     combo("text-role").selected_text(obj.role.label()).show_ui(ui, |ui| {
-                        for r in TextRole::ALL {
+                        for r in TextRole::CHOICES {
                             changed |= ui.selectable_value(&mut obj.role, r, r.label()).changed();
                         }
                     }).response.on_hover_text("What screen readers announce this text as: a heading (a Heading 1 is the page's main heading) or ordinary text");
@@ -6092,7 +6537,7 @@ impl App {
                     if ui.button("Edit equation…").clicked() { want_equation = Some((li, oi)); }
                 });
                 ui.label(egui::RichText::new(&e.latex).monospace().size(12.0).weak());
-                ui.weak("Its colour is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
+                ui.weak("Its color is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
             }
             if let Some(m) = obj.marker.as_mut() {
                 ui.horizontal(|ui| {
@@ -6166,6 +6611,11 @@ impl App {
                         changed |= ui.add(egui::DragValue::new(v).speed(1.0)).changed();
                         ui.end_row();
                     }
+                    if matches!(obj.kind, Kind::Image | Kind::Video) {
+                        ui.label("");
+                        if ui.button("Restore aspect ratio").on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { restore_ratio = true; }
+                        ui.end_row();
+                    }
                     ui.label("Rotation");
                     changed |= ui.add(egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
                     ui.end_row();
@@ -6223,6 +6673,7 @@ impl App {
         });
 
         if open_states { self.bottom_tab = 2; }
+        if restore_ratio { self.restore_aspect_ratio(); }
         if let Some((li, oi)) = want_thumb {
             if let Some((key, _, _, _)) = self.load_image_asset() {
                 self.snapshot();
@@ -6241,7 +6692,14 @@ impl App {
                     let still = video.and_then(|k| self.project.as_ref().and_then(|p| p.assets.get(&k))).and_then(|v| brainbend_import_legacy::still_asset_at(v, secs));
                     match still {
                         Some(a) => { let k = self.new_id("asset"); self.project.as_mut().map(|p| p.assets.insert(k.clone(), a)); Some(k) }
-                        None => { self.status = "Could not make a frame at that time. Studio needs ffmpeg for this, and the time must be inside the video. You can also choose a picture.".into(); None }
+                        None => {
+                            self.status = if self.video_support.request("make a picture from a frame of the video", true) {
+                                "Studio needs video support to make a frame. Download it, then try again. You can also choose a picture.".into()
+                            } else {
+                                "Could not make a frame at that time. The time must be inside the video. You can also choose a picture.".into()
+                            };
+                            None
+                        }
                     }
                 }
             };
@@ -6314,155 +6772,35 @@ impl App {
 
             if !matches!(slide.kind, SlideKind::Normal) {
                 // Question and results slides are drawn by the player; this mirrors its layout.
-                let rect = egui::Rect::from_min_size(origin, size);
+                let hot = self.paint_player_slide(ctx, &painter, origin, scale, &slide, true, true);
                 let qarea = match &slide.kind { SlideKind::Question(q) => q.area, _ => None };
-                if qarea.is_none() { painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(244, 246, 249)); }
-                // With its own area the question is laid out at the player's scaled size, from the area's top-left.
-                let qk = qarea.map(|a| (a.w / 1560.0).min(a.h / 860.0).clamp(0.3, 1.0)).unwrap_or(1.0);
                 let area_screen = qarea.map(|a| egui::Rect::from_min_size(origin + egui::vec2(a.x, a.y) * scale, egui::vec2(a.w, a.h) * scale));
                 let slide_scale = scale;
-                let (origin, scale) = match qarea {
-                    Some(a) => (origin + egui::vec2(a.x + 30.0, a.y + 24.0) * scale - egui::vec2(180.0, 110.0) * scale * qk, scale * qk),
-                    None => (origin, scale),
-                };
-                let at = |x: f32, y: f32| origin + egui::vec2(x, y) * scale;
-                let txt = |painter: &egui::Painter, x: f32, y: f32, text: String, px: f32, weight: f32, col: egui::Color32, width: f32| -> f32 {
-                    let fmt = egui::text::TextFormat {
-                        font_id: egui::FontId::new((px * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())),
-                        color: col,
-                        coords: egui::epaint::text::VariationCoords::new([(b"wght", weight)]),
-                        ..Default::default()
-                    };
-                    let mut job = egui::text::LayoutJob::single_section(text, fmt);
-                    job.wrap.max_width = (width * scale).max(1.0);
-                    let g = painter.layout_job(job);
-                    let h = g.size().y / scale;
-                    painter.galley(at(x, y), g, col);
-                    h
-                };
-                let ink = egui::Color32::from_rgb(27, 42, 58);
-                let blue = egui::Color32::from_rgb(3, 83, 158);
-                let content_w = match qarea { Some(a) => (a.w - 60.0) / qk, None => slide.width - 360.0 };
-                match &slide.kind {
-                    SlideKind::Question(q) => {
-                        txt(&painter, 180.0, 110.0, "QUESTION 1 OF 1".into(), 30.0, 400.0, egui::Color32::from_rgb(91, 107, 126), content_w);
-                        let ph = txt(&painter, 180.0, 164.0, q.prompt.clone(), 58.0, 700.0, ink, content_w);
-                        let mut y = 164.0 + ph + 48.0;
-                        // Non-choice styles: one row per input, in the player's look.
-                        let rows: Vec<String> = match &q.style {
-                            QuestionStyle::TextEntry { .. } => vec!["Type your answer here".to_string()],
-                            QuestionStyle::Matching { pairs } => pairs.iter().map(|(l, _)| format!("{l}      [ Choose… ]")).collect(),
-                            QuestionStyle::Sequence { items } => items.iter().enumerate().map(|(i, t)| format!("{}.  {}", i + 1, t)).collect(),
-                            QuestionStyle::FillBlanks { text, .. } => vec![brainbend_doc::passage::with_gaps(text)],
-                            QuestionStyle::DragWords { text, distractors } => {
-                                let mut bank: Vec<String> = brainbend_doc::passage::blanks(text).into_iter().map(|a| a[0].clone()).collect();
-                                bank.extend(distractors.iter().cloned());
-                                vec![brainbend_doc::passage::with_gaps(text), format!("Word bank:  {}", bank.join("   "))]
-                            }
-                            QuestionStyle::MarkWords { text } => vec![brainbend_doc::passage::answered(text)],
-                            QuestionStyle::Numeric { .. } => vec!["Type a number".to_string()],
-                            QuestionStyle::Categorize { categories } => categories.iter().map(|(n, items)| format!("{n}:  {}", items.join(",  "))).collect(),
-                            QuestionStyle::Hotspot { .. } | QuestionStyle::LabelPicture { .. } => vec![],
-                            QuestionStyle::Likert { statements, scale, .. } => statements.iter().map(|t| format!("{t}      {}", scale.iter().map(|_| "( )").collect::<Vec<_>>().join("  "))).collect(),
-                            QuestionStyle::Reflection { .. } => vec!["Type your answer here".to_string()],
-                            QuestionStyle::Dictation { .. } => vec!["[ play audio ]".to_string(), "Type what you hear".to_string()],
-                            QuestionStyle::Dropdowns { text } => vec![brainbend_doc::passage::parse(text).into_iter().map(|p| match p { brainbend_doc::passage::Part::Text(t) => t, brainbend_doc::passage::Part::Blank(_) => "[ Choose… ]".to_string() }).collect::<String>()],
-                            QuestionStyle::Choice => vec![],
-                        };
-                        for r in &rows {
-                            let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
-                            painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
-                            painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), egui::Color32::from_rgb(184, 196, 214)), egui::StrokeKind::Inside);
-                            txt(&painter, 180.0 + 34.0, y + 26.0, r.clone(), 40.0, 400.0, ink, content_w - 80.0);
-                            y += 122.0;
+                if let Some(rect) = hot {
+                        let frac = |pos: egui::Pos2| { let d = (pos - rect.min) / rect.size(); (d.x.clamp(0.0, 1.0), d.y.clamp(0.0, 1.0)) };
+                        if resp.drag_started() {
+                            if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.hot_drag = Some((frac(pos), frac(pos))); }
                         }
-                        for c in &q.choices {
-                            let row = egui::Rect::from_min_size(at(180.0, y), egui::vec2(content_w, 100.0) * scale);
-                            painter.rect_filled(row, 16.0 * scale, egui::Color32::WHITE);
-                            let edge = if c.correct { egui::Color32::from_rgb(30, 142, 62) } else { egui::Color32::from_rgb(184, 196, 214) };
-                            painter.rect_stroke(row, 16.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), edge), egui::StrokeKind::Inside);
-                            let mark = at(180.0 + 34.0 + 20.0, y + 50.0);
-                            if q.multiple {
-                                painter.rect_stroke(egui::Rect::from_center_size(mark, egui::Vec2::splat(40.0 * scale)), 6.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue), egui::StrokeKind::Inside);
-                            } else {
-                                painter.circle_stroke(mark, 20.0 * scale, egui::Stroke::new((3.0 * scale).max(1.0), blue));
-                            }
-                            if c.correct {
-                                painter.circle_filled(mark, 9.0 * scale, egui::Color32::from_rgb(30, 142, 62));
-                            }
-                            txt(&painter, 180.0 + 34.0 + 40.0 + 28.0, y + 26.0, c.text.clone(), 40.0, 400.0, ink, content_w - 140.0);
-                            y += 122.0;
-                        }
-                        let picture: Option<(&Option<String>, Vec<(HotRegion, String)>)> = match &q.style {
-                            QuestionStyle::Hotspot { asset, regions, .. } => Some((asset, regions.iter().map(|r| (*r, String::new())).collect())),
-                            QuestionStyle::LabelPicture { asset, zones, .. } => Some((asset, zones.iter().map(|z| (z.region, z.label.clone())).collect())),
-                            _ => None,
-                        };
-                        if let Some((asset, regions)) = picture {
-                            // The picture, with its correct areas; dragging on it draws a new area.
-                            let tex = asset.as_ref().and_then(|k| self.texture(ctx, k));
-                            let room = egui::vec2(content_w, (slide.height - y - 190.0).clamp(160.0, 560.0));
-                            let img = match &tex {
-                                Some(t) => { let sz = t.size_vec2(); let k = (room.x / sz.x).min(room.y / sz.y); sz * k }
-                                None => egui::vec2(room.x.min(900.0), room.y.min(420.0)),
-                            };
-                            let rect = egui::Rect::from_min_size(at(180.0, y), img * scale);
-                            match &tex {
-                                Some(t) => { painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE); }
-                                None => {
-                                    painter.rect_filled(rect, 8.0 * scale, egui::Color32::from_gray(225));
-                                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, "Choose a picture in the panel on the right", egui::FontId::proportional((30.0 * scale).max(10.0)), egui::Color32::from_gray(90));
-                                }
-                            }
-                            let green = egui::Color32::from_rgb(30, 142, 62);
-                            let to_rect = |r: &HotRegion| egui::Rect::from_min_size(rect.min + egui::vec2(r.x, r.y) * rect.size(), egui::vec2(r.w, r.h) * rect.size());
-                            for (r, label) in &regions {
-                                let rr = to_rect(r);
-                                if !label.is_empty() { painter.text(rr.left_top() + egui::vec2(4.0, 2.0), egui::Align2::LEFT_TOP, label, egui::FontId::proportional((26.0 * scale).max(9.0)), green); }
-                                if r.ellipse {
-                                    painter.add(egui::epaint::EllipseShape { center: rr.center(), radius: rr.size() / 2.0, fill: green.gamma_multiply(0.25), stroke: egui::Stroke::new(2.0, green), angle: 0.0 });
-                                } else {
-                                    painter.rect(rr, 0.0, green.gamma_multiply(0.25), egui::Stroke::new(2.0, green), egui::StrokeKind::Inside);
-                                }
-                            }
-                            let frac = |pos: egui::Pos2| { let d = (pos - rect.min) / rect.size(); (d.x.clamp(0.0, 1.0), d.y.clamp(0.0, 1.0)) };
-                            if resp.drag_started() {
-                                if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.hot_drag = Some((frac(pos), frac(pos))); }
-                            }
-                            if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
-                            if let Some((a, b)) = self.hot_drag {
-                                let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
-                                painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
-                                if resp.drag_stopped() || !resp.dragged() {
-                                    self.hot_drag = None;
-                                    let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
-                                    if x1 - x0 >= 0.02 && y1 - y0 >= 0.02 {
-                                        self.snapshot();
-                                        let region = HotRegion { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ellipse: false };
-                                        match self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) {
-                                            Some(SlideKind::Question(Question { style: QuestionStyle::Hotspot { regions, .. }, .. })) => regions.push(region),
-                                            Some(SlideKind::Question(Question { style: QuestionStyle::LabelPicture { zones, .. }, .. })) => { let n = zones.len() + 1; zones.push(LabelZone { region, label: format!("Label {n}") }); }
-                                            _ => {}
-                                        }
-                                        self.dirty = true;
+                        if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
+                        if let Some((a, b)) = self.hot_drag {
+                            let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
+                            painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
+                            if resp.drag_stopped() || !resp.dragged() {
+                                self.hot_drag = None;
+                                let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
+                                if x1 - x0 >= 0.02 && y1 - y0 >= 0.02 {
+                                    self.snapshot();
+                                    let region = HotRegion { x: x0, y: y0, w: x1 - x0, h: y1 - y0, ellipse: false };
+                                    match self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) {
+                                        Some(SlideKind::Question(Question { style: QuestionStyle::Hotspot { regions, .. }, .. })) => regions.push(region),
+                                        Some(SlideKind::Question(Question { style: QuestionStyle::LabelPicture { zones, .. }, .. })) => { let n = zones.len() + 1; zones.push(LabelZone { region, label: format!("Label {n}") }); }
+                                        _ => {}
                                     }
+                                    self.dirty = true;
                                 }
                             }
-                            y += img.y + 24.0;
                         }
-                        let b = egui::Rect::from_min_size(at(180.0, y + 8.0), egui::vec2(300.0, 90.0) * scale);
-                        painter.rect_filled(b, 14.0 * scale, blue);
-                        painter.text(b.center(), egui::Align2::CENTER_CENTER, "Submit", egui::FontId::new((38.0 * scale).max(1.0), egui::FontFamily::Name("Open Sans".into())), egui::Color32::WHITE);
-                    }
-                    _ => {
-                        txt(&painter, 180.0, 110.0, "Results".into(), 58.0, 700.0, ink, content_w);
-                        txt(&painter, 180.0, 230.0, "86%".into(), 200.0, 800.0, blue, content_w);
-                        txt(&painter, 180.0, 470.0, "6 of 7 points. Pass mark: 80%.".into(), 42.0, 400.0, ink, content_w);
-                        txt(&painter, 180.0, 540.0, "You passed.".into(), 52.0, 700.0, egui::Color32::from_rgb(30, 142, 62), content_w);
-                    }
                 }
-                painter.text(rect.right_bottom() - egui::vec2(12.0, 12.0), egui::Align2::RIGHT_BOTTOM,
-                    "preview (sample score) - drawn by the player", egui::FontId::proportional(13.0), egui::Color32::GRAY);
                 // The question's own area: a frame with a grip to move it and handles on its edges and corners to resize it.
                 if let (Some(sr), false) = (area_screen, self.try_mode) {
                     let accent = ribbon::ACCENT;
@@ -6602,6 +6940,7 @@ impl App {
                 self.paint_slide(ctx, &painter, origin, scale, &slide, &shown, if try_on { None } else { self.selected });
             }
 
+            if !try_on { self.background_handles(ui, &painter, origin, scale, slide_idx); }
             if try_on {
                 // Nothing is selected, moved or saved while trying.
                 let strip = egui::Rect::from_min_size(area.left_top(), egui::vec2(area.width(), 40.0));
@@ -7098,8 +7437,11 @@ impl App {
                                 // Drag in the object's own frame, keeping the opposite edge where it is.
                                 let a = o.rotation.to_radians();
                                 let (ldx, ldy) = (d.x * a.cos() + d.y * a.sin(), -d.x * a.sin() + d.y * a.cos());
-                                let (el, er) = (if hx < 0 { ldx } else { 0.0 }, if hx > 0 { ldx } else { 0.0 });
-                                let (et, eb) = (if hy < 0 { ldy } else { 0.0 }, if hy > 0 { ldy } else { 0.0 });
+                                let (mut gx, mut gy) = (hx as f32 * ldx, hy as f32 * ldy);
+                                if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (hx, hy), (gx, gy), 4.0); }
+                                // A side that was not dragged only grows (with Shift), evenly at both ends.
+                                let (el, er) = if hx < 0 { (-gx, 0.0) } else if hx > 0 { (0.0, gx) } else { (-gx / 2.0, gx / 2.0) };
+                                let (et, eb) = if hy < 0 { (-gy, 0.0) } else if hy > 0 { (0.0, gy) } else { (-gy / 2.0, gy / 2.0) };
                                 let (nw, nh) = ((o.w - el + er).max(4.0), (o.h - et + eb).max(4.0));
                                 let shift = egui::vec2((el + er) / 2.0, (et + eb) / 2.0);
                                 let world = egui::vec2(shift.x * a.cos() - shift.y * a.sin(), shift.x * a.sin() + shift.y * a.cos());
@@ -7108,8 +7450,12 @@ impl App {
                                 (o.x, o.y) = (cxn - nw / 2.0, cyn - nh / 2.0);
                             }
                             DragMode::Resize(hx, hy) => {
-                                if hx < 0 { o.x += d.x; o.w -= d.x; } else if hx > 0 { o.w += d.x; }
-                                if hy < 0 { o.y += d.y; o.h -= d.y; } else if hy > 0 { o.h += d.y; }
+                                // Shift keeps the object's proportions: a corner leaves the opposite corner where it is, and a side
+                                // handle leaves the opposite side, the other sides growing about the middle.
+                                let (mut gx, mut gy) = (hx as f32 * d.x, hy as f32 * d.y);
+                                if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(o.w, o.h, (hx, hy), (gx, gy), 4.0); }
+                                if hx < 0 { o.x -= gx; o.w += gx; } else if hx > 0 { o.w += gx; } else { o.x -= gx / 2.0; o.w += gx; }
+                                if hy < 0 { o.y -= gy; o.h += gy; } else if hy > 0 { o.h += gy; } else { o.y -= gy / 2.0; o.h += gy; }
                                 if o.w < 4.0 { if hx < 0 { o.x -= 4.0 - o.w; } o.w = 4.0; }
                                 if o.h < 4.0 { if hy < 0 { o.y -= 4.0 - o.h; } o.h = 4.0; }
                             }
@@ -7126,8 +7472,10 @@ impl App {
                         for &k in &members { let o = &objs[k]; x0 = x0.min(o.x); y0 = y0.min(o.y); x1 = x1.max(o.x + o.w); y1 = y1.max(o.y + o.h); }
                         let (ow, oh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
                         let (mut nx0, mut ny0, mut nx1, mut ny1) = (x0, y0, x1, y1);
-                        if hx < 0 { nx0 += d.x; } else if hx > 0 { nx1 += d.x; }
-                        if hy < 0 { ny0 += d.y; } else if hy > 0 { ny1 += d.y; }
+                        let (mut gx, mut gy) = (hx as f32 * d.x, hy as f32 * d.y);
+                        if ctx.input(|i| i.modifiers.shift) { (gx, gy) = keep_proportions(ow, oh, (hx, hy), (gx, gy), 8.0); }
+                        if hx < 0 { nx0 -= gx; } else if hx > 0 { nx1 += gx; } else { nx0 -= gx / 2.0; nx1 += gx / 2.0; }
+                        if hy < 0 { ny0 -= gy; } else if hy > 0 { ny1 += gy; } else { ny0 -= gy / 2.0; ny1 += gy / 2.0; }
                         if nx1 - nx0 >= 8.0 && ny1 - ny0 >= 8.0 {
                             let (kx, ky) = ((nx1 - nx0) / ow, (ny1 - ny0) / oh);
                             for &k in &members {
@@ -7398,6 +7746,10 @@ impl App {
 }
 
 /// A project name made safe to use as a file or folder name on any system.
+/// What the editor adds to a video or audio object besides its picture: a play mark on a video, and the object's name when
+/// there is no picture. A picture of the slide for a video (`clean`) has neither, as they are for the editor's eyes.
+fn media_decor(clean: bool, video: bool, has_picture: bool) -> (bool, bool) { (video && !clean, !has_picture && !clean) }
+
 pub(crate) fn file_safe_name(name: &str) -> String {
     let cleaned: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
     let cleaned = cleaned.trim().trim_matches('.').trim();
@@ -7474,7 +7826,7 @@ mod tests {
         a.new_project();
         let mut h = harness(a);
         h.run_steps(4);
-        for tab in [ribbon::HOME_TAB, 2, 3, 4, 5, ribbon::HELP_TAB] {
+        for tab in [ribbon::HOME_TAB, ribbon::THEME_TAB, ribbon::SLIDES_TAB, ribbon::OBJECTS_TAB, ribbon::ANIMATIONS_TAB, ribbon::REVIEW_TAB, ribbon::HELP_TAB] {
             h.state_mut().ribbon_tab = tab;
             h.run_steps(3);
             for label in ["Try It", "Preview", "Publish"] {
@@ -7603,6 +7955,74 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("help-tab.png")).unwrap();
         }
+    }
+
+    #[test]
+    fn check_for_updates_opens_a_window_with_what_it_found_but_the_launch_check_stays_quiet() {
+        use egui_kittest::kittest::Queryable;
+        let release = update::parse_release(r#"{"tag_name":"v9.9.9","html_url":"https://example.com/r","body":"New","assets":[]}"#).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The check at launch is not asked for, so a result opens nothing.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        tx.send(Ok(None)).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("You have the latest version.").is_none(), "no window after the check at launch");
+        // Asked for, and up to date.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Ok(None)).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("You have the latest version.").is_some(), "the window says so");
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("You have the latest version.").is_none(), "OK closes it");
+        // Asked for, and the check failed.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Err("no connection".into())).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("Could not check for updates").is_some());
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        // Asked for, and there is an update: the update window opens.
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.state_mut().updater.state = update::State::Checking(rx);
+        h.state_mut().updater.manual = true;
+        tx.send(Ok(Some(release))).unwrap();
+        h.run_steps(3);
+        assert!(h.state().updater.dialog_open && !h.state().updater.notice_open, "the update window opens, not the notice");
+    }
+
+    #[test]
+    fn video_support_asks_before_downloading_and_not_now_is_remembered() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("Not now").is_none(), "nothing asks until a feature needs the program");
+        h.state_mut().video_support.phase = video_support::Phase::Asking;
+        h.state_mut().video_support.why = "make a picture of the video".into();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Studio needs a video program to make a picture of the video").is_some(), "it says what for");
+        assert!(h.query_by_label("Download").is_some() && h.query_by_label("Not now").is_some());
+        h.get_by_label("Not now").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Not now").is_none(), "Not now closes it");
+        assert!(h.state().video_support.declined, "and an import does not ask again this run");
+        // A failed download offers another try.
+        h.state_mut().video_support.phase = video_support::Phase::Failed("no connection".into());
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("no connection").is_some());
+        assert!(h.query_by_label("Try again").is_some());
+        h.get_by_label("Not now").click();
+        h.run_steps(2);
     }
 
     #[test]
@@ -7948,7 +8368,7 @@ mod tests {
         h.ctx.set_theme(egui::ThemePreference::Light);
         h.run_steps(3);
         shot(&mut h, "5j-light-home.png");
-        h.state_mut().ribbon_tab = 2;
+        h.state_mut().ribbon_tab = ribbon::OBJECTS_TAB;
         shot(&mut h, "5k-light-insert.png");
         h.state_mut().ribbon_tab = 1;
         h.ctx.set_theme(egui::ThemePreference::Dark);
@@ -8005,7 +8425,7 @@ mod tests {
                 Err(_) => (0..n.min(4)).collect(),
             };
             if let Ok(v) = std::env::var("BRAINBEND_MASTER") {
-                // Slide Master view on layout number `v` (1-based), instead of the slides.
+                // Layout Builder view on layout number `v` (1-based), instead of the slides.
                 h.state_mut().enter_master_view();
                 h.state_mut().slide = v.parse().unwrap_or(1);
                 h.run_steps(3);
@@ -8217,7 +8637,7 @@ mod tests {
         let solid = ribbon::quick_look(2, theme[4], &theme);
         assert_eq!((solid.fill, solid.stroke, solid.text), (theme[4], None, white), "white on a dark accent");
         let pale = ribbon::quick_look(2, Rgba(250, 230, 120, 255), &theme);
-        assert_eq!(pale.text, theme[0], "dark text on a light colour");
+        assert_eq!(pale.text, theme[0], "dark text on a light color");
         assert!(ribbon::quick_look(3, theme[5], &theme).shadow.is_some());
         let mut a = App::default();
         a.new_project();
@@ -8315,7 +8735,7 @@ mod tests {
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("icons-on-slide.png")).unwrap();
-            h.state_mut().ribbon_tab = 2;
+            h.state_mut().ribbon_tab = ribbon::OBJECTS_TAB;
             h.run_steps(2);
             { use egui_kittest::kittest::Queryable; h.get_by_label("Icons").click(); }
             h.run_steps(4);
@@ -8377,7 +8797,7 @@ mod tests {
         for style in [DialStyle::Teardrop, DialStyle::Dot, DialStyle::Needle] { a.insert_dial(style); }
         for (i, o) in a.project.as_mut().unwrap().slides[0].layers[0].objects.iter_mut().enumerate() { o.x = 120.0 + (i / 2) as f32 * 420.0; o.y = 260.0; }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("dials-on-slide.png")).unwrap();
@@ -8468,7 +8888,7 @@ mod tests {
             for (i, o) in objs.iter_mut().enumerate().skip(1) { o.x = 60.0 + ((i - 1) % 4) as f32 * 180.0; o.y = 60.0 + ((i - 1) / 4) as f32 * 170.0; }
         }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("markers-on-slide.png")).unwrap();
@@ -8513,7 +8933,7 @@ mod tests {
                 for (i, o) in objs.iter_mut().enumerate() { o.w = 400.0; o.h = 240.0; o.x = 40.0 + (i % 4) as f32 * 450.0; o.y = 40.0 + (i / 4) as f32 * 300.0; o.margins[3] = if i % 2 == 0 { 12.0 + 0.26 * 240.0 } else { 12.0 }; }
             }
             a.selected = None;
-            a.ribbon_tab = 2;
+            a.ribbon_tab = ribbon::OBJECTS_TAB;
             let mut h = harness(a);
             h.run_steps(4);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("captions-on-slide.png")).unwrap();
@@ -8539,7 +8959,7 @@ mod tests {
             for (i, o) in objs.iter_mut().enumerate() { o.x = 100.0; o.y = 100.0 + i as f32 * 150.0; if i == 2 { o.initial_state = "Selected".into(); } if i == 0 { o.initial_state = "Selected".into(); } }
         }
         a.selected = None;
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("inputs-on-slide.png")).unwrap();
@@ -8561,7 +8981,7 @@ mod tests {
     }
 
     #[test]
-    fn linked_text_is_drawn_in_the_link_colour_underlined() {
+    fn linked_text_is_drawn_in_the_link_color_underlined() {
         use brainbend_doc::richtext::Attr;
         let mut a = App::default();
         a.new_project();
@@ -8574,8 +8994,8 @@ mod tests {
         let job = text_job(&o, 1.0, 500.0, blue);
         assert_eq!(job.sections[0].format.color, blue);
         assert_ne!(job.sections[0].format.underline, egui::Stroke::NONE);
-        assert_ne!(job.sections.last().unwrap().format.color, blue, "unlinked text keeps its colour");
-        // The author's own colour and underline on a link win, even when they equal the object's style.
+        assert_ne!(job.sections.last().unwrap().format.color, blue, "unlinked text keeps its color");
+        // The author's own color and underline on a link win, even when they equal the object's style.
         o.format_range(0, 2, &Attr::Color(o.style.color));
         o.format_range(0, 2, &Attr::ToggleUnderline);
         let job = text_job(&o, 1.0, 500.0, blue);
@@ -8727,7 +9147,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("pano-edit.png")).unwrap();
         }
-        h.get_by_label("Save & Close").click();
+        h.get_by_label("Close").click();
         h.run_steps(3);
         assert!(h.state().pano.edit.is_none(), "the mode closes");
         let p = pano(&h);
@@ -8777,7 +9197,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("equation-window.png")).unwrap();
         }
-        // The ribbon has an Insert tab of the same name; the window's button is the last one.
+        // The ribbon has other buttons of the same name; the window's button is the last one.
         h.get_all_by_label("Insert").last().unwrap().click();
         h.run_steps(3);
         assert!(h.state().eq_dialog.is_none(), "the window closes");
@@ -8838,7 +9258,7 @@ mod tests {
         h.state_mut().slide = 1;
         h.state_mut().selected = Some((0, 0));
         h.run_steps(3);
-        h.state_mut().ribbon_tab = 3;
+        h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.run_steps(2);
         { let sel = h.state().slide_selection(); h.state_mut().pending_delete = Some(sel); }
         h.run_steps(4);
@@ -9635,6 +10055,8 @@ mod tests {
     fn app() -> App {
         let mut a = App::default();
         a.new_project();
+        let p = a.project.as_mut().unwrap();
+        p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
         a
     }
 
@@ -9648,7 +10070,7 @@ mod tests {
         a.bottom_tab = 2;
         let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
         a.state_view = Some((id, "Hover".into()));
-        // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolours, the frame ends.
+        // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolors, the frame ends.
         a.begin_state_swap();
         assert!(a.swap.is_some());
         a.snapshot();
@@ -9831,10 +10253,10 @@ mod tests {
         assert_ne!(hover.fill, o.states[0].fill, "hover differs from rest");
         assert!(hover.gradient.is_some(), "and keeps the look");
         assert!(o.states.iter().find(|s| s.name == "Disabled").unwrap().gradient.is_none(), "disabled is a flat grey");
-        // A flat style has an outline but no gradient or shadow, and light colours get dark text.
+        // A flat style has an outline but no gradient or shadow, and light colors get dark text.
         a.apply_button_style(&style_of("Grey", Look::Flat, Corners::Square));
         let o = a.selected_object().unwrap().clone();
-        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a colour and an outline");
+        assert!(o.stroke.is_some() && o.gradient.is_none() && o.shadow.is_none(), "a flat style is a color and an outline");
         assert_eq!(o.radius, 0.0);
         assert_eq!(o.style.color, button_styles::HUES[1].text, "dark text on light grey");
         a.apply_button_style(&style_of("Teal", Look::Gloss, Corners::Pill));
@@ -9846,12 +10268,12 @@ mod tests {
     }
 
     #[test]
-    fn the_gallery_has_nine_colours_in_four_looks_and_three_corner_shapes() {
+    fn the_gallery_has_nine_colors_in_four_looks_and_three_corner_shapes() {
         use button_styles::{Corners, Look, HUES};
         assert_eq!(HUES.len(), 9);
         assert_eq!(Look::GALLERY.len(), 4);
         assert_eq!(Corners::ALL.len(), 3);
-        // Every look gives the colour it is built on to the resting state, so a swatch's colour is its hue's.
+        // Every look gives the color it is built on to the resting state, so a swatch's color is its hue's.
         for hue in &HUES { for look in Look::GALLERY {
             let mut o = Object::new("b", "b", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
             button_styles::apply(&mut o, &button_styles::StyleDef::new(hue, look, Corners::Rounded));
@@ -9903,11 +10325,11 @@ mod tests {
         assert_eq!(faces(2, 2).normal.angle, 90.0);
         assert_eq!(faces(2, 2).normal.stops.len(), 3);
         assert!(faces(2, 2).normal.stroke.is_none());
-        // Blue, split gloss: the top half is one flat colour, with a hard edge in the middle.
+        // Blue, split gloss: the top half is one flat color, with a hard edge in the middle.
         let gloss = faces(2, 3).normal.stops;
         assert!(gloss.windows(2).any(|w| w[0].0 == w[1].0 && w[0].1 != w[1].1), "a hard edge: two stops at one position");
         assert_eq!(gloss[0].1, gloss[1].1, "the top half is flat");
-        // Every look of every colour has its three faces, and the shaded looks all have a gradient.
+        // Every look of every color has its three faces, and the shaded looks all have a gradient.
         for hue in 0..HUES.len() { for look in 0..4 {
             let f = faces(hue, look);
             for face in [&f.normal, &f.hover, &f.down] { assert_eq!(face.stops.is_empty(), look == 0, "{} look {}", HUES[hue].name, look); }
@@ -9950,7 +10372,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-styles.png")).unwrap();
         }
-        // Click the first Teal swatch (its flat look): found by its colour, so the popup can be rearranged.
+        // Click the first Teal swatch (its flat look): found by its color, so the popup can be rearranged.
         let teal = button_styles::HUES.iter().find(|d| d.name == "Teal").unwrap().fill;
         let img = h.render().expect("renderer");
         let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0.0f32);
@@ -10005,7 +10427,7 @@ mod tests {
             (lo, hi)
         };
         let home = span(&mut h);
-        h.state_mut().ribbon_tab = 3;
+        h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.step();
         let mid = span(&mut h);
         h.run_steps(30);
@@ -10077,24 +10499,24 @@ mod tests {
     #[test]
     fn inserting_an_object_switches_to_home_and_leaves_you_free_to_leave() {
         let mut a = app();
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.insert_table(2, 2);
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "inserting a table opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.insert_rect();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "adding an object opens Home");
         assert!(a.selected.is_some(), "and keeps it selected");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.duplicate_selected();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "duplicating opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.copy_selected();
         a.paste();
         assert_eq!(a.ribbon_tab, ribbon::HOME_TAB, "pasting opens Home");
-        a.ribbon_tab = 2;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
-        assert_eq!(h.state().ribbon_tab, 2, "clicking away from Home sticks while the object stays selected");
+        assert_eq!(h.state().ribbon_tab, ribbon::OBJECTS_TAB, "clicking away from Home sticks while the object stays selected");
     }
 
     #[test]
@@ -10699,17 +11121,61 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_gradient_handle_moves_only_that_handle_and_new_handles_start_on_the_slide() {
+        let mut h = harness_fast(app());
+        h.run_steps(4);
+        {
+            let p = h.state_mut().project.as_mut().unwrap();
+            let (w, hh) = (p.slides[0].width, p.slides[0].height);
+            let mut g = Background::gradient(135.0, Rgba(0, 80, 160, 255), Rgba(230, 120, 30, 255));
+            if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, w, hh)); }
+            p.slides[0].background = Some(g);
+        }
+        h.state_mut().background_open = true;
+        h.run_steps(4);
+        let line = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[0].background {
+            Some(Background::Gradient { geom, .. }) => geom.line.unwrap(),
+            _ => unreachable!(),
+        };
+        let start = line(&h);
+        assert!(start.iter().all(|v| (-0.001..=1.001).contains(v)), "a new gradient's handles are on the slide: {start:?}");
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (w, hh) = { let s = &h.state().project.as_ref().unwrap().slides[0]; (s.width, s.height) };
+        let at = |x: f32, y: f32| origin + egui::vec2(x * w, y * hh) * scale;
+        let from = at(start[0], start[1]);
+        // Handle at the very edge of the slide: press just inside it.
+        let from = from + egui::vec2(6.0, 6.0);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        let mut pos = from;
+        for _ in 0..12 {
+            pos += egui::vec2(9.0, 4.0);
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(2);
+            let now = line(&h);
+            assert_eq!((now[2], now[3]), (start[2], start[3]), "the end handle stays put while the start one is dragged");
+        }
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(2);
+        let end = line(&h);
+        assert!(end[0] > start[0] + 0.05 && end[1] > start[1] + 0.02, "the start handle followed: {start:?} -> {end:?}");
+    }
+
+    #[test]
     fn gui_design_tab_changes_colors_and_fonts_and_hides_background_graphics() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
         {
             let p = a.project.as_mut().unwrap();
+            p.layouts = brainbend_doc::master::sample_layouts(&p.theme, 1920.0, 1080.0);
             p.master.objects.push(Object::new("logo", "Logo", Kind::Rect, 0.0, 0.0, 50.0, 50.0));
             let id = p.layouts[1].id.clone();
             p.slides[0].layout = Some(id);
         }
-        a.ribbon_tab = 4;
+        a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let theme = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().theme.clone();
@@ -10744,7 +11210,7 @@ mod tests {
             h.state_mut().theme_colors_open = false;
             h.run_steps(2);
         }
-        // "Edit…" in a colour menu asks for the same window.
+        // "Edit…" in a color menu asks for the same window.
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("open-project-colors"), true));
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
@@ -10752,38 +11218,260 @@ mod tests {
         h.run_steps(2);
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
+        // Background: a window with a kind, a live preview and a gradient you build.
+        h.state_mut().background_open = true;
+        h.run_steps(3);
+        h.get_by_label("Gradient").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Gradient { .. })));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-gradient.png")).unwrap();
+        }
+        h.get_by_label("Radial").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Gradient { kind: brainbend_doc::GradientKind::Radial, .. })));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-radial.png")).unwrap();
+        }
+        // Move the centre and shrink it: the slide follows, and the handles sit where the gradient is.
+        if let Some(brainbend_doc::Background::Gradient { geom, .. }) = h.state_mut().project.as_mut().unwrap().slides[0].background.as_mut() { geom.center = (0.25, 0.3); geom.radius = 0.3; }
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-radial-moved.png")).unwrap();
+        }
+        h.get_by_label("Linear").click();
+        h.run_steps(3);
+        if let Some(brainbend_doc::Background::Gradient { geom, angle, .. }) = h.state_mut().project.as_mut().unwrap().slides[0].background.as_mut() { *angle = geom.set_line_px((300.0, 200.0), (1400.0, 800.0), 1920.0, 1080.0); }
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-linear-moved.png")).unwrap();
+        }
+        h.get_by_label("Angular").click();
+        h.run_steps(3);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-angular.png")).unwrap();
+        }
+        h.get_by_label("Color").click();
+        h.run_steps(3);
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[0].background, Some(brainbend_doc::Background::Solid(_))));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-color.png")).unwrap();
+        }
+        h.state_mut().background_open = false;
+        h.run_steps(2);
     }
 
     #[test]
-    fn gui_brand_colors_recent_colors_and_the_colour_menu_notes() {
+    fn the_objects_tab_lists_text_then_media_then_interactive_objects() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::OBJECTS_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let x = |h: &egui_kittest::Harness<'static, App>, name: &str| { use egui_kittest::kittest::NodeT; h.query_all_by_label(name).next().unwrap_or_else(|| panic!("{name}")).accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) };
+        let (text, media, interactive) = (x(&h, "Text Box"), x(&h, "Picture"), x(&h, "Button"));
+        assert!(text < media && media < interactive, "Text ({text}), Media ({media}), Interactive Objects ({interactive})");
+    }
+
+    #[test]
+    fn outline_hidden_objects_is_with_the_zoom_in_the_status_bar_not_on_the_review_tab_or_in_properties() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::REVIEW_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert_eq!(h.query_all_by_label("Outline hidden objects").count(), 1, "once, by the zoom, and not in the ribbon or the Properties");
+        assert!(!h.state().show_hidden);
+        h.get_by_label("Outline hidden objects").click();
+        h.run_steps(3);
+        assert!(h.state().show_hidden, "ticking it outlines the hidden objects on the canvas");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("status-outline.png")).unwrap(); }
+    }
+
+    /// Hide Background Graphics is a setting of the slide, so it is in the slide's Properties, and only for a slide with a layout.
+    #[test]
+    fn hide_background_graphics_is_in_the_slide_properties_and_only_for_a_slide_with_a_layout() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::THEME_TAB;
+        let layout = a.project.as_ref().unwrap().layouts.first().map(|l| l.id.clone());
+        a.project.as_mut().unwrap().slides[0].layout = layout;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert_eq!(h.query_all_by_label("Hide Background Graphics").count(), 1, "once, by the zoom, and not in the ribbon or the Properties");
+        h.state_mut().project.as_mut().unwrap().slides[0].layout = None;
+        h.run_steps(3);
+        assert!(h.query_by_label("Hide Background Graphics").is_none(), "no layout, no graphics to hide");
+    }
+
+    #[test]
+    fn dragging_a_brand_color_onto_another_reorders_the_palette() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
-        a.ribbon_tab = 4;
+        a.ribbon_tab = ribbon::THEME_TAB;
+        let (red, green, blue) = (Rgba(255, 0, 0, 255), Rgba(0, 255, 0, 255), Rgba(0, 0, 255, 255));
+        a.project.as_mut().unwrap().palette = vec![red, green, blue];
+        a.theme_colors_open = true;
+        let mut h = harness_fast(a);
+        h.run_steps(4);
+        let centre = |h: &egui_kittest::Harness<'_, App>, c: Rgba| h.get_by_label(&format!("Brand color {}", c.hex())).rect().center();
+        let (from, to) = (centre(&h, red), centre(&h, blue));
+        let (from, to) = (egui::pos2(from.x as f32, from.y as f32), egui::pos2(to.x as f32, to.y as f32));
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        let mid = from + (to - from) * 0.5;
+        h.event(egui::Event::PointerMoved(mid));
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().palette, vec![green, blue, red], "red dropped on blue takes blue's place");
+    }
+
+    #[test]
+    fn a_timeline_bar_end_can_be_dragged_and_the_timeline_length_set() {
+        let mut a = app();
+        a.file_view = false;
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(Object::new("o1", "Box", Kind::Rect, 100.0, 100.0, 200.0, 100.0));
+        let mut h = harness(a);
+        h.run_steps(4);
+        // The only bar runs the whole (automatic) timeline; find its right end from where the row is drawn.
+        let img = h.render().expect("renderer");
+        let (w, hgt) = (img.width() as f32, img.height() as f32);
+        let mut best: Option<(f32, f32)> = None;
+        for y in (hgt * 0.7) as u32..hgt as u32 {
+            for x in 0..img.width() {
+                let p = img.get_pixel(x, y);
+                if p.0[0] == 0x50 && p.0[1] == 0x50 && p.0[2] == 0x50 { if best.map_or(true, |b| x as f32 > b.0 || (x as f32 == b.0 && false)) { best = Some((x as f32, y as f32)); } }
+            }
+        }
+        let (rx, ry) = best.expect("a bar");
+        let ppp = img.width() as f32 / h.ctx.content_rect().width();
+        let from = egui::pos2((rx - 4.0 * ppp) / ppp, ry / ppp);
+        let to = egui::pos2(from.x - 200.0, from.y);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(3);
+        let t = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].timing.expect("dragging the end gives it a time");
+        assert_eq!(t.start_ms, 0, "the start stays put");
+        assert!(t.dur_ms.is_some_and(|d| d < 5000 && d > 0), "the end moved left: {t:?}");
+    }
+
+    #[test]
+    fn the_object_animation_buttons_open_their_panels_in_place() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::ANIMATIONS_TAB;
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(Object::new("o1", "Box", Kind::Rect, 100.0, 100.0, 200.0, 100.0));
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.run_steps(3);
+        for name in ["Emphasis", "Motion", "Exit", "Entrance"] {
+            h.get_all_by_label(name).next().unwrap().click();
+            h.run_steps(3);
+            assert!(!h.query_all_by_label("none").collect::<Vec<_>>().is_empty(), "{name} opens a panel with a none choice");
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+                h.render().expect("renderer").save(std::path::Path::new(&dir).join(format!("anim-{name}.png"))).unwrap();
+            }
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        for (btn, pick) in [("Emphasis", "Pulse"), ("Motion", "Line right")] {
+            h.get_all_by_label(btn).next().unwrap().click();
+            h.run_steps(3);
+            h.get_by_label(pick).click();
+            h.run_steps(4);
+            { let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0]; assert!(if btn == "Emphasis" { o.emphasis.is_some() } else { o.motion.is_some() }, "choosing from {btn} sets it"); }
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+                h.render().expect("renderer").save(std::path::Path::new(&dir).join(format!("anim-{btn}-set.png"))).unwrap();
+            }
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        // Choosing an exit for an object that stays to the end gives it an end to leave at.
+        h.get_all_by_label("Exit").next().unwrap().click();
+        h.run_steps(3);
+        h.get_by_label("fade").click();
+        h.run_steps(3);
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.exit.is_some());
+        assert!(o.timing.and_then(|t| t.dur_ms).is_some(), "an exit needs a time to play at");
+    }
+
+    #[test]
+    fn the_transition_menu_names_the_chosen_kind_and_options_follow_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::ANIMATIONS_TAB;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("None").is_some(), "a slide with no transition says None");
+        {
+            let sl = &mut h.state_mut().project.as_mut().unwrap().slides[0];
+            sl.fade_ms = 600;
+            sl.transition = brainbend_doc::Transition::of(brainbend_doc::TransitionKind::Split);
+        }
+        h.run_steps(3);
+        assert!(h.query_by_label("Split").is_some(), "the menu button names the kind");
+        assert!(h.query_by_label_contains("Effect").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.run_steps(2);
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("transition-menu.png")).unwrap();
+        }
+    }
+
+    #[test]
+    fn gui_brand_colors_recent_colors_and_the_color_menu_notes() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let proj = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().clone();
         assert!(proj(&h).palette.is_empty() && proj(&h).recent_colors.is_empty(), "nothing is preset");
-        // The Brand Colors window: add a colour, change it.
-        h.get_by_label_contains("Brand").click();
+        // The Brand Colors window: add a color, change it.
+        h.get_by_label_contains("Colors").click();
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
-        h.get_by_label("+ Add colour").click();
+        // With no colors yet the picker is already showing, and what it shows is added.
+        h.get_by_label("Add to palette").click();
+        h.run_steps(3);
+        assert_eq!(proj(&h).palette, vec![Rgba(79, 129, 189, 255)]);
+        // Then "+ Add color" adds a copy to change, and Remove takes the chosen one away.
+        h.get_by_label("+ Add color").click();
+        h.run_steps(3);
+        assert_eq!(proj(&h).palette.len(), 2);
+        h.get_by_label("Remove").click();
         h.run_steps(3);
         assert_eq!(proj(&h).palette.len(), 1);
-        // A colour menu's + adds the colour it is showing.
+        // A color menu's + adds the color it is showing.
         let teal = Rgba(0, 128, 128, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), teal));
         h.run_steps(3);
-        assert_eq!(proj(&h).palette, vec![Rgba(128, 128, 128, 255), teal]);
-        // Using a colour makes it recent (not if it is in the palette).
+        assert_eq!(proj(&h).palette, vec![Rgba(79, 129, 189, 255), teal]);
+        // Using a color makes it recent (not if it is in the palette).
         let coral = Rgba(255, 127, 80, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), coral));
         h.run_steps(3);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), teal));
         h.run_steps(3);
         assert_eq!(proj(&h).recent_colors, vec![coral]);
-        // Adding a recent colour to the palette takes it out of the recent ones.
+        // Adding a recent color to the palette takes it out of the recent ones.
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), coral));
         h.run_steps(3);
         assert!(proj(&h).recent_colors.is_empty() && proj(&h).palette.contains(&coral));
@@ -10795,14 +11483,14 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.run_steps(3);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("brand-colors.png")).unwrap();
-            // A colour menu, from Home with a text box selected.
+            // A color menu, from Home with a text box selected.
             h.state_mut().theme_colors_open = false;
             h.state_mut().insert_text();
             h.state_mut().ribbon_tab = 1;
             h.run_steps(4);
             h.get_by_label("Text color").click();
             h.run_steps(4);
-            h.render().expect("renderer").save(std::path::Path::new(&dir).join("colour-menu.png")).unwrap();
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("color-menu.png")).unwrap();
         }
     }
 
@@ -10810,7 +11498,7 @@ mod tests {
     fn gui_ribbon_dropdowns_open_and_add_slides() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
-        a.ribbon_tab = 3;
+        a.ribbon_tab = ribbon::SLIDES_TAB;
         let mut h = harness(a);
         h.run_steps(3);
         let before = h.state().project.as_ref().unwrap().slides.len();
@@ -10854,7 +11542,7 @@ mod tests {
         h.get_by_label("Publish").click();
         h.run_steps(4);
         assert!(h.state().publish_open, "Publish opens the dialog instead of a menu");
-        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video (coming soon)", "Web", "PDF", "Word (coming soon)", "PowerPoint"] {
+        for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video", "Web", "PDF", "Print", "Word", "PowerPoint"] {
             assert!(h.get_all_by_label(name).count() >= 1, "{name} is listed");
         }
         assert!(h.state().publish_page == publish_dialog::PublishPage::Web, "it opens on Web, the first one that works");
@@ -10863,6 +11551,31 @@ mod tests {
         h.get_by_label("Cancel").click();
         h.run_steps(3);
         assert!(!h.state().publish_open);
+    }
+
+    #[test]
+    fn a_picture_of_a_slide_for_a_video_has_no_play_mark_or_placeholder_name_on_media() {
+        assert_eq!(media_decor(false, true, true), (true, false), "the editor marks a video that has a picture with a play mark");
+        assert_eq!(media_decor(false, true, false), (true, true), "and names one that has none");
+        assert_eq!(media_decor(false, false, false), (false, true), "audio is named in the editor");
+        for (video, picture) in [(true, true), (true, false), (false, false)] {
+            assert_eq!(media_decor(true, video, picture), (false, false), "the video has neither");
+        }
+    }
+
+    #[test]
+    fn the_video_report_says_what_the_video_leaves_out() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.export_report = vec!["Slide 1 (A): 2 effects are not played.".into()];
+        a.export_report_for = "Video";
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("The video was saved. These things are not in it").is_some());
+        assert!(h.query_by_label_contains("Slide 1 (A): 2 effects are not played.").is_some());
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        assert!(h.state().export_report.is_empty() && h.query_by_label_contains("The video was saved").is_none(), "OK closes it");
     }
 
     #[test]
@@ -10875,11 +11588,16 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert!(!disabled_publish(&h), "Web can be published");
-        h.get_by_label("Video (coming soon)").click();
+        h.get_by_label("BrainBend LMS (coming soon)").click();
         h.run_steps(3);
-        assert!(h.state().publish_page == publish_dialog::PublishPage::Video, "clicking a destination shows it");
+        assert!(h.state().publish_page == publish_dialog::PublishPage::BrainBendLms, "clicking a destination shows it");
         assert!(h.query_by_label("Coming soon").is_some(), "the page says so");
         assert!(disabled_publish(&h), "Publish is off for a destination that does not exist yet");
+        h.get_by_label("Video").click();
+        h.run_steps(3);
+        assert!(h.state().publish_page == publish_dialog::PublishPage::Video);
+        assert!(!disabled_publish(&h), "Video can be published");
+        assert!(h.query_by_label("Quality").is_some() && h.query_by_label_contains("Include sound").is_some(), "its choices are shown");
         h.get_by_label("Other LMS").click();
         h.run_steps(3);
         assert!(!disabled_publish(&h));
@@ -10918,7 +11636,7 @@ mod tests {
     }
 
     #[test]
-    fn a_web_lesson_does_not_offer_powerpoint_and_the_unfinished_destinations_wait_for_later() {
+    fn a_web_lesson_offers_only_print_of_the_slide_handouts_and_the_unfinished_destinations_wait_for_later() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
@@ -10927,9 +11645,456 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("PowerPoint").is_none());
-        assert!(h.query_by_label("PDF").is_some());
+        assert!(h.query_by_label("PDF").is_none() && h.query_by_label("Word").is_none() && h.query_by_label("Video").is_none(), "they are made from slides");
+        assert!(h.query_by_label("Print").is_some(), "a Web Lesson can still be printed");
         let waiting: Vec<_> = publish_dialog::PublishPage::ALL.iter().filter(|p| !p.available()).map(|p| p.label()).collect();
-        assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS", "Video", "Word"]);
+        assert_eq!(waiting, ["BrainBend Review", "BrainBend LMS"]);
+    }
+
+    #[test]
+    fn crop_png_keeps_only_the_slides_part_of_the_window() {
+        let mut image = egui::ColorImage::filled([200, 100], egui::Color32::WHITE);
+        for y in 20..60 { for x in 40..120 { image.pixels[y * 200 + x] = egui::Color32::from_rgb(10, 20, 30); } }
+        let png = word_export::crop_png(&image, egui::Rect::from_min_size(egui::pos2(20.0, 10.0), egui::vec2(50.0, 25.0)), 2.0).expect("a picture");
+        let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(decoded.dimensions(), (100, 50), "points times the pixels in each point");
+        assert_eq!(decoded.get_pixel(5, 5).0, [10, 20, 30, 255], "the slide's color, from inside the dark patch");
+        assert!(word_export::crop_png(&image, egui::Rect::from_min_size(egui::pos2(500.0, 500.0), egui::vec2(10.0, 10.0)), 1.0).is_none(), "nothing of the window is there");
+    }
+
+    #[test]
+    fn a_word_handout_takes_a_picture_of_each_slide_that_can_be_drawn_and_then_writes_the_file() {
+        let mut a = app();
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut title = Object::new("t", "Title", Kind::Text, 200.0, 200.0, 1200.0, 300.0);
+            title.text = "Stay safe".into();
+            title.fill = Some(Rgba(40, 90, 200, 255));
+            p.slides[0].layers[0].objects.push(title);
+            p.slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
+            let q = Question { prompt: "Pick one".into(), multiple: false, choices: vec![], points: 1.0, feedback_correct: String::new(), feedback_incorrect: String::new(), style: QuestionStyle::Choice, area: None };
+            let mut qs = Slide::new("s3", "Quiz", 1920.0, 1080.0);
+            qs.kind = SlideKind::Question(q);
+            p.slides.push(qs);
+        }
+        let path = std::env::temp_dir().join(format!("brainbend-word-test-{}.docx", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        h.state_mut().begin_word_export(word_export::Handout::Word, vec![0, 1, 2], path.clone());
+        let mut shots = 0;
+        for _ in 0..80 {
+            h.step();
+            if h.state().word_capture.is_none() { break; }
+            if h.state().word_capture.as_ref().is_some_and(|c| c.waiting()) {
+                shots += 1;
+                // With BRAINBEND_SHOT_DIR set, the window is really drawn, so the pictures can be looked at.
+                let image = if std::env::var_os("BRAINBEND_SHOT_DIR").is_some() {
+                    let r = h.render().expect("renderer");
+                    std::sync::Arc::new(egui::ColorImage::from_rgba_unmultiplied([r.width() as usize, r.height() as usize], r.as_raw()))
+                } else {
+                    word_export::plain_image([1500, 950], egui::Color32::from_rgb(200, 220, 240))
+                };
+                h.input_mut().events.push(egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::default(), image });
+            }
+        }
+        assert!(h.state().word_capture.is_none(), "the handout is finished");
+        assert_eq!(shots, 3, "the question slide is drawn as it looks in the lesson, like the others");
+        let bytes = std::fs::read(&path).expect("the file was written");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("word/media/image1.png") && text.contains("word/media/image2.png") && text.contains("word/media/image3.png"));
+        assert!(h.state().status.contains("Exported Word handout"), "{}", h.state().status);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { std::fs::copy(&path, std::path::PathBuf::from(dir).join("handout.docx")).unwrap(); }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_pdf_handout_is_captured_the_same_way_and_written_as_a_pdf() {
+        let mut a = app();
+        a.project.as_mut().unwrap().slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
+        let path = std::env::temp_dir().join(format!("brainbend-pdf-test-{}.pdf", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        h.state_mut().begin_word_export(word_export::Handout::Pdf, vec![0, 1], path.clone());
+        let mut shots = 0;
+        for _ in 0..80 {
+            h.step();
+            if h.state().word_capture.is_none() { break; }
+            if h.state().word_capture.as_ref().is_some_and(|c| c.waiting()) {
+                shots += 1;
+                h.input_mut().events.push(egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::default(), image: word_export::plain_image([1500, 950], egui::Color32::from_rgb(200, 220, 240)) });
+            }
+        }
+        assert_eq!(shots, 2);
+        let bytes = std::fs::read(&path).expect("the file was written");
+        assert_eq!(&bytes[..5], b"%PDF-");
+        assert!(h.state().status.contains("Exported PDF handout"), "{}", h.state().status);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_video_takes_one_picture_for_each_change_and_joins_them_with_the_video_program() {
+        let mut a = app();
+        {
+            let p = a.project.as_mut().unwrap();
+            // Slide 1 lasts 3 seconds and a title leaves after the first: two pictures. Slide 2 is held for 2 seconds: one.
+            let l = &mut p.slides[0].layers[0];
+            l.duration_ms = Some(3000);
+            let mut title = blank_object("t".into(), "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+            title.timing = Some(Timing { start_ms: 0, dur_ms: Some(1000) });
+            title.fill = Some(Rgba(200, 40, 40, 255));
+            title.text = "Title leaves at 1 s".into();
+            l.objects.push(title);
+            let mut stays = blank_object("u".into(), "Stays", Kind::Text, 100.0, 400.0, 900.0, 120.0);
+            stays.fill = Some(Rgba(30, 90, 170, 255));
+            stays.text = "Stays all slide".into();
+            l.objects.push(stays);
+            let mut ghost = blank_object("g".into(), "Ghost", Kind::Text, 100.0, 700.0, 300.0, 60.0);
+            ghost.hidden = true;
+            l.objects.push(ghost);
+            let mut second = Slide::new("s2", "Second", 1920.0, 1080.0);
+            second.fade_ms = 500;
+            second.transition = Transition { kind: TransitionKind::Push, from: Edge::Right, inward: false };
+            p.slides.push(second);
+            p.name = "Safety Basics".into();
+        }
+        a.video_options = video_export::Options { height: 360, fps: 10, hold_secs: 2, audio: true };
+        let path = std::env::temp_dir().join(format!("brainbend-video-test-{}.mp4", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        h.state_mut().begin_video_export(vec![0, 1], path.clone());
+        let plan = h.state().video_run.as_ref().expect("the video was started").plan().clone();
+        assert_eq!(plan.shots.iter().map(|s| (s.slide, s.at_ms, s.length_ms)).collect::<Vec<_>>(), vec![(0, 0, 1000), (0, 1000, 2000), (1, 0, 2000)]);
+        assert_eq!(plan.blends.iter().map(|b| (b.shot, b.name, b.ms)).collect::<Vec<_>>(), vec![(2, "slideleft", 500)], "the second slide pushes in");
+        assert_eq!(h.state().video_run.as_ref().unwrap().title(), "Safety Basics", "the video is named for the project");
+        assert_eq!(h.state().video_run.as_ref().unwrap().report(), ["Slide 1: 1 object starts hidden and a trigger shows it, so it is not in the video.".to_string()]);
+        let mut shots = 0;
+        for _ in 0..400 {
+            h.step();
+            let Some(run) = h.state().video_run.as_ref() else { break };
+            if run.waiting() {
+                shots += 1;
+                // With BRAINBEND_SHOT_DIR set, the window is really drawn, so the video can be looked at.
+                let image = if std::env::var_os("BRAINBEND_SHOT_DIR").is_some() {
+                    let r = h.render().expect("renderer");
+                    std::sync::Arc::new(egui::ColorImage::from_rgba_unmultiplied([r.width() as usize, r.height() as usize], r.as_raw()))
+                } else {
+                    word_export::plain_image([1500, 950], egui::Color32::from_rgb(200, 220, 240))
+                };
+                h.input_mut().events.push(egui::Event::Screenshot { viewport_id: egui::ViewportId::ROOT, user_data: egui::UserData::default(), image });
+            } else if run.encoding() {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        assert_eq!(shots, 3, "a picture for each change");
+        assert!(h.state().video_run.is_none(), "the video is finished: {}", h.state().status);
+        if brainbend_video::ffmpeg().is_some() {
+            assert!(h.state().status.starts_with("Published the video"), "{}", h.state().status);
+            assert_eq!(h.state().export_report_for, "Video");
+            assert_eq!(h.state().export_report.len(), 1, "the author is told what was left out: {:?}", h.state().export_report);
+            let info = brainbend_video::encode::probe(&path).expect("the video can be read");
+            assert!((4800..5400).contains(&info.duration_ms), "the slides' 3 s and 2 s: {info:?}");
+            let details = std::process::Command::new(brainbend_video::ffmpeg().unwrap()).args(["-nostdin", "-hide_banner", "-i"]).arg(&path).output().unwrap();
+            assert!(String::from_utf8_lossy(&details.stderr).contains("title           : Safety Basics"), "the title is in the file");
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { let _ = std::fs::copy(&path, std::path::PathBuf::from(dir).join("video.mp4")); }
+            let _ = std::fs::remove_file(&path);
+        } else {
+            assert!(h.state().status.contains("the video program is not installed"), "{}", h.state().status);
+        }
+    }
+
+    #[test]
+    fn cancelling_while_pictures_are_taken_stops_the_video_and_cleans_up() {
+        // Enough slides that the pictures take longer than the click does (the test window answers a screenshot at once).
+        let mut a = app();
+        for i in 0..8 { a.project.as_mut().unwrap().slides.push(Slide::new(&format!("x{i}"), "Extra", 1920.0, 1080.0)); }
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        let path = std::env::temp_dir().join(format!("brainbend-video-cancel-{}.mp4", std::process::id()));
+        h.state_mut().begin_video_export((0..9).collect(), path.clone());
+        let dir = h.state().video_run.as_ref().map(|r| r.work_dir().to_path_buf()).expect("started");
+        h.step();
+        use egui_kittest::kittest::Queryable;
+        h.get_by_label("Cancel").click();
+        h.run_steps(4);
+        assert!(h.state().video_run.is_none(), "{}", h.state().status);
+        assert_eq!(h.state().status, "Video cancelled");
+        assert!(!path.exists() && !dir.exists(), "no video and no working files are left");
+    }
+
+    #[test]
+    fn video_is_a_publish_destination_for_slide_lessons() {
+        assert!(publish_dialog::PublishPage::Video.available());
+        assert!(!publish_dialog::PublishPage::Review.available() && !publish_dialog::PublishPage::BrainBendLms.available());
+    }
+
+    #[test]
+    fn a_handout_of_only_question_slides_still_draws_each_one() {
+        let mut a = app();
+        {
+            let p = a.project.as_mut().unwrap();
+            let q = Question { prompt: "Pick one".into(), multiple: false, choices: vec![], points: 1.0, feedback_correct: String::new(), feedback_incorrect: String::new(), style: QuestionStyle::Choice, area: None };
+            let mut qs = Slide::new("s3", "Quiz", 1920.0, 1080.0);
+            qs.kind = SlideKind::Question(q);
+            p.slides = vec![qs];
+        }
+        let path = std::env::temp_dir().join(format!("brainbend-word-test-q-{}.docx", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        a.begin_word_export(word_export::Handout::Word, vec![0], path.clone());
+        assert!(a.word_capture.as_ref().is_some_and(|c| !c.todo_is_empty()) && !path.exists(), "the question slide is drawn, so the file waits for its picture");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The ribbon follows the order an author works in: Home, Theme, Slides, Objects, Animations, Review, Help.
+    #[test]
+    fn the_tabs_follow_the_authors_workflow_and_the_theme_and_review_tabs_hold_their_groups() {
+        use egui_kittest::kittest::Queryable;
+        assert_eq!(ribbon::TABS, ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"]);
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let x = |h: &egui_kittest::Harness<'static, App>, name: &str| h.query_all_by_label(name).next().map(|n| { use egui_kittest::kittest::NodeT; n.accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) });
+        let xs: Vec<f64> = ["Home", "Theme", "Slides", "Objects", "Animations", "Review", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in that order: {xs:?}");
+        assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Layout Builder").is_none(), "the old names are gone, and Layout Builder is not a tab here");
+        h.state_mut().ribbon_tab = ribbon::THEME_TAB;
+        h.run_steps(3);
+        for name in ["Fonts", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
+        assert!(h.query_all_by_label_contains("Colors").next().is_some(), "Brand Colors is on Theme");
+        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
+        for gone in ["Themes", "Player", "Spelling", "Focus Order"] { assert!(h.query_all_by_label_contains(gone).next().is_none(), "{gone} is not on Theme"); }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-theme.png")).unwrap(); }
+        h.state_mut().ribbon_tab = ribbon::REVIEW_TAB;
+        h.run_steps(3);
+        for name in ["Spelling", "Focus Order"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Review"); }
+        assert!(h.query_all_by_label_contains("Player").next().is_some() && h.query_all_by_label_contains("Settings").next().is_some(), "Player Settings is on Review");
+        assert!(h.query_all_by_label_contains("Accessibility").next().is_some(), "the Accessibility Checker is on Review");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-review.png")).unwrap(); }
+        // Inside the Layout Builder the bar is Layout Builder first, then Home, Objects, Animations, Help.
+        h.state_mut().enter_master_view();
+        h.run_steps(4);
+        let xs: Vec<f64> = ["Layout Builder", "Home", "Objects", "Animations", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
+        assert!(h.query_all_by_label("Theme").next().is_none() && h.query_all_by_label("Review").next().is_none(), "the other tabs wait outside the master view");
+    }
+
+    /// While the Layout Builder is open its Close button leads the ribbon, on every tab.
+    #[test]
+    fn the_layout_builder_close_button_is_on_every_tab_and_not_outside() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_all_by_label("Close").next().is_none(), "not shown outside the Layout Builder");
+        assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Try It").is_some(), "shown outside the Layout Builder");
+        h.state_mut().enter_master_view();
+        for tab in [ribbon::MASTER_TAB, ribbon::HOME_TAB, ribbon::OBJECTS_TAB, ribbon::ANIMATIONS_TAB, ribbon::HELP_TAB] {
+            h.state_mut().ribbon_tab = tab;
+            h.run_steps(3);
+            assert_eq!(h.query_all_by_label("Close").count(), 1, "one Close button on tab {tab}");
+            assert!(h.query_by_label("Publish").is_none() && h.query_by_label("Try It").is_none(), "Try It, Preview and Publish are not shown in the Layout Builder (tab {tab})");
+        }
+        let x = |h: &egui_kittest::Harness<'_, App>, l: &str| h.query_all_by_label_contains(l).next().unwrap().rect().min.x;
+        h.state_mut().ribbon_tab = ribbon::MASTER_TAB;
+        h.run_steps(3);
+        assert!(x(&h, "Close") < x(&h, "Insert Layout"), "Close comes before the tab's own groups");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("layout-builder-ribbon.png")).unwrap(); }
+        h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("Transition").next().is_none(), "a layout has no slide transitions");
+        h.query_all_by_label("Close").next().unwrap().click();
+        h.run_steps(3);
+        assert!(!h.state().in_master_view());
+    }
+
+    /// The Fonts button on the Design tab opens a window with two font drop-downs; opening one used to close the menu it was in.
+    #[test]
+    fn the_theme_fonts_window_keeps_its_drop_downs_open_and_a_pick_changes_the_theme_font() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::THEME_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("Fonts").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the window opens");
+        let combos: Vec<_> = h.query_all_by_role(egui::accesskit::Role::ComboBox).collect();
+        assert!(combos.len() >= 2, "a Headings and a Body text drop-down");
+        use egui_kittest::kittest::NodeT;
+        combos.into_iter().find(|c| c.accesskit_node().value().as_deref() == Some("Montserrat")).expect("the headings drop-down shows the theme's font").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Headings").is_some(), "the window is still open after opening a drop-down");
+        assert!(h.query_by_label("BrainBend fonts").is_some(), "and the list of fonts is showing");
+        let before = h.state().project.as_ref().unwrap().theme.heading_font.clone();
+        let other = brainbend_fonts::families().into_iter().map(|(n, _)| n).find(|n| !n.eq_ignore_ascii_case(&before) && brainbend_fonts::source_of(n) == Some(brainbend_fonts::Source::Bundled)).expect("another bundled font");
+        h.get_by_label(&other).click();
+        h.run_steps(4);
+        assert_eq!(h.state().project.as_ref().unwrap().theme.heading_font, other, "picking a font sets the theme's heading font");
+        assert!(h.query_by_label("Headings").is_some(), "the window stays open so the body font can be set too");
+    }
+
+    /// A file as the window system hands it over when something is dropped on the app.
+    #[derive(Debug)]
+    struct FakeDrop(std::path::PathBuf);
+    impl egui::DroppedFile for FakeDrop {
+        fn path(&self) -> &std::path::Path { &self.0 }
+        fn bytes(&self) -> Result<Vec<u8>, String> { std::fs::read(&self.0).map_err(|e| e.to_string()) }
+    }
+
+    fn drop_files(h: &mut egui_kittest::Harness<'static, App>, paths: &[std::path::PathBuf]) {
+        for p in paths { h.input_mut().dropped_files.push(std::sync::Arc::new(FakeDrop(p.clone()))); }
+        h.run_steps(3);
+    }
+
+    fn tiny_png(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("brainbend-drop-{}-{name}", std::process::id()));
+        let mut img = image::RgbaImage::new(40, 20);
+        for px in img.pixels_mut() { *px = image::Rgba([10, 120, 200, 255]); }
+        img.save_with_format(&path, image::ImageFormat::Png).unwrap();
+        path
+    }
+
+    #[test]
+    fn dropping_a_picture_onto_the_editor_adds_it_to_the_slide() {
+        let png = tiny_png("one.png");
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[png.clone()]);
+        let p = h.state().project.as_ref().unwrap();
+        let objects = &p.slides[0].layers[0].objects;
+        assert_eq!(objects.len(), before + 1, "one picture was added");
+        let o = objects.last().unwrap();
+        assert!(matches!(o.kind, Kind::Image) && o.asset.as_ref().is_some_and(|k| p.assets.contains_key(k)));
+        assert_eq!(h.state().selected.map(|(_, i)| i), Some(objects.len() - 1), "the new picture is selected");
+        assert!(h.state().status.contains("Added the dropped file"), "{}", h.state().status);
+        let _ = std::fs::remove_file(png);
+    }
+
+    #[test]
+    fn dropping_several_pictures_adds_each_and_dropping_other_files_says_what_is_accepted() {
+        let (a1, a2) = (tiny_png("a.png"), tiny_png("b.png"));
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[a1.clone(), a2.clone()]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 2);
+        assert!(h.state().status.contains("Added 2 dropped files"), "{}", h.state().status);
+        drop_files(&mut h, &[std::path::PathBuf::from("/tmp/notes.txt")]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 2, "nothing added");
+        assert!(h.state().status.contains("Drop a picture"), "{}", h.state().status);
+        let _ = (std::fs::remove_file(a1), std::fs::remove_file(a2));
+    }
+
+    #[test]
+    fn dropping_an_audio_file_adds_an_audio_object() {
+        let mp3 = std::env::temp_dir().join(format!("brainbend-drop-{}-clip.mp3", std::process::id()));
+        std::fs::write(&mp3, b"ID3 not real audio but the type is what counts").unwrap();
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        drop_files(&mut h, &[mp3.clone()]);
+        let p = h.state().project.as_ref().unwrap();
+        let o = p.slides[0].layers[0].objects.last().unwrap();
+        assert!(matches!(o.kind, Kind::Audio), "{:?}", o.name);
+        assert_eq!(p.assets[o.asset.as_ref().unwrap()].mime, "audio/mpeg");
+        let _ = std::fs::remove_file(mp3);
+    }
+
+    #[test]
+    fn dropping_a_picture_with_no_project_open_asks_for_a_project_first() {
+        let png = tiny_png("none.png");
+        let mut h = harness(App::default());
+        drop_files(&mut h, &[png.clone()]);
+        assert!(h.state().project.is_none());
+        assert!(h.state().status.contains("Open or start a project first"), "{}", h.state().status);
+        let _ = std::fs::remove_file(png);
+    }
+
+    #[test]
+    fn a_dropped_picture_that_is_not_a_picture_leaves_its_own_message() {
+        let bad = std::env::temp_dir().join(format!("brainbend-drop-{}-bad.png", std::process::id()));
+        std::fs::write(&bad, b"not really a png").unwrap();
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        drop_files(&mut h, &[bad.clone()]);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before);
+        assert!(h.state().status.contains("Not a usable PNG/JPEG"), "{}", h.state().status);
+        let _ = std::fs::remove_file(bad);
+    }
+
+    #[test]
+    fn the_print_page_has_the_pdf_choices_and_says_it_uses_the_browser() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        a.publish_page = publish_dialog::PublishPage::Print;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for name in ["Landscape", "Portrait", "Slides per page", "Correct answers", "Space for notes", "Slide notes", "Alt text"] {
+            assert!(h.query_by_label(name).is_some(), "{name} is offered for Print");
+        }
+        assert!(h.query_by_label_contains("print dialog").is_some(), "it says what Publish does");
+        assert!(h.query_by_label_contains("Open the print view").is_none(), "the old link is gone");
+    }
+
+    #[test]
+    fn a_word_picture_gets_a_frame_the_same_on_all_four_sides() {
+        let src = word_export::plain_image([400, 225], egui::Color32::WHITE);
+        let png = word_export::crop_png(&src, egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 225.0)), 1.0).unwrap();
+        let framed = word_export::frame_png(&png).unwrap();
+        let img = image::load_from_memory(&framed).unwrap().to_rgba8();
+        let (w, h) = img.dimensions();
+        let grey = image::Rgba([102, 102, 102, 255]);
+        for (x, y) in [(w / 2, 0), (w / 2, h - 1), (0, h / 2), (w - 1, h / 2), (0, 0), (w - 1, h - 1)] { assert_eq!(*img.get_pixel(x, y), grey, "edge pixel {x},{y}"); }
+        assert_eq!(*img.get_pixel(w / 2, h / 2), image::Rgba([255, 255, 255, 255]), "the slide itself is untouched");
+        // The same depth on every side.
+        let depth = |f: &dyn Fn(u32) -> (u32, u32)| (0..20).take_while(|&i| { let (x, y) = f(i); *img.get_pixel(x, y) == grey }).count();
+        let d = [depth(&|i| (w / 2, i)), depth(&|i| (w / 2, h - 1 - i)), depth(&|i| (i, h / 2)), depth(&|i| (w - 1 - i, h / 2))];
+        assert!(d.iter().all(|&n| n == d[0] && n >= 2), "{d:?}");
+    }
+
+    #[test]
+    fn the_word_page_is_portrait_with_one_slide_and_its_notes_or_two_slides_and_nothing_else() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.publish_open = true;
+        a.publish_page = publish_dialog::PublishPage::Word;
+        a.handout.orientation = brainbend_publish_html::HandoutOrientation::Landscape;
+        a.handout.per_page = 3;
+        a.handout.note_lines = true;
+        a.handout.slide_notes = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Landscape").is_none() && h.query_by_label("Portrait").is_none(), "the page is always portrait, so there is nothing to choose");
+        assert!(h.query_by_label("3 slides").is_none() && h.query_by_label("2 slides").is_some() && h.query_by_label("1 slide").is_some());
+        assert_eq!((h.state().handout.orientation, h.state().handout.per_page), (brainbend_publish_html::HandoutOrientation::Portrait, 2), "what PDF had chosen is brought within what Word does");
+        assert!(h.state().handout.note_lines == false && !h.state().handout.slide_notes && !h.state().handout.alt_text, "two to a page have nothing else");
+        assert!(h.query_by_label("Correct answers").is_some());
+        h.get_by_label("1 slide").click();
+        h.run_steps(4);
+        for name in ["Just the slides", "Slide notes and alt text under each slide"] { assert!(h.query_by_label(name).is_some(), "{name}"); }
+        assert!(h.query_by_label("Lines to write notes on").is_none() && h.query_by_label("Space for notes").is_none(), "Word is for typing, so it has no lines to write on");
+        assert!(!h.state().handout.note_lines, "and any lines PDF had asked for are off");
+        h.get_by_label("Slide notes and alt text under each slide").click();
+        h.run_steps(3);
+        assert!(h.state().handout.slide_notes && h.state().handout.alt_text, "notes and alt text are on");
+        h.get_by_label("Just the slides").click();
+        h.run_steps(3);
+        assert!(!h.state().handout.slide_notes && !h.state().handout.alt_text);
+        assert!(publish_dialog::PublishPage::Word.available());
     }
 
     /// Renders the New page at the smallest allowed window, where the logo must not touch the text.
@@ -11228,7 +12393,7 @@ mod tests {
             h.state_mut().insert_text();
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("7b-ribbon-text-selected.png")).unwrap();
-            h.state_mut().ribbon_tab = 5;
+            h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
             h.state_mut().selected = None;
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("7c-animations-no-selection.png")).unwrap();
@@ -11644,7 +12809,7 @@ mod tests {
         o.emphasis = Some(Emphasis { kind: EmphasisKind::Pulse, delay_ms: 0, duration_ms: 800, repeat: 1 });
         a.insert(o);
         let mut h = harness(a);
-        h.state_mut().ribbon_tab = 5;
+        h.state_mut().ribbon_tab = ribbon::ANIMATIONS_TAB;
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("9n-motion-path.png")).unwrap();
@@ -11701,6 +12866,25 @@ mod tests {
         out
     }
 
+    /// A drag with Shift held (the key is pressed first and let go afterwards).
+    fn drag_with_shift(h: &mut egui_kittest::Harness<'static, App>, from: egui::Pos2, to: egui::Pos2) {
+        let shift = egui::Modifiers::SHIFT;
+        h.event(egui::Event::ModifiersChanged(shift));
+        h.run_steps(1);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: shift });
+        h.run_steps(1);
+        h.event(egui::Event::PointerMoved(from + egui::vec2(7.0, 0.0)));
+        h.run_steps(1);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: shift });
+        h.run_steps(1);
+        h.event(egui::Event::ModifiersChanged(Default::default()));
+        h.run_steps(2);
+    }
+
     fn drag(h: &mut egui_kittest::Harness<'static, App>, from: egui::Pos2, to: egui::Pos2) {
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
@@ -11712,6 +12896,213 @@ mod tests {
         h.run_steps(2);
         h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
         h.run_steps(2);
+    }
+
+    /// A 400 x 200 rectangle selected on an otherwise empty slide, ready to have a corner dragged.
+    fn selected_rect_for_resizing() -> egui_kittest::Harness<'static, App> {
+        let mut a = app();
+        a.insert_rect();
+        let (li, oi) = a.selected.unwrap();
+        let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
+        (o.x, o.y, o.w, o.h, o.rotation) = (300.0, 300.0, 400.0, 200.0, 0.0);
+        let mut h = harness(a);
+        h.run_steps(4);
+        h
+    }
+
+    fn resized_rect(h: &egui_kittest::Harness<'static, App>) -> (f32, f32, f32, f32) {
+        let (li, oi) = h.state().selected.unwrap();
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        (o.x, o.y, o.w, o.h)
+    }
+
+    /// A project with a 400 x 200 PNG asset ("pic") for the aspect-ratio tests.
+    fn app_with_a_400_by_200_picture() -> App {
+        let mut a = app();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(400, 200, image::Rgba([200, 60, 60, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        a.project.as_mut().unwrap().assets.insert("pic".into(), Asset { name: "p.png".into(), mime: "image/png".into(), bytes: png.into_inner(), file: None });
+        a
+    }
+
+    fn add_stretched(a: &mut App, kind: Kind, id: &str) -> (usize, usize) {
+        let mut o = Object::new(id, id, kind.clone(), 100.0, 100.0, 600.0, 600.0);
+        if matches!(kind, Kind::Video) { o.poster = Some("pic".into()); } else { o.asset = Some("pic".into()); }
+        a.insert(o);
+        a.selected.unwrap()
+    }
+
+    #[test]
+    fn the_publish_outline_button_tints_when_hovered_and_more_while_its_window_is_open() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut a = app();
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let b = h.get_all_by_label("Publish").next().unwrap().accesskit_node().raw_bounds().unwrap();
+        // A point on the button's padding, clear of its icon and its name.
+        let (px, py) = ((b.x0 + 5.0) as u32, ((b.y0 + b.y1) / 2.0) as u32);
+        let sample = |h: &mut egui_kittest::Harness<'static, App>| { let img = h.render().expect("renderer"); let p = img.get_pixel(px, py); p.0[0] as u32 + p.0[1] as u32 + p.0[2] as u32 };
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("publish-button.png")).unwrap(); }
+        let rest = sample(&mut h);
+        h.event(egui::Event::PointerMoved(egui::pos2(px as f32 + 6.0, py as f32)));
+        h.run_steps(3);
+        let hovered = sample(&mut h);
+        let d = |a: u32, b: u32| a.abs_diff(b);
+        assert!(d(hovered, rest) > 20, "hovering tints the inside: {rest} -> {hovered}");
+        h.event(egui::Event::PointerMoved(egui::pos2(5.0, 400.0)));
+        h.state_mut().publish_open = true;
+        h.run_steps(3);
+        let open = sample(&mut h);
+        // The window dims everything behind it, so compare with a plain bit of ribbon next to the button, dimmed the same.
+        let img = h.render().expect("renderer");
+        let q = img.get_pixel((b.x0 - 3.0) as u32, py);
+        let plain = q.0[0] as u32 + q.0[1] as u32 + q.0[2] as u32;
+        assert!(d(open, plain) > 15, "it stays tinted while the Publish window is open: ribbon {plain}, button {open}");
+    }
+
+    #[test]
+    fn restore_aspect_ratio_keeps_the_width_and_the_corner_and_takes_one_undo_step() {
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        let (x0, y0) = { let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi]; (o.x, o.y) };
+        a.restore_aspect_ratio();
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert_eq!((o.x, o.y, o.w, o.h), (x0, y0, 600.0, 300.0), "twice as wide as tall, as the file is, and the top-left corner has not moved");
+        a.undo();
+        let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
+        assert_eq!((o.w, o.h), (600.0, 600.0), "one undo puts the stretch back");
+    }
+
+    #[test]
+    fn the_properties_panel_has_a_restore_aspect_ratio_button_for_a_picture_but_not_a_shape() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("Size and position").click();
+        h.run_steps(3);
+        h.get_by_label("Restore aspect ratio").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].h, 300.0, "the button restores the proportions");
+        h.state_mut().insert_rect();
+        h.run_steps(4);
+        assert!(h.query_by_label("Restore aspect ratio").is_none(), "a shape has no original proportions");
+    }
+
+    #[test]
+    fn restore_aspect_ratio_uses_the_visible_part_of_a_cropped_picture_and_a_videos_still() {
+        let mut a = app_with_a_400_by_200_picture();
+        let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
+        a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].crop = Some([0.25, 0.0, 0.25, 0.0]);
+        a.restore_aspect_ratio();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        assert_eq!((o.w, o.h), (600.0, 600.0), "half the width hidden leaves a square");
+        let (li, oi) = add_stretched(&mut a, Kind::Video, "clip");
+        a.restore_aspect_ratio();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        assert_eq!((o.w, o.h), (600.0, 300.0), "a video follows its still picture");
+    }
+
+    #[test]
+    fn restore_aspect_ratio_applies_to_every_picture_selected_keeps_a_turned_ones_centre_and_skips_other_objects() {
+        let mut a = app_with_a_400_by_200_picture();
+        let first = add_stretched(&mut a, Kind::Image, "one");
+        let second = add_stretched(&mut a, Kind::Image, "two");
+        a.project.as_mut().unwrap().slides[0].layers[second.0].objects[second.1].rotation = 30.0;
+        let centre_y = { let o = &a.project.as_ref().unwrap().slides[0].layers[second.0].objects[second.1]; o.y + o.h / 2.0 };
+        a.insert_rect();
+        let rect = a.selected.unwrap();
+        a.project.as_mut().unwrap().slides[0].layers[rect.0].objects[rect.1].h = 77.0;
+        let ids: Vec<String> = [first, second].iter().map(|&(l, o)| a.project.as_ref().unwrap().slides[0].layers[l].objects[o].id.clone()).collect();
+        a.multi = ids;
+        a.restore_aspect_ratio();
+        let objs = &a.project.as_ref().unwrap().slides[0].layers[0].objects;
+        assert_eq!(objs[first.1].h, 300.0);
+        let t = &objs[second.1];
+        assert_eq!(t.h, 300.0);
+        assert!((t.y + t.h / 2.0 - centre_y).abs() < 0.01, "a turned picture keeps its centre: y {} h {}", t.y, t.h);
+        assert_eq!(objs[rect.1].h, 77.0, "other objects are left alone");
+        // With only a shape selected there is nothing to restore.
+        a.multi.clear();
+        a.selected = Some(rect);
+        a.restore_aspect_ratio();
+        assert_eq!(a.status, "Select a picture or video");
+    }
+
+    #[test]
+    fn holding_shift_while_dragging_a_corner_keeps_the_objects_proportions() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let corner = origin + egui::vec2(700.0, 500.0) * scale;
+        drag_with_shift(&mut h, corner, corner + egui::vec2(120.0, 10.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01, "still twice as wide as it is tall: {w} x {hgt}");
+        assert!(w > 450.0, "and it did grow: {w}");
+        assert_eq!((x, y), (300.0, 300.0), "the opposite corner stays put");
+    }
+
+    #[test]
+    fn without_shift_a_corner_drag_still_resizes_freely() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let corner = origin + egui::vec2(700.0, 500.0) * scale;
+        drag(&mut h, corner, corner + egui::vec2(120.0, 10.0) * scale);
+        let (_, _, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() > 0.1, "free resize changes the proportions: {w} x {hgt}");
+    }
+
+    #[test]
+    fn shift_on_a_top_left_corner_keeps_the_bottom_right_corner_fixed() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let corner = origin + egui::vec2(300.0, 300.0) * scale;
+        drag_with_shift(&mut h, corner, corner + egui::vec2(-80.0, -5.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01, "{w} x {hgt}");
+        assert!(((x + w) - 700.0).abs() < 0.5 && ((y + hgt) - 500.0).abs() < 0.5, "the bottom right corner did not move: {x},{y} {w}x{hgt}");
+    }
+
+    #[test]
+    fn shift_on_a_side_handle_keeps_the_proportions_growing_the_other_side_about_the_middle() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        // The right edge: the left edge stays, and the height grows evenly above and below.
+        let right = origin + egui::vec2(700.0, 400.0) * scale;
+        drag_with_shift(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01 && w > 450.0, "{w} x {hgt}");
+        assert!((x - 300.0).abs() < 0.5, "the left edge stayed: {x}");
+        assert!(((y + hgt / 2.0) - 400.0).abs() < 0.5, "it grew about the middle: y {y} h {hgt}");
+        // The top edge: the bottom stays, and the width grows evenly left and right.
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let top = origin + egui::vec2(500.0, 300.0) * scale;
+        drag_with_shift(&mut h, top, top - egui::vec2(0.0, 60.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert!((w / hgt - 2.0).abs() < 0.01 && hgt > 250.0, "{w} x {hgt}");
+        assert!(((y + hgt) - 500.0).abs() < 0.5, "the bottom stayed: {}", y + hgt);
+        assert!(((x + w / 2.0) - 500.0).abs() < 0.5, "it grew about the middle: x {x} w {w}");
+    }
+
+    #[test]
+    fn without_shift_a_side_handle_changes_only_that_side() {
+        let mut h = selected_rect_for_resizing();
+        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let right = origin + egui::vec2(700.0, 400.0) * scale;
+        drag(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
+        let (x, y, w, hgt) = resized_rect(&h);
+        assert_eq!((x, y, hgt), (300.0, 300.0, 200.0));
+        assert!(w > 450.0);
+    }
+
+    #[test]
+    fn keep_proportions_follows_the_bigger_move_and_never_shrinks_past_the_minimum() {
+        assert_eq!(keep_proportions(400.0, 200.0, (1, 1), (100.0, 0.0), 4.0), (100.0, 50.0));
+        assert_eq!(keep_proportions(400.0, 200.0, (1, 1), (0.0, 100.0), 4.0), (200.0, 100.0));
+        let (gx, gy) = keep_proportions(400.0, 200.0, (-1, -1), (-1000.0, -1000.0), 4.0);
+        assert!(400.0 + gx >= 8.0 - 0.01 && 200.0 + gy >= 4.0 - 0.01 && ((400.0 + gx) / (200.0 + gy) - 2.0).abs() < 0.01, "{gx} {gy}");
     }
 
     #[test]
@@ -11732,7 +13123,7 @@ mod tests {
         let before = state(&h);
         let whole = crop::image_rect(&before);
 
-        // The handle on the left edge, found by its colour in the rendered frame.
+        // The handle on the left edge, found by its color in the rendered frame.
         let img = h.render().expect("renderer");
         let handles = purple_handles(&img);
         assert_eq!(handles.len(), 8, "eight crop handles: {handles:?}");
@@ -12139,6 +13530,95 @@ mod tests {
         }
         assert!(moved, "dragging the border changed column widths: {before:?} -> {:?}", widths(&h));
         assert!(h.state().undo.len() >= 1);
+    }
+
+    #[test]
+    fn layout_builder_deletes_a_layout_even_one_slides_use_and_keeps_working() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.add_slide_with_layout(SlideKind::Normal, Some("layout-content".into()));
+        a.add_slide_with_layout(SlideKind::Normal, Some("layout-title".into()));
+        a.enter_master_view();
+        let mut h = harness(a);
+        h.run_steps(3);
+        for _ in 0..4 {
+            let n = h.state().project.as_ref().unwrap().slides.len();
+            let last = n - 1;
+            h.state_mut().slide = last;
+            h.run_steps(2);
+            h.get_by_label("Delete").click();
+            h.run_steps(4);
+            assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n - 1);
+            assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n - 2, "the layout list stays in step");
+        }
+        h.state_mut().leave_master_view();
+        h.run_steps(3);
+        let p = h.state().project.as_ref().unwrap();
+        assert!(p.slides.iter().all(|s| s.layout.as_deref().is_none_or(|l| p.layout(l).is_some())), "no slide points at a deleted layout");
+    }
+
+    #[test]
+    fn leaving_the_layout_builder_is_quick_however_much_media_the_project_holds() {
+        let mut a = app();
+        a.project.as_mut().unwrap().assets.insert("big".into(), Asset { name: "big.mp4".into(), mime: "video/mp4".into(), bytes: vec![7; 60_000_000], file: None });
+        a.enter_master_view();
+        a.insert_layout(None);
+        let t = std::time::Instant::now();
+        a.leave_master_view();
+        assert!(t.elapsed().as_millis() < 300, "took {:?}", t.elapsed());
+        assert_eq!(a.project.as_ref().unwrap().assets["big"].bytes.len(), 60_000_000, "the media is still there");
+    }
+
+    #[test]
+    fn layout_builder_panel_adds_renames_moves_and_deletes_layouts() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.enter_master_view();
+        let mut h = harness(a);
+        h.run_steps(3);
+        let n0 = h.state().project.as_ref().unwrap().slides.len();
+        h.get_by_label("+ Add layout").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n0 + 1);
+        let i = h.state().slide;
+        assert_eq!(i, n0, "the new layout is selected");
+        h.state_mut().rename_layout(i, "Quiz ");
+        h.state_mut().rename_layout(i, "Quiz page");
+        h.state_mut().move_layout(i, false);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[n0 - 1].name, "Quiz page");
+        assert_eq!(h.state().slide, n0 - 1);
+        h.state_mut().move_layout(1, false);
+        assert_eq!(h.state().slide, n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
+        h.state_mut().leave_master_view();
+        let p = h.state().project.as_ref().unwrap();
+        assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");
+        assert_eq!(p.layouts[n0 - 2].name, "Quiz page", "and so is the new order");
+    }
+
+    #[test]
+    fn double_clicking_a_slide_title_in_the_slide_list_renames_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.add_slide_with_layout(SlideKind::Normal, None);
+        let name = a.project.as_ref().unwrap().slides[1].name.clone();
+        let mut h = harness_fast(a);
+        h.run_steps(3);
+        let at = h.get_by_label(&format!("1.2 {name}")).rect().center();
+        for pressed in [true, false, true, false] {
+            h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() });
+            h.run_steps(1);
+        }
+        h.run_steps(3);
+        assert_eq!(h.state().slide_rename, Some(1), "the title became a box");
+        h.state_mut().project.as_mut().unwrap().slides[1].name = "Welcome ".into();
+        h.run_steps(2);
+        assert_eq!(h.state().slide_rename, Some(1));
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert_eq!(h.state().slide_rename, None);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].name, "Welcome", "trimmed when done");
+        h.state_mut().undo();
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].name, name, "one undo puts the old name back");
     }
 
     #[test]

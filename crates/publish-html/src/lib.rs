@@ -185,7 +185,7 @@ pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, Stri
 #topbar{{position:fixed;left:0;right:0;top:0;height:44px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--p-panel);color:var(--p-fg);font:calc(16px*var(--p-scale)) var(--p-font);z-index:4;border-bottom:1px solid var(--p-line)}}
 #topbar .tb-toggle{{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;cursor:pointer}}
 #topbar .tb-toggle:hover{{background:var(--p-hover)}}
-#topbar .tb-title{{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+#topbar .tb-title{{margin:0;font-size:inherit;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 #topbar .logo{{height:28px;max-width:140px;object-fit:contain}}
 body.side-anim #topbar,body.side-anim #nav{{transition:left .22s ease,right .22s ease}}
 body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
@@ -232,6 +232,13 @@ body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #nav .nav-controls .ctl-seek{{width:200px;max-width:28vw;accent-color:var(--p-accent)}}
 #nav .nav-controls .ctl-time{{font-size:.85em;color:var(--p-muted);white-space:nowrap;font-variant-numeric:tabular-nums}}
 #nav .nav-controls .ctl-volume[aria-pressed=true]{{background:var(--p-hover);color:var(--p-fg);border-color:var(--p-line)}}
+#nav .nav-controls{{position:relative}}
+#nav .nav-controls .ctl-menu{{position:absolute;left:0;bottom:calc(100% + 14px);min-width:160px;padding:6px 0;background:var(--p-panel);color:var(--p-fg);border:1px solid var(--p-line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;flex-direction:column;z-index:7}}
+#nav .nav-controls .ctl-menu[hidden]{{display:none}}
+#nav .nav-controls .ctl-menu-head{{padding:6px 16px 2px;font-size:.8em;letter-spacing:.06em;text-transform:uppercase;color:var(--p-muted)}}
+#nav .nav-controls button.ctl-item{{border:0;border-radius:0;text-align:left;padding:8px 16px 8px 34px;position:relative;min-width:0}}
+#nav .nav-controls button.ctl-item[aria-checked=true]{{background:transparent;color:var(--p-fg);font-weight:700}}
+#nav .nav-controls button.ctl-item[aria-checked=true]::before{{content:"\2713";position:absolute;left:12px}}
 #nav button:focus-visible{{outline:3px solid #6aa8e6}}
 .obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.hidden-by-layer{{display:none !important}}
 .obj:focus-visible{{outline:3px solid #1a1a1a;outline-offset:3px}}
@@ -385,7 +392,7 @@ mod tests {
             kind: brainbend_doc::SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -445,6 +452,16 @@ mod tests {
         let html = String::from_utf8(files.iter().find(|(n, _)| n == "index.html").unwrap().1.clone()).unwrap();
         assert!(html.contains("\"kind\":\"Video\""));
         assert!(html.contains("assets/a1.mp4") || html.contains("assets/a0.mp4"));
+    }
+
+    #[test]
+    fn the_projects_name_is_the_one_heading_one_and_each_slide_title_is_a_heading_two() {
+        let mut p = tiny();
+        p.sanitize();
+        let files = build(&p, Lms::None).unwrap();
+        let html = String::from_utf8(files.iter().find(|(n, _)| n == "index.html").unwrap().1.clone()).unwrap();
+        assert!(html.contains("el('h1', 'sr-only'") && html.contains("el('h1', 'tb-title'"), "the name is an h1, hidden unless the title is shown");
+        assert!(html.contains("'aria-level', '2'") && !html.contains("'aria-level', '1'"), "slide titles are level 2");
     }
 
     #[test]
@@ -516,7 +533,7 @@ mod tests {
             kind: brainbend_doc::SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -530,7 +547,7 @@ mod tests {
     }
 }
 
-/// `:root` custom properties for the player's colours, font and text size.
+/// `:root` custom properties for the player's colors, font and text size.
 fn player_vars(p: &brainbend_doc::PlayerSettings) -> String {
     // The two bundled faces come first in the stack so a font that is not installed falls back to them.
     let font = format!("\"{}\",\"Open Sans\",Montserrat,Arial,sans-serif", p.font.replace(['"', '\\', '<', '>', ';', '{', '}'], ""));

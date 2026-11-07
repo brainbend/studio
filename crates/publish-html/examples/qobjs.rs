@@ -8,7 +8,7 @@ fn main() {
     let mut hint = Object::new("hint", "Hint button", Kind::Rect, 1500.0, 20.0, 300.0, 80.0);
     hint.text = "Hint".into();
     let mut note = Object::new("note", "Hint text", Kind::Text, 1500.0, 120.0, 300.0, 80.0);
-    note.text = "Think about the colour of the sky".into();
+    note.text = "Think about the color of the sky".into();
     note.hidden = true;
     let badge = Object::new("badge", "Badge", Kind::Ellipse, 20.0, 20.0, 100.0, 100.0);
     s.layers[0].objects = vec![hint, note, badge];

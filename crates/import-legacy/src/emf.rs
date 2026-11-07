@@ -307,15 +307,15 @@ impl Renderer {
                 };
             }
             37 => self.select(u(8)),
-            // CREATEPEN: ihPen, style, width, (unused), colour
+            // CREATEPEN: ihPen, style, width, (unused), color
             38 => {
                 self.objects.insert(u(8), Obj::Pen(Pen { color: colorref(u(24)), width: i(16).max(1) as f32, hollow: u(12) == 5 }));
             }
-            // CREATEBRUSHINDIRECT: ihBrush, style, colour, hatch
+            // CREATEBRUSHINDIRECT: ihBrush, style, color, hatch
             39 => {
                 let b = match u(12) {
                     0 => Brush::Solid(colorref(u(16))),
-                    // Hatches and patterns are approximated by their colour.
+                    // Hatches and patterns are approximated by their color.
                     2 => {
                         self.skipped.insert("hatched fills (drawn solid)");
                         Brush::Solid(colorref(u(16)))
@@ -332,7 +332,7 @@ impl Renderer {
                 };
                 self.objects.insert(u(8), Obj::Brush(b));
             }
-            // EXTCREATEPEN: ihPen, offBmi, cbBmi, offBits, cbBits, then the pen: style, width, brush style, colour
+            // EXTCREATEPEN: ihPen, offBmi, cbBmi, offBits, cbBits, then the pen: style, width, brush style, color
             95 => {
                 self.objects.insert(u(8), Obj::Pen(Pen { color: colorref(u(48)), width: u(40).max(1) as f32, hollow: u(36) & 0xFF == 5 }));
             }

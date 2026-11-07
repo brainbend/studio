@@ -59,6 +59,7 @@ pub const EXPORT: char = '\u{eaf0}';
 pub const EYE_OFF: char = '\u{e224}';
 pub const TIMER: char = '\u{e492}';
 pub const CHECK: char = '\u{e186}';
+pub const X: char = '\u{e4f6}';
 pub const QUESTION: char = '\u{e3e8}';
 pub const FRONT: char = '\u{e462}';
 pub const BACK: char = '\u{e468}';
@@ -147,7 +148,7 @@ fn text_col(ui: &egui::Ui) -> egui::Color32 {
 pub const YELLOW: egui::Color32 = egui::Color32::from_rgb(255, 205, 0);
 pub const PURPLE: egui::Color32 = egui::Color32::from_rgb(110, 70, 200);
 
-/// The main-action colour: yellow on the dark theme, purple on the light one, where yellow would not stand out.
+/// The main-action color: yellow on the dark theme, purple on the light one, where yellow would not stand out.
 pub fn primary(ui: &egui::Ui) -> egui::Color32 { if ui.visuals().dark_mode { YELLOW } else { PURPLE } }
 
 /// Text on `primary`: near-black on the yellow, white on the purple.
@@ -159,7 +160,7 @@ pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(10, 110, 235);
 /// The accent under the pointer.
 pub const ACCENT_HOVER: egui::Color32 = egui::Color32::from_rgb(52, 140, 250);
 
-/// Icon colours give the ribbon its pop; each icon keeps one hue across the app.
+/// Icon colors give the ribbon its pop; each icon keeps one hue across the app.
 pub fn tint(icon: char) -> egui::Color32 {
     let c = |r, g, b| egui::Color32::from_rgb(r, g, b);
     match icon {
@@ -169,7 +170,7 @@ pub fn tint(icon: char) -> egui::Color32 {
         VIDEO | TRASH => c(214, 74, 84),
         SPEAKER | STACK | FILM | SHAPES => c(135, 92, 205),
         RECT | CIRCLE | EXPORT | TIMER | QUESTION | SLIDERS => c(236, 112, 40),
-        LINE | RADIO | LIST_NUM | COPY => c(0, 150, 160),
+        LINE | RADIO | LIST_NUM | COPY | TABLE => c(0, 150, 160),
         MOON | SUN => c(240, 170, 20),
         _ => ACCENT,
     }
@@ -197,16 +198,21 @@ fn label_lines(ui: &egui::Ui, label: &str) -> Vec<String> {
     }
 }
 
-/// Large flat button: coloured icon on top, up to two lines of label under it, optional dropdown caret.
+/// Large flat button: colored icon on top, up to two lines of label under it, optional dropdown caret.
 /// Icon and text sit at fixed positions so neighbouring buttons align regardless of label length.
 fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
+    big_widget_min(ui, icon, label, caret, selected, 0.0)
+}
+
+/// `big_widget`, at least `min_w` wide.
+fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, min_w: f32) -> egui::Response {
     let lines = label_lines(ui, label);
     let font = egui::FontId::proportional(11.5);
     let widest = lines.iter().enumerate().map(|(i, l)| {
         let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
         if caret && i + 1 == lines.len() { w + 14.0 } else { w }
     }).fold(0.0f32, f32::max);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2((widest + 6.0).max(36.0), BIG_H), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2((widest + 6.0).max(36.0).max(min_w), BIG_H), egui::Sense::click());
     let plain = label.replace('\n', " ");
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), plain.clone()));
     if ui.is_rect_visible(rect) {
@@ -216,7 +222,7 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
             ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
         }
         let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
-        let icon_col = if enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
+        let icon_col = if !selected && enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
         ui.painter().text(egui::pos2(rect.center().x, rect.top() + 4.0), egui::Align2::CENTER_TOP, icon, egui::FontId::new(22.0, icons()), icon_col);
         let n = lines.len();
         for (i, line) in lines.iter().enumerate() {
@@ -234,6 +240,91 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
         }
     }
     resp
+}
+
+/// A big ribbon button whose picture is drawn by `draw` (given the painter, the 30 x 20 frame it may draw in, the colour of the
+/// new slide and the colour of the old one), for a gallery of things no icon font has a glyph for.
+fn big_drawn_button(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, draw: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32, egui::Color32)) -> egui::Response {
+    let w = big_width(ui, label, false);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, BIG_H), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    if ui.is_rect_visible(rect) {
+        let vis = ui.style().interact_selectable(&resp, selected);
+        if resp.hovered() || resp.has_focus() || selected {
+            ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
+        }
+        let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
+        let frame = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 18.0), egui::vec2(30.0, 20.0));
+        let old = if selected { col.gamma_multiply(0.45) } else { text_col(ui).gamma_multiply(0.35) };
+        let new = if selected { col } else { ACCENT };
+        draw(&ui.painter().with_clip_rect(frame.expand(1.5)), frame, new, old);
+        ui.painter().rect_stroke(frame, 2.0, egui::Stroke::new(1.2, col), egui::StrokeKind::Outside);
+        ui.painter().text(egui::pos2(rect.center().x, rect.top() + 31.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(11.5), col);
+    }
+    resp.on_hover_text(tip)
+}
+
+/// What each kind of slide transition looks like in the ribbon: the old slide in grey, the new one in colour, part way through.
+fn draw_transition(kind: brainbend_doc::TransitionKind, p: &egui::Painter, f: egui::Rect, new: egui::Color32, old: egui::Color32) {
+    use brainbend_doc::TransitionKind::*;
+    let part = |x0: f32, x1: f32, y0: f32, y1: f32| egui::Rect::from_min_max(egui::pos2(f.left() + f.width() * x0, f.top() + f.height() * y0), egui::pos2(f.left() + f.width() * x1, f.top() + f.height() * y1));
+    match kind {
+        Fade => {
+            const N: usize = 10;
+            for i in 0..N {
+                let t = i as f32 / (N - 1) as f32;
+                let c = egui::Color32::from_rgba_unmultiplied(new.r(), new.g(), new.b(), (255.0 * t) as u8);
+                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, old);
+                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, c);
+            }
+        }
+        Push => {
+            p.rect_filled(part(-0.45, 0.5, 0.0, 1.0), 0.0, old);
+            p.rect_filled(part(0.5, 1.45, 0.0, 1.0), 0.0, new);
+            p.line_segment([part(0.5, 0.5, 0.0, 0.0).min, part(0.5, 0.5, 1.0, 1.0).min + egui::vec2(0.0, 0.0)], egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)));
+        }
+        Cover => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.4, 1.0, 0.0, 1.0), 0.0, new);
+            p.line_segment([part(0.4, 0.4, 0.0, 0.0).min, part(0.4, 0.4, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
+        }
+        Uncover => {
+            p.rect_filled(f, 0.0, new);
+            p.rect_filled(part(-0.4, 0.55, 0.0, 1.0), 0.0, old);
+            p.line_segment([part(0.55, 0.55, 0.0, 0.0).min, part(0.55, 0.55, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
+        }
+        Wipe => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.0, 0.58, 0.0, 1.0), 0.0, new);
+            for k in 0..4 { let y = k as f32 / 4.0; p.rect_filled(part(0.58, 0.75, y + 0.06, y + 0.19), 0.0, new.gamma_multiply(0.55)); }
+        }
+        Split => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.3, 0.7, 0.0, 1.0), 0.0, new);
+            let s = egui::Stroke::new(1.3, egui::Color32::WHITE);
+            p.line_segment([part(0.3, 0.3, 0.5, 0.5).min, part(0.12, 0.12, 0.5, 0.5).min], s);
+            p.line_segment([part(0.7, 0.7, 0.5, 0.5).min, part(0.88, 0.88, 0.5, 0.5).min], s);
+        }
+        Zoom => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.28, 0.72, 0.18, 0.82), 1.0, new);
+            let s = egui::Stroke::new(1.0, new);
+            p.rect_stroke(part(0.12, 0.88, 0.08, 0.92), 1.0, s, egui::StrokeKind::Inside);
+        }
+        Dissolve => {
+            p.rect_filled(f, 0.0, old);
+            // Scattered squares of the new slide, in a fixed pattern.
+            for i in 0..6 { for j in 0..4 {
+                if (i * 7 + j * 5 + i * j) % 3 != 0 { p.rect_filled(part(i as f32 / 6.0, (i + 1) as f32 / 6.0, j as f32 / 4.0, (j + 1) as f32 / 4.0), 0.0, new); }
+            } }
+        }
+    }
+}
+
+/// `c` mixed towards black by `t` (0 to 1), still fully opaque.
+fn shade(c: egui::Color32, t: f32) -> egui::Color32 {
+    let k = 1.0 - t;
+    egui::Color32::from_rgb((c.r() as f32 * k).round() as u8, (c.g() as f32 * k).round() as u8, (c.b() as f32 * k).round() as u8)
 }
 
 /// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
@@ -303,23 +394,57 @@ fn caret_job(ui: &egui::Ui, text: &str, icon: Option<char>) -> egui::text::Layou
     job
 }
 
-/// What Heading 1 to 4 and Normal Text look like when applied: size in px and whether they use the theme's heading
-/// font. The point is the element the text is published as; the look is a
-/// starting point the author can change.
-fn role_look(role: TextRole) -> (f32, bool) {
-    match role { TextRole::Normal => (36.0, false), TextRole::H1 => (64.0, true), TextRole::H2 => (52.0, true), TextRole::H3 => (44.0, true), TextRole::H4 => (38.0, true) }
+/// An entrance or exit as one button; its panel holds the effects, how it starts and how long it takes.
+/// There is no delay to set: when the object is shown is the timeline's job.
+fn effect_menu(ui: &mut egui::Ui, icon: char, title: &str, tip: &str, effect: &mut Option<Entrance>, step: &mut u32, with_delay: bool) -> bool {
+    let mut changed = false;
+    let tip = match effect { Some(e) => format!("{title}: {}", effect_label(e.kind)), None => tip.to_string() };
+    let btn = big_widget(ui, icon, title, true, effect.is_some()).on_hover_text(tip);
+    egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        ui.set_min_width(210.0);
+        if ui.selectable_label(effect.is_none(), "none").clicked() { *effect = None; changed = true; }
+        for k in EFFECT_KINDS {
+            if ui.selectable_label(effect.map(|e| e.kind) == Some(k), effect_label(k)).clicked() {
+                let prev = *effect;
+                *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) });
+                changed = true;
+            }
+        }
+        if let Some(en) = effect.as_mut() {
+            ui.separator();
+            changed |= click_row(ui, &format!("ck-{title}"), "Starts", step);
+            ui.horizontal(|ui| {
+                ui.label("takes");
+                changed |= ui.add(egui::DragValue::new(&mut en.duration_ms).range(50..=10000).speed(10.0).suffix(" ms")).changed();
+            });
+            if with_delay { changed |= delay_leftover(ui, &mut en.delay_ms); }
+            else { ui.weak("Leaves when its bar ends on the timeline."); }
+        }
+    });
+    changed
+}
+
+/// A delay saved by an earlier version is still honored, so it is shown (and can be cleared); nothing offers to set a new one.
+fn delay_leftover(ui: &mut egui::Ui, delay: &mut u32) -> bool {
+    if *delay == 0 { return false; }
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.weak(format!("Delayed {} ms", *delay));
+        if ui.small_button("Clear").on_hover_text("Remove the delay. Set when it shows by dragging its bar on the timeline").clicked() { *delay = 0; changed = true; }
+    });
+    changed
 }
 
 impl App {
-    /// Text Styles: Normal Text and Heading 1 to 4. The button names the style of the selected object.
+    /// Text Styles: Normal Text and Heading 2 to 4. The button names the style of the selected object.
     fn text_styles_menu(&mut self, ui: &mut egui::Ui) {
         let theme = self.project.as_ref().map(|p| p.theme.clone()).unwrap_or_default();
         let current = self.selected_object().map(|o| o.role).unwrap_or_default();
         let mut pick = None;
         let btn = big_menu(ui, TEXT_AA, current.label(), "Text styles: set whether the text is a heading (published as <h1> to <h4>) or normal text", |ui| {
             ui.set_min_width(250.0);
-            for role in TextRole::ALL {
-                let (size, heading) = role_look(role);
+            for role in TextRole::CHOICES {
+                let (size, heading) = role.look();
                 let font = if heading { &theme.heading_font } else { &theme.body_font };
                 let mut job = egui::text::LayoutJob::default();
                 job.append(role.label(), 0.0, egui::text::TextFormat {
@@ -354,10 +479,10 @@ impl App {
     }
 
     /// Give the selected objects a text style: the element they are published as, and its starting look (size, the
-    /// theme's font and text colour). Character formatting is cleared (links stay). One undo step.
+    /// theme's font and text color). Character formatting is cleared (links stay). One undo step.
     pub(super) fn apply_text_style(&mut self, role: TextRole) {
         let theme = self.project.as_ref().map(|p| p.theme.clone()).unwrap_or_default();
-        let (size, heading) = role_look(role);
+        let (size, heading) = role.look();
         let family = if heading { theme.heading_font.clone() } else { theme.body_font.clone() };
         let col = theme.colors.first().copied().unwrap_or(Rgba(34, 34, 34, 255));
         self.edit_text_range(move |o, _, _, _| {
@@ -479,10 +604,16 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-pub const HELP_TAB: usize = 7;
-pub const TABS: [&str; 8] = ["File", "Home", "Insert", "Slides", "Design", "Animations", "Slide Master", "Help"];
-pub const MASTER_TAB: usize = 6;
+/// The tabs, left to right, in the order an author works through them. Layout Builder shows only inside its own mode.
+pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"];
 pub const HOME_TAB: usize = 1;
+pub const THEME_TAB: usize = 2;
+pub const SLIDES_TAB: usize = 3;
+pub const OBJECTS_TAB: usize = 4;
+pub const ANIMATIONS_TAB: usize = 5;
+pub const MASTER_TAB: usize = 6;
+pub const REVIEW_TAB: usize = 7;
+pub const HELP_TAB: usize = 8;
 const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
@@ -572,11 +703,63 @@ fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(1.0);
 }
 
+/// Extra width an outlined button gets, so its label does not touch the border.
+const OUTLINE_PAD: f32 = 16.0;
+
+/// For a main-action button drawn as an outline: its text and icon take the main-action color, and the button's
+/// own hover fill is left off (the outline shape paints the states).
+fn outlined_look(ui: &mut egui::Ui) {
+    let p = primary(ui);
+    let v = ui.visuals_mut();
+    v.override_text_color = Some(p);
+    for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
+}
+
+/// The outline and inside of a main-action button: a border in the main-action color, with an opaque tint inside
+/// and a darker border when the pointer is over it (`hot`), and more of both while pressed (`down`).
+fn outline_shape(ui: &egui::Ui, rect: egui::Rect, hot: bool, down: bool) -> egui::Shape {
+    let p = primary(ui);
+    let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+    let mix = |t: f32| { let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8; egui::Color32::from_rgb(m(card.r(), p.r()), m(card.g(), p.g()), m(card.b(), p.b())) };
+    let (fill, line) = if down { (mix(0.30), shade(p, 0.24)) } else if hot { (mix(0.15), shade(p, 0.12)) } else { (egui::Color32::TRANSPARENT, p) };
+    egui::Shape::Vec(vec![
+        egui::Shape::rect_filled(rect, RIBBON_RADIUS, fill),
+        egui::Shape::rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(2.0, line), egui::StrokeKind::Inside),
+    ])
+}
+
+/// How wide the leading "way out" button of a mode is, divider included.
+fn lead_width(ui: &egui::Ui, label: &str, caption: &str) -> f32 { big_width(ui, label, false).max(caption_width(ui, caption)) + 12.0 }
+
+/// How wide a group's small caption is.
+fn caption_width(ui: &egui::Ui, caption: &str) -> f32 {
+    ui.fonts_mut(|f| f.layout_no_wrap(caption.to_string(), egui::FontId::proportional(10.5), egui::Color32::WHITE).size().x)
+}
+
+/// The button that leaves a mode, at the very start of the ribbon in the main-action color (so it is never
+/// scrolled away or missed), with a divider after it. True when clicked.
+fn lead_button(ui: &mut egui::Ui, at: egui::Rect, icon: char, label: &str, caption: &str, tip: &str) -> bool {
+    let mut clicked = false;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
+        let cw = caption_width(ui, caption).max(big_width(ui, label, false));
+        group(ui, caption, |ui| {
+            // The group is exactly as wide as its caption or button, whichever is wider, with the button centred over it.
+            ui.allocate_ui_with_layout(egui::vec2(cw, BIG_H), egui::Layout::top_down(egui::Align::Center), |ui| {
+            let backing = ui.painter().add(egui::Shape::Noop);
+            let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, icon, label, false, false, cw).on_hover_text(tip) }).inner;
+            ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), resp.is_pointer_button_down_on()));
+            clicked = resp.clicked();
+            });
+        });
+    });
+    clicked
+}
+
 fn rgba(c: egui::Color32) -> Rgba {
     Rgba(c.r(), c.g(), c.b(), c.a())
 }
 
-/// A small icon button with a colour bar under it; opens a palette + picker. Returns true when changed.
+/// A small icon button with a color bar under it; opens a palette + picker. Returns true when changed.
 /// "Starts: automatically / on click #n" for one animation. Effects with the same click number play together.
 fn click_row(ui: &mut egui::Ui, id: &str, label: &str, step: &mut u32) -> bool {
     let mut changed = false;
@@ -609,8 +792,8 @@ pub(super) fn color_menu(ui: &mut egui::Ui, icon: char, tip: &str, cur: &mut Opt
     changed
 }
 
-/// A colour square that opens the same choices as the ribbon's colour buttons: the project's colours first. For settings
-/// outside the ribbon (a slider's colours, the player's accent).
+/// A color square that opens the same choices as the ribbon's color buttons: the project's colors first. For settings
+/// outside the ribbon (a slider's colors, the player's accent).
 pub(super) fn color_swatch(ui: &mut egui::Ui, c: &mut Rgba) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 20.0), egui::Sense::click());
     ui.painter().rect_filled(rect, 3.0, color(*c));
@@ -623,12 +806,12 @@ pub(super) fn color_swatch(ui: &mut egui::Ui, c: &mut Rgba) -> bool {
     changed
 }
 
-/// A row of colour squares; returns the one clicked.
-fn swatch_row(ui: &mut egui::Ui, colours: &[Rgba], cur: Option<Rgba>) -> Option<Rgba> {
+/// A row of color squares; returns the one clicked.
+fn swatch_row(ui: &mut egui::Ui, colors: &[Rgba], cur: Option<Rgba>) -> Option<Rgba> {
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
-        for c in colours {
+        for c in colors {
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
             ui.painter().rect_filled(rect, 3.0, color(*c));
             let on = cur.is_some_and(|k| (k.0, k.1, k.2) == (c.0, c.1, c.2));
@@ -639,11 +822,13 @@ fn swatch_row(ui: &mut egui::Ui, colours: &[Rgba], cur: Option<Rgba>) -> Option<
     picked
 }
 
-/// Pick a colour freely: a square for shade, a bar for hue, the colour itself, and a code to type (hex, or red, green and blue)
+/// Pick a color freely: a square for shade, a bar for hue, the color itself, and a code to type (hex, or red, green and blue)
 /// and how opaque it is. Drawn by hand so it is as small and plain as the rest of the menu.
 pub(super) fn color_entry(ui: &mut egui::Ui, cur: &mut Rgba) -> bool {
     use egui::ecolor::Hsva;
-    const W: f32 = 232.0;
+    // Menus use the usual width; a window can ask for more.
+    let w_id = egui::Id::new("color-entry-width");
+    let W: f32 = ui.ctx().data(|d| d.get_temp(w_id)).unwrap_or(232.0);
     let mut changed = false;
     // Hue and shade are kept between frames: a grey or black has no hue of its own to come back to.
     let state_id = ui.id().with("hsv");
@@ -715,7 +900,7 @@ pub(super) fn color_entry(ui: &mut egui::Ui, cur: &mut Rgba) -> bool {
     }
     ui.data_mut(|d| d.insert_temp(state_id, (hsv.h, hsv.s, hsv.v, [cur.0, cur.1, cur.2])));
 
-    // The colour, and how to say it: a hex code, or red, green and blue.
+    // The color, and how to say it: a hex code, or red, green and blue.
     ui.add_space(6.0);
     let rgb_id = ui.id().with("rgb-mode");
     let mut rgb_mode: bool = ui.data(|d| d.get_temp(rgb_id)).unwrap_or(false);
@@ -731,8 +916,8 @@ pub(super) fn color_entry(ui: &mut egui::Ui, cur: &mut Rgba) -> bool {
             ui.spacing_mut().item_spacing.x = 3.0;
             for v in [&mut cur.0, &mut cur.1, &mut cur.2] { changed |= ui.add(egui::DragValue::new(v).range(0..=255).speed(0.5)).changed(); }
         } else {
-            // A typed code takes effect when Enter is pressed or the box is left, so half a code never sets a colour.
-            let id = ui.id().with("typed-colour");
+            // A typed code takes effect when Enter is pressed or the box is left, so half a code never sets a color.
+            let id = ui.id().with("typed-color");
             let mut text: String = ui.data_mut(|d| d.get_temp(id)).unwrap_or_else(|| cur.hex());
             let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(86.0).hint_text("#4F81BD"));
             if r.has_focus() { ui.data_mut(|d| d.insert_temp(id, text.clone())); } else { ui.data_mut(|d| d.remove_temp::<String>(id)); }
@@ -752,8 +937,8 @@ pub(super) fn color_entry(ui: &mut egui::Ui, cur: &mut Rgba) -> bool {
     changed
 }
 
-/// The choices in a colour menu: "none", the author's palette (when they have made one), recently used colours, and a free
-/// picker with a way to type a code, a + that adds the colour to the palette and a pencil that edits the palette.
+/// The choices in a color menu: "none", the author's palette (when they have made one), recently used colors, and a free
+/// picker with a way to type a code, a + that adds the color to the palette and a pencil that edits the palette.
 fn color_popup(ui: &mut egui::Ui, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
     let mut changed = false;
     ui.set_min_width(232.0);
@@ -777,7 +962,7 @@ fn color_popup(ui: &mut egui::Ui, cur: &mut Option<Rgba>, none_label: Option<&st
     if color_entry(ui, &mut c) { *cur = Some(c); changed = true; }
     ui.horizontal(|ui| {
         let plus = crate::panos::icon_char("plus").unwrap_or('+');
-        if icon_button(ui, plus, false, "Add this colour to the palette").clicked() {
+        if icon_button(ui, plus, false, "Add this color to the palette").clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), c));
         }
         if icon_button(ui, PEN, false, "Edit the palette").clicked() {
@@ -785,50 +970,103 @@ fn color_popup(ui: &mut egui::Ui, cur: &mut Option<Rgba>, none_label: Option<&st
             ui.close();
         }
     });
-    // What was chosen is remembered as a recent colour once the pointer is released.
+    // What was chosen is remembered as a recent color once the pointer is released.
     if changed { if let Some(c) = *cur { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), c)); } }
     changed
 }
 
-/// Menu body for choosing a background: inherit, a solid colour, a gradient or a picture.
-/// `want_picture` is set when the user asks for a picture (the caller owns the file dialog).
-fn background_editor(ui: &mut egui::Ui, bg: &mut Option<Background>, theme: &Theme, inherits: bool, want_picture: &mut bool) -> bool {
+/// Build a linear gradient: a bar to see it, markers to select, move, add and remove its colors, the angle, presets
+/// and the selected color's picker. All inline. True when anything changed.
+fn gradient_editor(ui: &mut egui::Ui, angle: &mut f32, stops: &mut Vec<(f32, Rgba)>, kind: &mut brainbend_doc::GradientKind, geom: &mut brainbend_doc::GradientGeom, slide_size: (f32, f32)) -> bool {
     let mut changed = false;
-    ui.set_min_width(230.0);
-    if ui.selectable_label(bg.is_none(), if inherits { "Same as layout" } else { "White (none)" }).clicked() { *bg = None; changed = true; }
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("Solid colour").weak().size(12.0));
-    let mut solid = match bg { Some(Background::Solid(c)) => Some(*c), _ => None };
-    if color_menu(ui, BUCKET, "Pick a colour", &mut solid, None) {
-        if let Some(c) = solid { *bg = Some(Background::Solid(c)); changed = true; }
+    let w: f32 = ui.ctx().data(|d| d.get_temp(egui::Id::new("color-entry-width"))).unwrap_or(300.0);
+    let sel_id = ui.id().with("stop");
+    let mut sel: usize = ui.data(|d| d.get_temp(sel_id)).unwrap_or(0).min(stops.len().saturating_sub(1));
+    // The color being edited comes first: the project's colors, recent ones and a free picker.
+    if let Some(st) = stops.get_mut(sel) {
+        let mut c = Some(st.1);
+        if color_popup(ui, &mut c, None) { if let Some(n) = c { st.1 = n; changed = true; } }
     }
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("Gradient").weak().size(12.0));
-    ui.horizontal_wrapped(|ui| {
-        let presets = [(4, 5, 135.0), (2, 4, 135.0), (3, 1, 180.0), (2, 0, 90.0), (6, 4, 45.0), (1, 3, 180.0)];
-        for (a, b, ang) in presets {
-            let (ca, cb) = (theme.color(a), theme.color(b));
-            let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 24.0), egui::Sense::click());
-            paint_gradient(&ui.painter_at(rect), rect, ang, &[(0.0, ca), (1.0, cb)]);
-            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Inside);
-            if resp.on_hover_text("Gradient").clicked() { *bg = Some(Background::gradient(ang, ca, cb)); changed = true; }
+    ui.add_space(8.0);
+    // The shape of the gradient.
+    ui.columns(4, |cols| {
+        for (i, k) in brainbend_doc::GradientKind::ALL.into_iter().enumerate() {
+            if cols[i].add_sized([cols[i].available_width(), 22.0], egui::Button::selectable(*kind == k, k.label())).clicked() && *kind != k { *kind = k; changed = true; }
         }
     });
-    if let Some(Background::Gradient { angle, stops }) = bg {
-        ui.horizontal(|ui| {
-            ui.label("Angle");
-            changed |= ui.add(egui::DragValue::new(angle).range(0.0..=360.0).speed(1.0).suffix("°")).changed();
-            ui.label("Colours");
-            for st in stops.iter_mut() {
-                let mut c = Some(st.1);
-                if color_menu(ui, BUCKET, "Gradient colour", &mut c, None) { st.1 = c.unwrap_or(st.1); changed = true; }
-            }
-            if ui.small_button("Flip").clicked() { stops.reverse(); for st in stops.iter_mut() { st.0 = 1.0 - st.0; } changed = true; }
-        });
+    ui.add_space(8.0);
+    // The bar, with a marker under it for each color. Click the bar to add a color; drag a marker to move it.
+    let (bar_full, bar_resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+    let bar = bar_full.shrink2(egui::vec2(8.0, 0.0));
+    paint_gradient(&ui.painter_at(bar), bar, 90.0, stops);
+    ui.painter().rect_stroke(bar, 3.0, egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
+    let (strip_full, _) = ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::hover());
+    let strip = strip_full.shrink2(egui::vec2(8.0, 0.0));
+    let mut moved: Option<(usize, f32)> = None;
+    for i in 0..stops.len() {
+        let x = strip.left() + stops[i].0.clamp(0.0, 1.0) * strip.width();
+        let m = egui::Rect::from_center_size(egui::pos2(x, strip.center().y), egui::vec2(16.0, 16.0));
+        let r = ui.interact(m, ui.id().with(("stop-marker", i)), egui::Sense::click_and_drag());
+        if r.clicked() || r.drag_started() { sel = i; }
+        if let (true, Some(p)) = (r.dragged(), r.interact_pointer_pos()) { moved = Some((i, ((p.x - strip.left()) / strip.width()).clamp(0.0, 1.0))); }
+        ui.painter().rect_filled(m, 3.0, color(stops[i].1));
+        ui.painter().rect_stroke(m, 3.0, egui::Stroke::new(if sel == i { 2.5 } else { 1.0 }, if sel == i { ACCENT } else { egui::Color32::from_gray(120) }), egui::StrokeKind::Outside);
     }
-    ui.add_space(4.0);
-    if ui.button("Picture…").clicked() { *want_picture = true; ui.close(); }
-    if matches!(bg, Some(Background::Image { .. })) { ui.label(egui::RichText::new("A picture fills the slide").weak().size(12.0)); }
+    if let Some((i, t)) = moved { stops[i].0 = t; changed = true; }
+    if bar_resp.clicked() && stops.len() < 6 {
+        if let Some(p) = bar_resp.interact_pointer_pos() {
+            let t = ((p.x - bar.left()) / bar.width()).clamp(0.0, 1.0);
+            let c = gradient_at(stops, t);
+            stops.push((t, Rgba(c.r(), c.g(), c.b(), 255)));
+            sel = stops.len() - 1;
+            changed = true;
+        }
+    }
+    // Keep the colors in order along the bar, following the selected one.
+    let selected = stops.get(sel).copied();
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some(s) = selected { sel = stops.iter().position(|x| *x == s).unwrap_or(0); }
+    ui.add_space(2.0);
+    ui.weak("Click the bar to add a color. Drag a marker to move it.");
+    ui.weak(match *kind {
+        brainbend_doc::GradientKind::Radial => "On the slide, drag the middle dot to move the centre and the other dot to change the size.",
+        brainbend_doc::GradientKind::Angular => "On the slide, drag the middle dot to move the centre and the other dot to change where it starts.",
+        _ => "On the slide, drag the two dots to set where the gradient starts and ends.",
+    });
+    let home = {
+        let mut g = brainbend_doc::GradientGeom::default();
+        if matches!(*kind, brainbend_doc::GradientKind::Linear | brainbend_doc::GradientKind::Reflected) { g.line = Some(brainbend_doc::GradientGeom::fitted_line(*angle, slide_size.0, slide_size.1)); }
+        g
+    };
+    if *geom != home && ui.small_button("Reset position").on_hover_text("Back to filling the slide from its middle").clicked() { *geom = home; changed = true; }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label(format!("Color {} of {}", sel + 1, stops.len()));
+        if let Some(st) = stops.get_mut(sel) {
+            let mut pct = (st.0 * 100.0).round();
+            if ui.add(egui::DragValue::new(&mut pct).range(0.0..=100.0).suffix("%")).changed() { st.0 = pct / 100.0; changed = true; }
+        }
+        if ui.add_enabled(stops.len() > 2, egui::Button::new("Remove")).on_hover_text("Remove this color (a gradient needs two)").clicked() { stops.remove(sel); sel = 0; changed = true; }
+    });
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(kind.uses_angle(), |ui| {
+        ui.label(if *kind == brainbend_doc::GradientKind::Angular { "Start" } else { "Angle" });
+        ui.spacing_mut().slider_width = (w - 170.0).max(80.0);
+        // The slider rounds what it shows, so work on a copy and only take it when the author moves the slider: a handle
+        // dragged on the slide leaves the angle between whole degrees.
+        let mut shown = *angle;
+        let r = ui.add(egui::Slider::new(&mut shown, 0.0..=360.0).suffix("°").fixed_decimals(0));
+        if r.changed() && (r.dragged() || r.has_focus() || r.is_pointer_button_down_on() || r.lost_focus()) {
+            *angle = shown;
+            if geom.line.is_none() { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(*angle, slide_size.0, slide_size.1)); }
+            geom.turn_line(*angle, slide_size.0, slide_size.1);
+            changed = true;
+        }
+        });
+        if ui.button("Flip").on_hover_text("Reverse the colors").clicked() { stops.reverse(); for st in stops.iter_mut() { st.0 = 1.0 - st.0; } sel = stops.len() - 1 - sel; changed = true; }
+    });
+    ui.data_mut(|d| d.insert_temp(sel_id, sel));
     changed
 }
 
@@ -881,24 +1119,24 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
 /// Copy the fields that differ between `a` (before) and `b` (after) onto `t`.
 fn apply_diff(a: &Object, b: &Object, t: &mut Object) {
     macro_rules! field { ($($f:ident),*) => { $( if a.$f != b.$f { t.$f = b.$f.clone(); } )* } }
-    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
-    // Picking a flat colour replaces a gradient.
+    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, emphasis, motion, click_steps, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
+    // Picking a flat color replaces a gradient.
     if a.fill != b.fill && a.gradient == b.gradient { t.gradient = None; }
     macro_rules! sfield { ($($f:ident),*) => { $( if a.style.$f != b.style.$f { t.style.$f = b.style.$f.clone(); } )* } }
     sfield!(font_family, size, bold, italic, underline, color, align, valign);
 }
 
 /// Fill, outline and effects (shadow, corners) for the object being edited. Shared by the selection groups on Home.
-/// A colour mixed towards white: `t` of the colour, the rest white.
+/// A color mixed towards white: `t` of the color, the rest white.
 fn tint_toward_white(c: Rgba, t: f32) -> Rgba {
     let m = |v: u8| (v as f32 * t + 255.0 * (1.0 - t)).round() as u8;
     Rgba(m(c.0), m(c.1), m(c.2), 255)
 }
 
-/// What a Quick Styles swatch gives a shape: fill, outline, shadow and the text colour that reads on it.
+/// What a Quick Styles swatch gives a shape: fill, outline, shadow and the text color that reads on it.
 pub(super) struct QuickLook { pub(super) fill: Rgba, pub(super) stroke: Option<Stroke>, pub(super) shadow: Option<Shadow>, pub(super) text: Rgba }
 
-/// The Quick Styles grid: four looks (outline, light fill, solid fill, intense) in each of the theme's six accent colours.
+/// The Quick Styles grid: four looks (outline, light fill, solid fill, intense) in each of the theme's six accent colors.
 pub(super) fn quick_look(row: usize, accent: Rgba, theme: &[Rgba]) -> QuickLook {
     use brainbend_doc::check::contrast_ratio;
     let paper = theme.get(1).copied().unwrap_or(Rgba(255, 255, 255, 255));
@@ -913,11 +1151,11 @@ pub(super) fn quick_look(row: usize, accent: Rgba, theme: &[Rgba]) -> QuickLook 
     }
 }
 
-/// Quick Styles: a gallery of ready-made fill, outline and shadow looks in the theme's colours.
+/// Quick Styles: a gallery of ready-made fill, outline and shadow looks in the theme's colors.
 fn quick_styles(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
     let theme: Vec<Rgba> = ui.ctx().data(|d| d.get_temp(egui::Id::new("theme-colors"))).unwrap_or_default();
     let accents: Vec<Rgba> = if theme.len() >= 10 { theme[4..10].to_vec() } else { vec![Rgba(3, 83, 158, 255), Rgba(232, 119, 34, 255), Rgba(46, 139, 87, 255), Rgba(142, 68, 173, 255), Rgba(200, 50, 70, 255), Rgba(90, 100, 115, 255)] };
-    big_menu(ui, SHAPES, "Quick Styles", "Give the shape a ready-made fill, outline and shadow in the theme's colours", |ui| {
+    big_menu(ui, SHAPES, "Quick Styles", "Give the shape a ready-made fill, outline and shadow in the theme's colors", |ui| {
         ui.set_min_width(0.0);
         let labels = ["Outline", "Light fill", "Solid fill", "Intense"];
         egui::Grid::new("quick-styles").spacing([5.0, 5.0]).show(ui, |ui| {
@@ -1030,7 +1268,7 @@ impl App {
         self.sync_color_events(ctx);
         self.title_bar(root, ctx);
         self.run_format_painter(ctx);
-        // The Quick Styles are built from the theme's colours.
+        // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
@@ -1041,15 +1279,16 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
-                for (i, name) in TABS.into_iter().enumerate() {
-                    // The master view has its own short tab list; the Slide Master tab exists only there.
-                    if master != (i == MASTER_TAB) && i != 0 && !(master && [1, 2, HELP_TAB].contains(&i)) { continue; }
+                // The Layout Builder has its own short tab list, with its own tab first; that tab exists only there.
+                let order: Vec<usize> = if master { vec![0, MASTER_TAB, HOME_TAB, OBJECTS_TAB, ANIMATIONS_TAB, HELP_TAB] } else { (0..TABS.len()).filter(|&i| i != MASTER_TAB).collect() };
+                for i in order {
+                    let name = TABS[i];
                     let sel = self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0, 26.0), egui::Sense::click());
                     if sel {
-                        // Cut from the ribbon: the card's own colour, reaching down to meet the card, with a blue line under the label.
+                        // Cut from the ribbon: the card's own color, reaching down to meet the card, with a blue line under the label.
                         let blue = ui.visuals().selection.bg_fill;
                         let over = ui.painter().with_clip_rect(ui.clip_rect().expand2(egui::vec2(0.0, 4.0)));
                         let joined = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.bottom() + 2.0));
@@ -1085,10 +1324,14 @@ impl App {
                 let mut edited = primary.clone();
                 let mut edit_changed = false;
                 // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
-                let pin_w = if self.project.is_some() { self.pinned_width(ui) } else { 0.0 };
+                // Try It, Preview and Publish are for the finished lesson, so the Layout Builder does not show them.
+                let pin_w = if self.project.is_some() && !self.in_master_view() { self.pinned_width(ui) } else { 0.0 };
                 let full = ui.available_rect_before_wrap();
                 let h = BIG_H + CAP_H + 8.0;
-                let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w - 8.0).max(80.0), h));
+                // In the Layout Builder the way out comes first, in the main-action color, and does not scroll away.
+                let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
+                if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
+                let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - pin_w - 8.0 - lead_w).max(80.0), h));
                 let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
                     egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
@@ -1098,14 +1341,16 @@ impl App {
                             ui.add_enabled_ui(!self.try_mode, |ui| {
                             match self.ribbon_tab {
                                 HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
-                                2 => self.insert_tab(ui, normal),
-                                3 => self.slides_tab(ui, ctx),
-                                4 => self.design_tab(ui, ctx),
-                                5 => {
-                                    self.transition_groups(ui, ctx);
+                                OBJECTS_TAB => self.insert_tab(ui, normal),
+                                SLIDES_TAB => self.slides_tab(ui, ctx),
+                                THEME_TAB => self.design_tab(ui, ctx),
+                                ANIMATIONS_TAB => {
+                                    // A layout has no transitions of its own: only the shapes on it animate.
+                                    if !self.in_master_view() { self.transition_groups(ui, ctx); }
                                     self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
                                 }
                                 MASTER_TAB => self.master_tab(ui, ctx),
+                                REVIEW_TAB => self.review_tab(ui, ctx),
                                 HELP_TAB => self.help_tab(ui),
                                 _ => self.design_tab(ui, ctx),
                             }
@@ -1144,9 +1389,18 @@ impl App {
             let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
             egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
                 flat(ui);
-                egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                    ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
+                // Close leads the ribbon and stays put; the groups scroll beside it.
+                let full = ui.available_rect_before_wrap();
+                let h = BIG_H + CAP_H + 8.0;
+                let lead_w = lead_width(ui, "Close", "360° Image");
+                if lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "360° Image", "Go back to the slide. Your changes are kept") { self.pano_cmd(panos::Cmd::Close); }
+                let rest = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w).max(80.0), h));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
+                    egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
+                        ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
+                    });
                 });
+                ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
             });
         });
         self.pano_tabs(root);
@@ -1190,9 +1444,9 @@ impl App {
                 ui.add_enabled_ui(sel.is_some(), |ui| {
                     ui.vertical(|ui| {
                         rows(ui);
-                        let mut c = sel.as_ref().map(|s| s.colour());
-                        if color_menu(ui, BUCKET, "The colour of the selected marker or hotspot", &mut c, None) { cmd = Some(Cmd::SetColor(c)); }
-                        ui.label(egui::RichText::new("Colour").size(11.5));
+                        let mut c = sel.as_ref().map(|s| s.color());
+                        if color_menu(ui, BUCKET, "The color of the selected marker or hotspot", &mut c, None) { cmd = Some(Cmd::SetColor(c)); }
+                        ui.label(egui::RichText::new("Color").size(11.5));
                     });
                     if big_button(ui, BOLT, "Trigger", "Run something when the learner presses the selected marker or hotspot").clicked() { cmd = Some(Cmd::AddTrigger); }
                     if big_button(ui, ARROW_COUNTER, "Switch\nType", "Turn a marker into a hotspot, or the other way round").clicked() { cmd = Some(Cmd::SwitchType); }
@@ -1225,14 +1479,11 @@ impl App {
         group(ui, "View", |ui| {
             if big_button(ui, FRAME, "Initial\nView", "The learner starts by looking at what is on the canvas now").clicked() { cmd = Some(Cmd::SetInitialView); }
         });
-        group(ui, "Close", |ui| {
-            if big_button(ui, SAVE, "Save &\nClose", "Go back to the slide").clicked() { cmd = Some(Cmd::Close); }
-        });
         if set != p { self.pano_set(set); }
         if let Some(c) = cmd { self.pano_cmd(c); }
     }
 
-    /// Take what the colour menus left for the app: a colour to add to the palette, a colour that was just used, a request to edit
+    /// Take what the color menus left for the app: a color to add to the palette, a color that was just used, a request to edit
     /// the palette. (The menus have no access to the project, so they leave notes.)
     pub(super) fn sync_color_events(&mut self, ctx: &egui::Context) {
         let Some(proj) = self.project.as_mut() else { return };
@@ -1260,47 +1511,258 @@ impl App {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-project-colors"))).unwrap_or(false) { self.theme_colors_open = true; }
     }
 
-    /// The author's brand colours: add, change, reorder and remove them. Every colour menu offers them first.
+    /// The background of the current slide (or layout): none, a color, a gradient you build, or a picture. A window rather
+    /// than a menu, because a picker opened inside a menu closes the menu.
+    pub(super) fn background_window(&mut self, ctx: &egui::Context) {
+        if !self.background_open { return; }
+        let cur = self.slide;
+        let Some(key) = self.project.as_ref().filter(|p| cur < p.slides.len()).map(|p| match &p.slides[cur].background { Some(Background::Image { asset }) => asset.clone(), _ => String::new() }) else { self.background_open = false; return };
+        let Some(proj) = self.project.as_mut() else { return };
+        let picture_name = proj.assets.get(&key).map(|a| a.name.clone());
+        let before = Snap::of(proj);
+        let theme = proj.theme.clone();
+        let inherits = cur > 0;
+        let mut open = true;
+        let mut changed = false;
+        let mut want_picture = false;
+        let slide_size = (proj.slides[cur].width, proj.slides[cur].height);
+        let bg = &mut proj.slides[cur].background;
+        crate::tool_window_at(ctx, "background", "Background", [352.0, 420.0], true, &mut open, |ui| {
+            // The picker takes the width the window has, so there is no empty strip beside it.
+            let w = ui.available_width().clamp(240.0, 720.0);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
+            // What kind of background. A slide with none uses its layout's (or plain white on the master).
+            let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
+            let mut pick = kind;
+            ui.columns(3, |cols| {
+                for (i, label) in ["Color", "Gradient", "Picture"].into_iter().enumerate() {
+                    if cols[i].add_sized([cols[i].available_width(), 24.0], egui::Button::selectable(kind == i + 1, label)).clicked() { pick = i + 1; }
+                }
+            });
+            if pick != kind {
+                match pick {
+                    1 => { *bg = Some(Background::Solid(bg.as_ref().map(|b| b.base_color()).unwrap_or(Rgba(255, 255, 255, 255)))); changed = true; }
+                    2 => {
+                        let mut g = Background::gradient(135.0, theme.color(4), theme.color(5));
+                        if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, slide_size.0, slide_size.1)); }
+                        *bg = Some(g);
+                        changed = true;
+                    }
+                    _ => want_picture = true,
+                }
+            }
+            ui.add_space(8.0);
+            match bg {
+                None => {
+                    // Nothing set yet: offer the color picker on white. The slide changes once a color is chosen.
+                    let mut cur_c = Some(Rgba(255, 255, 255, 255));
+                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *bg = Some(Background::Solid(n)); changed = true; } }
+                }
+                Some(Background::Solid(c)) => {
+                    let mut cur_c = Some(*c);
+                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *c = n; changed = true; } }
+                }
+                Some(Background::Gradient { angle, stops, kind, geom }) => changed |= gradient_editor(ui, angle, stops, kind, geom, slide_size),
+                Some(Background::Image { .. }) => {
+                    ui.label(picture_name.as_deref().unwrap_or("Picture"));
+                    ui.weak("The picture fills the slide.");
+                    ui.add_space(4.0);
+                    if ui.button("Choose another picture…").clicked() { want_picture = true; }
+                }
+            }
+            if inherits && bg.is_some() {
+                ui.add_space(8.0);
+                if ui.button("Use the layout's background").clicked() { *bg = None; changed = true; }
+            }
+        });
+        ctx.data_mut(|d| d.remove_temp::<f32>(egui::Id::new("color-entry-width")));
+        if changed { self.commit_project_edit(ctx, before); }
+        if want_picture {
+            if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
+                let before = Snap::of(self.project.as_ref().unwrap());
+                self.project.as_mut().unwrap().slides[cur].background = Some(Background::Image { asset: key });
+                self.commit_project_edit(ctx, before);
+            }
+        }
+        if !open { self.background_open = false; }
+    }
+
+    /// While the Background window shows a gradient, dots on the slide set where it starts, ends and centres: drag them.
+    pub(super) fn background_handles(&mut self, ui: &mut egui::Ui, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide_idx: usize) {
+        if !self.background_open || slide_idx != self.slide { return; }
+        let Some(proj) = self.project.as_ref() else { return };
+        let Some(sl) = proj.slides.get(slide_idx) else { return };
+        let (w, h) = (sl.width, sl.height);
+        let Some(Background::Gradient { angle, stops, kind, geom }) = sl.background.clone() else { return };
+        let (Some(first), Some(last)) = (stops.first().map(|s| s.1), stops.last().map(|s| s.1)) else { return };
+        use brainbend_doc::GradientKind::*;
+        let at = |p: (f32, f32)| origin + egui::vec2(p.0, p.1) * scale;
+        let ink = egui::Stroke::new(3.0, egui::Color32::from_black_alpha(160));
+        let line = egui::Stroke::new(1.5, egui::Color32::WHITE);
+        // (name, where it is on screen, its fill)
+        let mut handles: Vec<(&str, egui::Pos2, egui::Color32)> = Vec::new();
+        let centre = (geom.center.0 * w, geom.center.1 * h);
+        match kind {
+            Linear | Reflected => {
+                // A gradient that has not been moved yet runs corner to corner, whose ends are off the slide: show a line
+                // that is on it, and make that the gradient's line as soon as a dot is dragged.
+                let [x0, y0, x1, y1] = geom.line.unwrap_or_else(|| brainbend_doc::GradientGeom::fitted_line(angle, w, h));
+                let (a, b) = ((x0 * w, y0 * h), (x1 * w, y1 * h));
+                painter.line_segment([at(a), at(b)], ink);
+                painter.line_segment([at(a), at(b)], line);
+                handles.push(("start", at(a), color(first)));
+                handles.push(("end", at(b), color(last)));
+            }
+            Radial => {
+                let r = geom.radius;
+                let ring: Vec<egui::Pos2> = (0..=64).map(|i| { let t = i as f32 / 64.0 * std::f32::consts::TAU; at((centre.0 + r * w * t.cos(), centre.1 + r * h * t.sin())) }).collect();
+                painter.add(egui::Shape::line(ring.clone(), ink));
+                painter.add(egui::Shape::line(ring, line));
+                handles.push(("centre", at(centre), color(first)));
+                handles.push(("size", at((centre.0 + r * w, centre.1)), color(last)));
+            }
+            Angular => {
+                let a = angle.to_radians();
+                let tip = (centre.0 + a.sin() * w.min(h) * 0.25, centre.1 - a.cos() * w.min(h) * 0.25);
+                painter.line_segment([at(centre), at(tip)], ink);
+                painter.line_segment([at(centre), at(tip)], line);
+                handles.push(("centre", at(centre), color(first)));
+                handles.push(("angle", at(tip), color(last)));
+            }
+        }
+        for (name, pos, fill) in handles {
+            let r = ui.interact(egui::Rect::from_center_size(pos, egui::vec2(22.0, 22.0)), egui::Id::new(("background-handle", name)), egui::Sense::drag());
+            r.clone().on_hover_cursor(egui::CursorIcon::Grab);
+            painter.circle(pos, 8.0, fill, egui::Stroke::new(3.0, egui::Color32::from_black_alpha(160)));
+            painter.circle_stroke(pos, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
+            if r.drag_started() { self.snapshot(); }
+            let Some(ptr) = r.interact_pointer_pos().filter(|_| r.dragged()) else { continue };
+            let p = ((ptr.x - origin.x) / scale, (ptr.y - origin.y) / scale);
+            let Some(Background::Gradient { angle, geom, .. }) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)).and_then(|s| s.background.as_mut()) else { continue };
+            if geom.line.is_none() && matches!(kind, Linear | Reflected) { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(*angle, w, h)); }
+            match name {
+                "start" => { let (_, b) = geom.line_px(*angle, w, h); *angle = geom.set_line_px(p, b, w, h); }
+                "end" => { let (a, _) = geom.line_px(*angle, w, h); *angle = geom.set_line_px(a, p, w, h); }
+                "centre" => geom.center = ((p.0 / w).clamp(0.0, 1.0), (p.1 / h).clamp(0.0, 1.0)),
+                "size" => geom.radius = ((p.0 - geom.center.0 * w).abs() / w).clamp(0.02, 3.0),
+                _ => *angle = (p.0 - centre.0).atan2(-(p.1 - centre.1)).to_degrees().rem_euclid(360.0),
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// The author's brand colors: pick one to change it with the picker, add more, remove one, and drag them into order.
+    /// Every color menu offers them first.
     pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context) {
         if !self.theme_colors_open { return; }
         let Some(proj) = self.project.as_mut() else { self.theme_colors_open = false; return };
         let mut open = true;
         let before = Snap::of(proj);
         let mut changed = false;
-        let mut remove: Option<usize> = None;
-        let mut swap: Option<(usize, usize)> = None;
+        let sel_id = egui::Id::new("brand-colors-selected");
+        let draft_id = egui::Id::new("brand-colors-draft");
+        let mut sel: usize = ctx.data(|d| d.get_temp(sel_id)).unwrap_or(0);
+        let mut draft: Rgba = ctx.data(|d| d.get_temp(draft_id)).unwrap_or(Rgba(79, 129, 189, 255));
+        let mut mv: Option<(usize, usize)> = None;
+        let mut remove = false;
         let mut add = false;
-        let n = proj.palette.len();
-        egui::Window::new("Brand Colors").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.set_min_width(300.0);
-            ui.weak("Your project's colours. They show first in every colour menu. Colours already on slides do not change.");
-            if n == 0 { ui.add_space(4.0); ui.label("No colours yet. Add one here, or press + in any colour menu."); }
-            ui.add_space(4.0);
-            for i in 0..n {
-                ui.horizontal(|ui| {
-                    let c = &mut proj.palette[i];
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 24.0), egui::Sense::click());
-                    ui.painter().rect_filled(rect, 3.0, color(*c));
-                    ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
-                    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                        ui.set_min_width(230.0);
-                        changed |= color_entry(ui, c);
-                    });
-                    ui.label(egui::RichText::new(c.hex()).monospace());
-                    let glyph = |name: &str, fallback: char| egui::RichText::new(crate::panos::icon_char(name).unwrap_or(fallback).to_string()).family(icons());
-                    if ui.add_enabled(i > 0, egui::Button::new(glyph("caret-left", '<')).small()).on_hover_text("Move earlier").clicked() { swap = Some((i, i - 1)); }
-                    if ui.add_enabled(i + 1 < n, egui::Button::new(glyph("caret-right", '>')).small()).on_hover_text("Move later").clicked() { swap = Some((i, i + 1)); }
-                    if ui.add(egui::Button::new(glyph("x", 'x')).small()).on_hover_text("Remove from the palette").clicked() { remove = Some(i); }
+        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 260.0], true, &mut open, |ui| {
+            // The picker takes the width the window has, so there is no empty strip beside it.
+            let w = ui.available_width().clamp(240.0, 720.0);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
+            ui.weak("Your project's colors. They show first in every color menu. Colors already on slides do not change.");
+            ui.add_space(6.0);
+            let n = proj.palette.len();
+            sel = sel.min(n.saturating_sub(1));
+            if n == 0 {
+                ui.label("No colors yet. Choose one below and add it.");
+            } else {
+                // The palette: click one to change it; drag one to a new place to reorder.
+                let mut rects: Vec<egui::Rect> = Vec::new();
+                let mut dragged: Option<usize> = None;
+                let mut dropped = false;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    for i in 0..n {
+                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click_and_drag());
+                        rects.push(rect);
+                        ui.painter().rect_filled(rect, 4.0, color(proj.palette[i]));
+                        let on = i == sel;
+                        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(if on { 3.0 } else { 1.0 }, if on { ACCENT } else { ui.visuals().weak_text_color() }), egui::StrokeKind::Inside);
+                        let name = format!("Brand color {}", proj.palette[i].hex());
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                        if resp.clicked() { sel = i; }
+                        if resp.dragged() { dragged = Some(i); sel = i; ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing); }
+                        if resp.drag_stopped() { dragged = Some(i); dropped = true; }
+                        resp.on_hover_text(format!("{}\nDrag to reorder", proj.palette[i].hex()));
+                    }
                 });
+                if let (Some(from), Some(p)) = (dragged, ui.input(|i| i.pointer.latest_pos())) {
+                    if let Some(to) = rects.iter().position(|r| r.expand(3.0).contains(p)).filter(|&t| t != from) {
+                        if dropped { mv = Some((from, to)); }
+                        else { ui.painter().rect_stroke(rects[to].expand(2.0), 5.0, egui::Stroke::new(2.0, egui::Color32::WHITE), egui::StrokeKind::Outside); }
+                    }
+                }
             }
-            ui.add_space(4.0);
-            if ui.add_enabled(n < Project::PALETTE_MAX, egui::Button::new("+ Add colour")).clicked() { add = true; }
+            ui.add_space(8.0);
+            // The picker: for the chosen color, or, with an empty palette, for the color about to be added.
+            if n > 0 {
+                if color_entry(ui, &mut proj.palette[sel]) { changed = true; }
+            } else {
+                color_entry(ui, &mut draft);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if n == 0 {
+                    if ui.button("Add to palette").clicked() { add = true; }
+                } else {
+                    if ui.add_enabled(n < Project::PALETTE_MAX, egui::Button::new("+ Add color")).on_hover_text("Add a copy of this color, then change it").clicked() { add = true; }
+                    if ui.button("Remove").on_hover_text("Remove this color from the palette").clicked() { remove = true; }
+                }
+            });
         });
-        if add { proj.palette.push(Rgba(128, 128, 128, 255)); changed = true; }
-        if let Some(i) = remove { proj.palette.remove(i); changed = true; }
-        if let Some((a, b)) = swap { proj.palette.swap(a, b); changed = true; }
+        if add {
+            let c = if proj.palette.is_empty() { draft } else { proj.palette[sel.min(proj.palette.len() - 1)] };
+            proj.palette.push(c);
+            sel = proj.palette.len() - 1;
+            changed = true;
+        }
+        if remove && !proj.palette.is_empty() {
+            proj.palette.remove(sel.min(proj.palette.len() - 1));
+            sel = sel.saturating_sub(1);
+            changed = true;
+        }
+        if let Some((from, to)) = mv {
+            let c = proj.palette.remove(from);
+            proj.palette.insert(to, c);
+            sel = to;
+            changed = true;
+        }
+        ctx.data_mut(|d| { d.insert_temp(sel_id, sel); d.insert_temp(draft_id, draft); });
         if changed { self.commit_project_edit(ctx, before); }
         if !open { self.theme_colors_open = false; }
+    }
+
+    /// The theme's heading and body fonts. A window rather than a menu, because a drop-down opened inside a menu closes the menu.
+    pub(super) fn theme_fonts_window(&mut self, ctx: &egui::Context) {
+        if !self.theme_fonts_open { return; }
+        let Some(proj) = self.project.as_mut() else { self.theme_fonts_open = false; return };
+        let mut open = true;
+        let before = Snap::of(proj);
+        let mut next = proj.theme.clone();
+        let mut moved = false;
+        crate::tool_window_at(ctx, "theme-fonts", "Fonts", [360.0, 220.0], true, &mut open, |ui| {
+            ui.set_min_width(300.0);
+            ui.weak("The fonts of the master and layouts, and of slides that still follow them. Other text keeps its font.");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 190.0); });
+            ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 190.0); });
+        });
+        if moved {
+            proj.set_theme(next.named());
+            self.commit_project_edit(ctx, before);
+        }
+        if !open { self.theme_fonts_open = false; }
     }
 
     /// Custom title bar: window buttons stay native on macOS, then Save / Undo / Redo / Preview,
@@ -1375,19 +1837,7 @@ impl App {
             ui.horizontal(|ui| {
                 let checking = matches!(self.updater.state, update::State::Checking(_));
                 let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
-                if check.clicked() { self.updater.start(ui.ctx()); }
-                let mut open: Option<String> = None;
-                ui.vertical(|ui| {
-                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                    match &self.updater.state {
-                        update::State::Checking(_) => { ui.weak("Checking…"); }
-                        update::State::UpToDate => { ui.weak("You have the latest version."); }
-                        update::State::Failed(e) => { ui.weak(format!("Could not check: {e}")); }
-                        update::State::Idle => {}
-                        _ => { if let Some(r) = self.updater.available() { if ui.link(format!("Version {} is available", r.version)).on_hover_text("Open the update window").clicked() { open = Some(r.tag.clone()); } } }
-                    }
-                });
-                if open.is_some() { self.updater.dialog_open = true; }
+                if check.clicked() { self.updater.check_now(ui.ctx()); }
             });
         });
     }
@@ -1663,7 +2113,7 @@ impl App {
         if obj.has_button_states() {
             group(ui, "Button Styles", |ui| {
                 let corners = &mut self.button_corners;
-                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colours in four looks, with square, rounded or pill corners", |ui| {
+                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colors in four looks, with square, rounded or pill corners", |ui| {
                     if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
                 });
             });
@@ -1819,25 +2269,10 @@ impl App {
 
     fn insert_tab(&mut self, ui: &mut egui::Ui, normal: bool) {
         ui.add_enabled_ui(normal, |ui| {
-            group(ui, "Media", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
-                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
-                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
-                    });
-                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
-                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
-                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
-                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
-                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolour").clicked() { self.open_equation_dialog(None); }
-                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolour and resize", |ui| self.icon_gallery(ui));
-                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
-                });
-            });
             group(ui, "Text", |ui| {
                 ui.horizontal(|ui| {
                     if big_button(ui, TEXTBOX, "Text Box", "Insert a text box").clicked() { self.insert_text(); }
-                    big_menu(ui, LIST_NUM, "Table", "Insert a table", |ui| {
+                    big_menu(ui, TABLE, "Table", "Insert a table", |ui| {
                         ui.set_min_width(0.0);
                         if let Some((r, c)) = table_picker(ui) { self.insert_table(r, c); ui.close(); }
                     });
@@ -1885,6 +2320,21 @@ impl App {
                             });
                         });
                     }
+                });
+            });
+            group(ui, "Media", |ui| {
+                ui.horizontal(|ui| {
+                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
+                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
+                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
+                    });
+                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
+                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
+                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
+                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
+                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolor").clicked() { self.open_equation_dialog(None); }
+                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolor and resize", |ui| self.icon_gallery(ui));
+                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
                 });
             });
             group(ui, "Interactive Objects", |ui| {
@@ -2139,7 +2589,7 @@ impl App {
 
     /// How wide the pinned group is, so the ribbon can leave room for it at the right.
     fn pinned_width(&self, ui: &egui::Ui) -> f32 {
-        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false)];
+        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false) + OUTLINE_PAD];
         if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
         widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
     }
@@ -2152,27 +2602,20 @@ impl App {
         ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
         ui.add_space(5.0);
         let can_try = self.can_try();
-        pinned_group(ui, "Try, preview, publish", |ui| {
+        pinned_group(ui, "", |ui| {
             ui.horizontal(|ui| {
                 if can_try {
                     let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";
                     if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
                 }
                 big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
-                // Publish is the main action, so it takes the main-action colour.
-                let (fill, ink) = (primary(ui), on_primary(ui));
+                // Publish is the main action, so it is outlined in the main-action color; the outline darkens and the
+                // inside tints while the pointer is over it, and more while pressed or while the Publish window is open.
                 let backing = ui.painter().add(egui::Shape::Noop);
-                let resp = ui.scope(|ui| {
-                    let v = ui.visuals_mut();
-                    v.override_text_color = Some(ink);
-                    let hover = fill.gamma_multiply(0.85);
-                    v.widgets.hovered.weak_bg_fill = hover;
-                    v.widgets.active.weak_bg_fill = hover;
-                    v.widgets.open.weak_bg_fill = hover;
-                    big_button(ui, EXPORT, "Publish", "Publish the project: to the web, an LMS, PDF and more")
-                }).inner;
+                let publishing = self.publish_open;
+                let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, EXPORT, "Publish", false, false, big_width(ui, "Publish", false) + OUTLINE_PAD).on_hover_text("Publish the project: to the web, an LMS, PDF and more") }).inner;
                 if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
+                ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), publishing || resp.is_pointer_button_down_on()));
             });
         });
     }
@@ -2310,9 +2753,13 @@ impl App {
                 });
             });
         });
+        // Delete and Insert change the slide list and the current slide: look again before using the index.
+        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
+        let cur = self.slide.min(n.saturating_sub(1));
+        let is_layout = cur > 0 && cur < n;
         group(ui, "Placeholders", |ui| {
-            big_menu(ui, TEXTBOX, "Placeholder", "Add a title or text placeholder", |ui| {
-                for k in [PlaceholderKind::Title, PlaceholderKind::Subtitle, PlaceholderKind::Body] {
+            big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder", |ui| {
+                for k in PlaceholderKind::CHOICES {
                     if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
                 }
             });
@@ -2332,56 +2779,24 @@ impl App {
             }
             if changed { self.commit_project_edit(ctx, before); }
         });
-        let mut want_picture = false;
         group(ui, "Background", |ui| {
-            let Some(proj) = self.project.as_mut() else { return };
-            let before = Snap::of(proj);
-            let theme = proj.theme.clone();
-            let inherits = cur > 0;
-            let mut changed = false;
-            big_menu(ui, BUCKET, "Background", "Background of this layout or the master", |ui| {
-                changed |= background_editor(ui, &mut proj.slides[cur].background, &theme, inherits, &mut want_picture);
+            if big_button(ui, BUCKET, "Background", "Background of this layout or the master").clicked() { self.background_open = !self.background_open; }
+        });
+    }
+
+    /// What an author checks once the project is built: the player's settings, the accessibility report, spelling and focus order.
+    fn review_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        if self.project.is_none() { return; }
+        group(ui, "Player", |ui| {
+            if big_button(ui, PLAY, "Player\nSettings", "Colors, font, sidebar, title, logo and controls of the published player").clicked() { self.player_open = true; }
+        });
+                group(ui, "Check", |ui| {
+            ui.horizontal(|ui| {
+                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
+                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
+                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
             });
-            if changed { self.commit_project_edit(ctx, before); }
         });
-        group(ui, "Theme", |ui| {
-            let Some(proj) = self.project.as_mut() else { return };
-            let before = Snap::of(proj);
-            let mut changed = false;
-            big_menu(ui, SHAPES, "Theme", "Colours and fonts for new content", |ui| {
-                for t in Theme::presets() {
-                    ui.horizontal(|ui| {
-                        for c in t.colors.iter().skip(2).take(6) {
-                            let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 16.0), egui::Sense::hover());
-                            ui.painter().rect_filled(r, 2.0, color(*c));
-                        }
-                        if ui.selectable_label(proj.theme.name == t.name, format!("{}  ({} / {})", t.name, t.heading_font, t.body_font)).clicked() {
-                            // Placeholders in the master and layouts pick up the theme's fonts and colours.
-                            for s in proj.slides.iter_mut() {
-                                for o in s.layers[0].objects.iter_mut().filter(|o| o.placeholder.is_some()) {
-                                    o.style.font_family = if o.placeholder == Some(PlaceholderKind::Title) { t.heading_font.clone() } else { t.body_font.clone() };
-                                    o.style.color = if o.placeholder == Some(PlaceholderKind::Subtitle) { t.color(9) } else { t.text() };
-                                }
-                            }
-                            proj.theme = t.clone();
-                            changed = true;
-                            ui.close();
-                        }
-                    });
-                }
-            });
-            if changed { self.commit_project_edit(ctx, before); }
-        });
-        group(ui, "Close", |ui| {
-            if big_button(ui, CHECK, "Close Master View", "Return to the slides").clicked() { self.leave_master_view(); }
-        });
-        if want_picture {
-            if let Some((key, ..)) = self.load_image_asset() {
-                let before = Snap::of(self.project.as_ref().unwrap());
-                self.project.as_mut().unwrap().slides[cur].background = Some(Background::Image { asset: key });
-                self.commit_project_edit(ctx, before);
-            }
-        }
     }
 
     fn design_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -2390,43 +2805,13 @@ impl App {
         let before = Snap::of(proj);
         let mut changed = false;
         let mut open_master = false;
-        let mut open_player = false;
         let mut layout_pick: Option<Option<String>> = None;
         let mut open_theme_colors = false;
-        group(ui, "Theme", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, SHAPES, "Themes", "Colours and fonts for the master, layouts and new content", |ui| {
-                    for t in Theme::presets() {
-                        ui.horizontal(|ui| {
-                            for c in t.colors.iter().skip(2).take(6) {
-                                let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 16.0), egui::Sense::hover());
-                                ui.painter().rect_filled(r, 2.0, color(*c));
-                            }
-                            if ui.selectable_label(proj.theme.name == t.name, format!("{}  ({} / {})", t.name, t.heading_font, t.body_font)).clicked() {
-                                proj.set_theme(t.clone());
-                                changed = true;
-                                ui.close();
-                            }
-                        });
-                    }
-                });
-                if big_button(ui, DROP, "Brand\nColors", "Your project's colours, offered first in every colour menu").clicked() { open_theme_colors = true; }
-                big_menu(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts", |ui| {
-                    ui.set_min_width(260.0);
-                    let mut next = proj.theme.clone();
-                    let mut moved = false;
-                    ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 170.0); });
-                    ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 170.0); });
-                    if moved {
-                        proj.set_theme(next.named());
-                        changed = true;
-                    }
-                });
-            });
-        });
+        let mut open_theme_fonts = false;
+        let mut toggle_background = false;
         group(ui, "Master", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, STACK, "Slide Master", "Edit the master, layouts and theme").clicked() { open_master = true; }
+                if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
                 big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
                     let current = proj.slides[slide_idx].layout.clone();
                     for l in proj.layouts.clone() {
@@ -2435,63 +2820,30 @@ impl App {
                     ui.separator();
                     if ui.selectable_label(current.is_none(), "No layout").clicked() { layout_pick = Some(None); ui.close(); }
                 });
-            });
-        });
-        group(ui, "Slide Size", |ui| {
-            let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
-            big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
-                for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
-                    if ui.selectable_label(cur == (w, h), label).clicked() {
-                        for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
-                        changed = true;
+                let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
+                big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
+                    for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
+                        if ui.selectable_label(cur == (w, h), label).clicked() {
+                            for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
+                            changed = true;
+                        }
                     }
-                }
-            });
-        });
-        let mut want_picture = false;
-        group(ui, "Background", |ui| {
-            let inherits = proj.slides[slide_idx].layout.is_some();
-            let theme = proj.theme.clone();
-            ui.horizontal(|ui| {
-                big_menu(ui, BUCKET, "Background", "Colour, gradient or picture behind this slide", |ui| {
-                    changed |= background_editor(ui, &mut proj.slides[slide_idx].background, &theme, inherits, &mut want_picture);
-                });
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.add_enabled_ui(inherits, |ui| {
-                        changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide (needs a layout)").changed();
-                    });
                 });
             });
         });
-        group(ui, "Player", |ui| {
-            if big_button(ui, PLAY, "Player", "Colours, font, sidebar, title, logo and controls of the published player").clicked() { open_player = true; }
-        });
-        let mut open_checker = false;
-        group(ui, "Check", |ui| {
+        group(ui, "Brand", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { open_checker = true; }
-                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
-                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
-                });
+                if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
+                if big_button(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts").clicked() { open_theme_fonts = true; }
+                if big_button(ui, BUCKET, "Background", "Color, gradient or picture behind this slide").clicked() { toggle_background = true; }
             });
         });
         if changed { self.commit_project_edit(ctx, before); }
         if open_master { self.enter_master_view(); }
-        if open_player { self.player_open = true; }
+        if toggle_background { self.background_open = !self.background_open; }
         if open_theme_colors { self.theme_colors_open = true; }
-        if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
+        if open_theme_fonts { self.theme_fonts_open = !self.theme_fonts_open; }
         if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
-        if want_picture {
-            if let Some((key, ..)) = self.load_image_asset() {
-                let before = Snap::of(self.project.as_ref().unwrap());
-                self.project.as_mut().unwrap().slides[slide_idx].background = Some(Background::Image { asset: key });
-                self.commit_project_edit(ctx, before);
-            }
-        }
     }
 
     /// The slide's transition: a gallery to which more can be added (each is a name, an icon and what the player does).
@@ -2502,12 +2854,37 @@ impl App {
         let mut changed = false;
         let mut apply_all = false;
         group(ui, "Slide Transition", |ui| {
+            use brainbend_doc::{Transition, TransitionKind};
             ui.horizontal(|ui| {
                 let fade = proj.slides[slide_idx].fade_ms;
-                let none = big_toggle(ui, SQUARE_BORDER, "None", "No transition", fade == 0);
-                if none.clicked() { proj.slides[slide_idx].fade_ms = 0; changed = true; }
-                let fadeb = big_toggle(ui, FILM, "Fade", "Fade in", fade > 0);
-                if fadeb.clicked() && fade == 0 { proj.slides[slide_idx].fade_ms = 500; changed = true; }
+                let cur = proj.slides[slide_idx].transition;
+                if big_toggle(ui, SQUARE_BORDER, "None", "No transition: the next slide just appears", fade == 0).clicked() { proj.slides[slide_idx].fade_ms = 0; changed = true; }
+                for k in TransitionKind::ALL {
+                    let tip = match k {
+                        TransitionKind::Fade => "The slide fades in",
+                        TransitionKind::Push => "The new slide pushes the old one out",
+                        TransitionKind::Wipe => "The new slide is wiped in",
+                        TransitionKind::Split => "The new slide opens from the middle, or closes in from the sides",
+                        TransitionKind::Cover => "The new slide slides over the old one",
+                        TransitionKind::Uncover => "The old slide slides away to show the new one",
+                        TransitionKind::Zoom => "The new slide zooms in, or the old one zooms away",
+                        TransitionKind::Dissolve => "The new slide appears in scattered pieces",
+                    };
+                    if big_drawn_button(ui, k.label(), tip, fade > 0 && cur.kind == k, |p, f, new, old| draw_transition(k, p, f, new, old)).clicked() {
+                        proj.slides[slide_idx].transition = Transition::of(k);
+                        if fade == 0 { proj.slides[slide_idx].fade_ms = 500; }
+                        changed = true;
+                    }
+                }
+                // The choices a kind has: where it comes from, or whether it goes in or out.
+                let variants = Transition::variants(cur.kind);
+                ui.add_enabled_ui(fade > 0 && variants.len() > 1, |ui| {
+                    big_menu(ui, SLIDERS, "Effect\nOptions", "Direction, or in and out, for this transition", |ui| {
+                        for v in variants {
+                            if ui.selectable_label(v.variant_label() == cur.variant_label(), v.variant_label()).clicked() { proj.slides[slide_idx].transition = v; changed = true; }
+                        }
+                    });
+                });
             });
         });
         group(ui, "Transition Timing", |ui| {
@@ -2524,8 +2901,8 @@ impl App {
             if ui.button("Apply to all slides").clicked() { apply_all = true; }
         });
         if apply_all {
-            let ms = proj.slides[slide_idx].fade_ms;
-            for sl in proj.slides.iter_mut() { sl.fade_ms = ms; }
+            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
+            for sl in proj.slides.iter_mut() { sl.fade_ms = ms; sl.transition = tr; }
             changed = true;
         }
         if changed { self.commit_project_edit(ctx, before); }
@@ -2538,107 +2915,85 @@ impl App {
         let obj = obj.unwrap_or(&mut stand_in);
         ui.add_enabled_ui(enabled, |ui| {
         group(ui, "Entrance and Exit", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                *changed |= effect_picker(ui, "Entrance", &mut obj.entrance, true);
-                if obj.entrance.is_some() { *changed |= click_row(ui, "ck-entrance", "Entrance starts", &mut obj.click_steps.entrance); }
-                *changed |= effect_picker(ui, "Exit", &mut obj.exit, false);
-                if obj.exit.is_some() { *changed |= click_row(ui, "ck-exit", "Exit starts", &mut obj.click_steps.exit); }
+            ui.horizontal(|ui| {
+                *changed |= effect_menu(ui, ARROW_DOWN, "Entrance", "How the object appears", &mut obj.entrance, &mut obj.click_steps.entrance, true);
+                let had_exit = obj.exit.is_some();
+                let exit_changed = effect_menu(ui, ARROW_UP, "Exit", "How the object leaves", &mut obj.exit, &mut obj.click_steps.exit, false);
+                // An exit plays when the object leaves, so an object that stays to the end of the timeline is given an end to leave at.
+                if exit_changed && !had_exit && obj.exit.is_some() && obj.click_steps.exit == 0 && obj.timing.map_or(true, |t| t.dur_ms.is_none()) {
+                    let start = obj.timing.map_or(0, |t| t.start_ms);
+                    obj.timing = Some(Timing { start_ms: start, dur_ms: Some(2000) });
+                }
+                *changed |= exit_changed;
             });
         });
         group(ui, "Emphasis", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let label = obj.emphasis.map(|e| e.kind.label()).unwrap_or("none");
-                    combo("emphasis-kind").selected_text(label).width(90.0).show_ui(ui, |ui| {
-                        if ui.selectable_label(obj.emphasis.is_none(), "none").clicked() { obj.emphasis = None; *changed = true; }
-                        for k in EmphasisKind::ALL {
-                            if ui.selectable_label(obj.emphasis.map(|e| e.kind) == Some(k), k.label()).clicked() {
-                                let old = obj.emphasis;
-                                obj.emphasis = Some(Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) });
-                                *changed = true;
-                            }
+            ui.horizontal(|ui| {
+                let on = obj.emphasis.is_some();
+                let tip = obj.emphasis.map(|e| format!("Emphasis: {}", e.kind.label())).unwrap_or_else(|| "Draw attention to the object while it is showing".into());
+                let btn = big_widget(ui, STAR, "Emphasis", true, on).on_hover_text(tip);
+                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.set_min_width(210.0);
+                    if ui.selectable_label(obj.emphasis.is_none(), "none").clicked() { obj.emphasis = None; *changed = true; }
+                    for k in EmphasisKind::ALL {
+                        let r = ui.selectable_label(obj.emphasis.map(|e| e.kind) == Some(k), k.label());
+                        if r.clicked() {
+                            let old = obj.emphasis;
+                            obj.emphasis = Some(Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) });
+                            *changed = true;
                         }
-                    });
-                    if obj.emphasis.is_some() { *changed |= click_row(ui, "ck-emphasis", "Starts", &mut obj.click_steps.emphasis); }
+                    }
+                    if let Some(e) = obj.emphasis.as_mut() {
+                        ui.separator();
+                        *changed |= click_row(ui, "ck-emphasis", "Starts", &mut obj.click_steps.emphasis);
+                        ui.horizontal(|ui| {
+                            ui.label("lasts");
+                            *changed |= ui.add(egui::DragValue::new(&mut e.duration_ms).range(100..=60_000).speed(50.0).suffix(" ms")).changed();
+                            ui.label("plays");
+                            *changed |= ui.add(egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed();
+                        });
+                        *changed |= delay_leftover(ui, &mut e.delay_ms);
+                    }
                 });
-                if let Some(e) = obj.emphasis.as_mut() {
-                    ui.horizontal(|ui| {
-                        ui.label("delay");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.delay_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("lasts");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.duration_ms).range(100..=60_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("plays");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed();
-                    });
-                }
             });
         });
         group(ui, "Motion path", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let label = if obj.motion.is_some() { "path" } else { "none" };
-                    combo("motion-preset").selected_text(label).width(90.0).show_ui(ui, |ui| {
-                        if ui.selectable_label(obj.motion.is_none(), "none").clicked() { obj.motion = None; *changed = true; }
-                        for k in PathPreset::ALL {
-                            if ui.selectable_label(false, k.label()).clicked() {
-                                let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
-                                let mut m = MotionPath::preset(k);
-                                m.delay_ms = delay;
-                                m.duration_ms = dur;
-                                obj.motion = Some(m);
+            ui.horizontal(|ui| {
+                let on = obj.motion.is_some();
+                let btn = big_widget(ui, POLYLINE, "Motion", true, on).on_hover_text("Move the object along a path. Drag the points on the slide to shape it");
+                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.set_min_width(210.0);
+                    if ui.selectable_label(obj.motion.is_none(), "none").clicked() { obj.motion = None; *changed = true; }
+                    for k in PathPreset::ALL {
+                        if ui.selectable_label(false, k.label()).clicked() {
+                            let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
+                            let mut m = MotionPath::preset(k);
+                            m.delay_ms = delay;
+                            m.duration_ms = dur;
+                            obj.motion = Some(m);
+                            *changed = true;
+                        }
+                    }
+                    if let Some(m) = obj.motion.as_mut() {
+                        ui.separator();
+                        *changed |= click_row(ui, "ck-motion", "Starts", &mut obj.click_steps.motion);
+                        ui.horizontal(|ui| {
+                            ui.label("takes");
+                            *changed |= ui.add(egui::DragValue::new(&mut m.duration_ms).range(100..=120_000).speed(50.0).suffix(" ms")).changed();
+                            *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points").changed();
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.small_button("+ Point").on_hover_text("Add a point after the last one").clicked() {
+                                let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
+                                m.points.push((lx + 120.0, ly));
                                 *changed = true;
                             }
-                        }
-                    });
-                    if obj.motion.is_some() { *changed |= click_row(ui, "ck-motion", "Starts", &mut obj.click_steps.motion); }
+                            if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
+                        });
+                        *changed |= delay_leftover(ui, &mut m.delay_ms);
+                    }
                 });
-                if let Some(m) = obj.motion.as_mut() {
-                    ui.horizontal(|ui| {
-                        ui.label("delay");
-                        *changed |= ui.add(egui::DragValue::new(&mut m.delay_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("takes");
-                        *changed |= ui.add(egui::DragValue::new(&mut m.duration_ms).range(100..=120_000).speed(50.0).suffix(" ms")).changed();
-                        *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points. Drag the points on the slide to shape the path").changed();
-                        if ui.small_button("+ Point").on_hover_text("Add a point after the last one").clicked() {
-                            let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
-                            m.points.push((lx + 120.0, ly));
-                            *changed = true;
-                        }
-                        if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
-                    });
-                }
             });
-        });
-        group(ui, "Timing", |ui| {
-            rows(ui);
-            ui.horizontal(|ui| {
-                ui.label(icon_text(TIMER, 17.0));
-                let mut timed = obj.timing.is_some();
-                if ui.checkbox(&mut timed, "On the timeline").on_hover_text("Appears and leaves at set times").changed() {
-                    obj.timing = if timed { Some(Timing { start_ms: 0, dur_ms: None }) } else { None };
-                    *changed = true;
-                }
-            });
-            if let Some(t) = obj.timing.as_mut() {
-                ui.horizontal(|ui| {
-                    framed(ui, |ui| {
-                        ui.label("start");
-                        *changed |= ui.add(egui::DragValue::new(&mut t.start_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        let mut until_end = t.dur_ms.is_none();
-                        if ui.checkbox(&mut until_end, "until end").changed() {
-                            t.dur_ms = if until_end { None } else { Some(2000) };
-                            *changed = true;
-                        }
-                        if let Some(d) = t.dur_ms.as_mut() {
-                            ui.label("for");
-                            *changed |= ui.add(egui::DragValue::new(d).range(50..=600_000).speed(50.0).suffix(" ms")).changed();
-                        }
-                    });
-                });
-            }
         });
         group(ui, "Visibility", |ui| {
             rows(ui);
@@ -2732,7 +3087,7 @@ fn effect_percent(ui: &mut egui::Ui, label: &str, value: &mut f32, min: f32) -> 
     changed
 }
 
-/// A colour button with its label, as one row of a grid.
+/// A color button with its label, as one row of a grid.
 fn effect_color(ui: &mut egui::Ui, label: &str, c: &mut Rgba) -> bool {
     ui.label(label);
     let mut cur = Some(*c);
@@ -2775,7 +3130,7 @@ fn shadow_dial(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
     changed
 }
 
-/// The shadow's controls: the dial, distance and angle sliders, blur, spread and colour.
+/// The shadow's controls: the dial, distance and angle sliders, blur, spread and color.
 fn shadow_controls(ui: &mut egui::Ui, sh: &mut Shadow) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
@@ -2916,7 +3271,7 @@ fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
         let panes = [
             (EffectPane::Presets, "Presets", "Ready-made effects", false),
             (EffectPane::Shadow, "Shadow", "A shadow behind the object", obj.shadow.is_some()),
-            (EffectPane::Glow, "Glow", "A soft halo of colour around the object", obj.glow.is_some()),
+            (EffectPane::Glow, "Glow", "A soft halo of color around the object", obj.glow.is_some()),
             (EffectPane::Reflection, "Reflection", "A faded mirror image below the object", obj.reflection.is_some()),
             (EffectPane::Soft, "Soft edges", "Fade the object's edges", obj.soft_edge > 0.0),
             (EffectPane::Corners, "Corners", "Round the corners of a shape", obj.radius > 0.0),

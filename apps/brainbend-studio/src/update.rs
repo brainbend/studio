@@ -360,10 +360,14 @@ pub struct Updater {
     pub dialog_open: bool,
     /// The update is installed and the app should close so the new one can open.
     pub restarting: bool,
+    /// A check the author asked for is running: when it ends they get a window with the result.
+    pub manual: bool,
+    /// The window saying there is no update, or that the check failed.
+    pub notice_open: bool,
 }
 
 impl Default for Updater {
-    fn default() -> Self { Self { state: State::Idle, on_launch: true, dialog_open: false, restarting: false } }
+    fn default() -> Self { Self { state: State::Idle, on_launch: true, dialog_open: false, restarting: false, manual: false, notice_open: false } }
 }
 
 impl Updater {
@@ -381,6 +385,15 @@ impl Updater {
         let Some(path) = settings_path() else { return };
         if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
         let _ = std::fs::write(path, serde_json::json!({ "check_for_updates": self.on_launch }).to_string());
+    }
+
+    /// "Check for Updates": an update already known opens its window; otherwise a check runs and, when it ends, a window
+    /// says what it found.
+    pub fn check_now(&mut self, ctx: &egui::Context) {
+        if self.available().is_some() { self.dialog_open = true; return; }
+        if matches!(self.state, State::Checking(_)) { self.manual = true; return; }
+        self.manual = true;
+        self.start(ctx);
     }
 
     /// Starts a check in the background; does nothing while a check or a download is running or an update is known.
@@ -434,6 +447,12 @@ impl Updater {
                     Err(TryRecvError::Empty) => return,
                     Err(TryRecvError::Disconnected) => State::Failed("the check stopped unexpectedly".into()),
                 };
+                if std::mem::take(&mut self.manual) {
+                    match self.state {
+                        State::Available(_) => self.dialog_open = true,
+                        _ => self.notice_open = true,
+                    }
+                }
             }
             State::Downloading { release, rx, .. } => {
                 let release = release.clone();
@@ -464,8 +483,34 @@ pub fn open_in_browser(url: &str) {
 }
 
 impl super::App {
+    /// What a "Check for Updates" found when there is nothing to install: you are up to date, or the check failed.
+    fn update_notice_window(&mut self, ctx: &egui::Context) {
+        if !self.updater.notice_open { return; }
+        let mut open = true;
+        let mut close = false;
+        egui::Window::new("Check for Updates").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            ui.set_width(320.0);
+            match &self.updater.state {
+                State::Failed(e) => {
+                    ui.strong("Could not check for updates");
+                    ui.add_space(2.0);
+                    ui.weak(format!("{e}. Check your internet connection and try again."));
+                }
+                _ => {
+                    ui.strong("You have the latest version.");
+                    ui.add_space(2.0);
+                    ui.weak(format!("BrainBend Studio {}", env!("CARGO_PKG_VERSION")));
+                }
+            }
+            ui.add_space(8.0);
+            if ui.button("OK").clicked() { close = true; }
+        });
+        if !open || close { self.updater.notice_open = false; }
+    }
+
     /// The update window: what is new, then download, then restart.
     pub(super) fn update_window(&mut self, ctx: &egui::Context) {
+        self.update_notice_window(ctx);
         if !self.updater.dialog_open { return; }
         let Some(release) = self.updater.available().cloned() else { self.updater.dialog_open = false; return };
         #[derive(PartialEq)]

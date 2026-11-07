@@ -37,12 +37,12 @@ pub struct PanoPin {
     pub button: bool,
     #[serde(default)]
     pub kind: PinKind,
-    /// A marker's icon: its name, and its outline in a 0..1 box (drawn white on the marker's colour). Empty = none.
+    /// A marker's icon: its name, and its outline in a 0..1 box (drawn white on the marker's color). Empty = none.
     #[serde(default)]
     pub icon: String,
     #[serde(default)]
     pub icon_path: Vec<PathCmd>,
-    /// The marker's or hotspot's colour; the default when `None`.
+    /// The marker's or hotspot's color; the default when `None`.
     #[serde(default)]
     pub color: Option<Rgba>,
     /// A hotspot's corners as (heading, pitch), in order round its edge.
@@ -71,8 +71,8 @@ impl PanoPin {
         p
     }
 
-    /// The colour it is drawn in.
-    pub fn colour(&self) -> Rgba {
+    /// The color it is drawn in.
+    pub fn color(&self) -> Rgba {
         self.color.unwrap_or(if self.kind == PinKind::Hotspot { HOTSPOT_COLOR } else { MARKER_COLOR })
     }
 

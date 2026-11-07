@@ -1,13 +1,14 @@
 //! The Publish dialog: every way to publish a project in one place, in the style of Storyline's Publish window. A list of
 //! destinations on the left, the chosen destination's options on the right, Publish and Cancel along the bottom.
 //!
-//! Destinations that do not exist yet (BrainBend Review, BrainBend LMS, Video) are listed and greyed with a Coming soon
+//! Destinations that do not exist yet (BrainBend Review, BrainBend LMS) are listed and greyed with a Coming soon
 //! tag, so they show up as features to come.
 use super::*;
 use super::ribbon::{icons, on_primary, primary, tint, RIBBON_RADIUS};
 use brainbend_publish_html::{HandoutOrientation, Lms};
 
 const PRINTER: char = '\u{e3dc}';
+const FILE_PDF: char = '\u{e702}';
 
 /// Which slides the PDF handout holds.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -29,13 +30,14 @@ pub enum PublishPage {
     #[default]
     Web,
     Pdf,
+    Print,
     Word,
     PowerPoint,
 }
 
 impl PublishPage {
     /// In the order the list shows them.
-    pub const ALL: [PublishPage; 8] = [Self::Review, Self::BrainBendLms, Self::OtherLms, Self::Video, Self::Web, Self::Pdf, Self::Word, Self::PowerPoint];
+    pub const ALL: [PublishPage; 9] = [Self::Review, Self::BrainBendLms, Self::OtherLms, Self::Video, Self::Web, Self::Pdf, Self::Print, Self::Word, Self::PowerPoint];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -45,6 +47,7 @@ impl PublishPage {
             Self::Video => "Video",
             Self::Web => "Web",
             Self::Pdf => "PDF",
+            Self::Print => "Print",
             Self::Word => "Word",
             Self::PowerPoint => "PowerPoint",
         }
@@ -57,7 +60,8 @@ impl PublishPage {
             Self::OtherLms => ribbon::STACK,
             Self::Video => ribbon::FILM,
             Self::Web => ribbon::GLOBE,
-            Self::Pdf => PRINTER,
+            Self::Pdf => FILE_PDF,
+            Self::Print => PRINTER,
             Self::Word => ribbon::TEXT_AA,
             Self::PowerPoint => ribbon::FRAME,
         }
@@ -65,7 +69,7 @@ impl PublishPage {
 
     /// Whether this version of BrainBend Studio can publish there.
     pub fn available(self) -> bool {
-        !matches!(self, Self::Review | Self::BrainBendLms | Self::Video | Self::Word)
+        !matches!(self, Self::Review | Self::BrainBendLms)
     }
 
     /// What the destination is for.
@@ -74,10 +78,11 @@ impl PublishPage {
             Self::Review => "Share a link so customers can review a project in their browser and leave comments, without installing anything. Projects are kept in BrainBend cloud storage.",
             Self::BrainBendLms => "Publish straight to a BrainBend LMS, where learners take the course and their results are tracked.",
             Self::OtherLms => "Make a SCORM package for any learning management system. Upload the .zip file to your LMS.",
-            Self::Video => "Turn the lesson into a video file that plays anywhere. This needs a video encoder that is not part of BrainBend Studio yet.",
+            Self::Video => "Turn the lesson into an MP4 video that plays anywhere. Each slide shows for the length of its timeline, or for as long as its sound plays, and the sound is mixed in. Slide transitions are blended in. Things appear and disappear at their times on the timeline; effects and motion paths are not played yet.",
             Self::Web => "Publish an HTML5 version of the project to a folder, ready to put on any web server or open from your computer.",
-            Self::Pdf => "Make a handout of the slides. It opens in your browser, which shows its print dialog; choose a printer or \"Save as PDF\" there. Question slides print the question and its answers (correct ones ticked). Video and audio print as a placeholder.",
-            Self::Word => "Make a Word (.docx) handout with the same layout options as PDF, for people who want to edit or add to it.",
+            Self::Pdf => "Save a PDF handout of the slides. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them. Video and audio show as a placeholder.",
+            Self::Print => "Print the handout. It opens in your browser, which shows its print dialog: choose a printer, or \"Save as PDF\". It has the same choices as PDF. A Web Lesson prints from here too.",
+            Self::Word => "Make a Word (.docx) handout for people who want to edit it or add to it. The page is portrait, with one slide and its notes, or two slides to a page. Question slides look as they do in the lesson, with the correct answers marked only if you choose to include them.",
             Self::PowerPoint => "Save the project as a PowerPoint (.pptx) file. Things PowerPoint cannot do, such as triggers and variables, are listed in a report afterwards.",
         }
     }
@@ -87,8 +92,10 @@ impl PublishPage {
         match self {
             Self::Web => "You choose an empty folder when you press Publish.",
             Self::OtherLms => "You choose where to save the .zip file when you press Publish.",
-            Self::Pdf => "The handout opens in your browser when you press Publish.",
-            Self::PowerPoint => "You choose where to save the file when you press Publish.",
+            Self::Pdf => "You choose where to save the .pdf file when you press Publish.",
+            Self::Print => "The handout opens in your browser when you press Publish.",
+            Self::PowerPoint | Self::Word => "You choose where to save the file when you press Publish.",
+            Self::Video => "You choose where to save the .mp4 file when you press Publish. The window shows each slide as it is captured, so leave it alone until it finishes.",
             _ => "",
         }
     }
@@ -115,13 +122,14 @@ impl App {
             v.push(("Pass mark", format!("{}%", p.pass_mark)));
             v
         };
-        // PowerPoint holds slides, so a Web Lesson does not offer it.
-        let pages: Vec<PublishPage> = PublishPage::ALL.into_iter().filter(|pg| !(is_web && *pg == PublishPage::PowerPoint)).collect();
+        // PowerPoint, PDF and Word are made from slides, so a Web Lesson does not offer them; it can still be printed.
+        let pages: Vec<PublishPage> = PublishPage::ALL.into_iter().filter(|pg| !(is_web && matches!(pg, PublishPage::PowerPoint | PublishPage::Pdf | PublishPage::Word | PublishPage::Video))).collect();
         if !pages.contains(&self.publish_page) { self.publish_page = PublishPage::Web; }
         let mut page = self.publish_page;
         let mut lms = self.publish_lms;
         let mut handout = self.handout;
         let mut range = self.handout_range;
+        let mut video = self.video_options;
         let counts = (p.slides.len(), p.scene_slides(self.current_scene()).len(), self.slide_selection().len());
         // Which fonts travel is worked out once per opening: it reads the font files.
         let fonts_id = egui::Id::new("publish-fonts-report");
@@ -162,15 +170,27 @@ impl App {
                             ui.radio_value(&mut lms, Lms::Scorm2004, "SCORM 2004 4th Edition");
                             ui.add_space(12.0);
                         }
-                        if page == PublishPage::Pdf {
+                        if matches!(page, PublishPage::Pdf | PublishPage::Print | PublishPage::Word) {
                             ui.label(egui::RichText::new("Page").strong());
-                            ui.horizontal(|ui| {
-                                for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Slides per page");
-                                for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
-                            });
+                            if page == PublishPage::Word {
+                                // Word cannot fit content to a page the way PDF can, so it offers a page that is always portrait,
+                                // with one slide and its notes, or two slides and nothing else.
+                                handout.orientation = HandoutOrientation::Portrait;
+                                handout.per_page = handout.per_page.clamp(1, 2);
+                                ui.horizontal(|ui| {
+                                    ui.label("Slides per page");
+                                    for n in [1u8, 2] { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
+                                });
+                                ui.weak("Portrait.");
+                            } else {
+                                ui.horizontal(|ui| {
+                                    for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Slides per page");
+                                    for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
+                                });
+                            }
                             ui.add_space(8.0);
                             if !is_web {
                                 ui.label(egui::RichText::new("Slides to include").strong());
@@ -181,10 +201,54 @@ impl App {
                             }
                             ui.label(egui::RichText::new("Include").strong());
                             ui.checkbox(&mut handout.correct_answers, "Correct answers").on_hover_text("Off prints question slides as a blank worksheet");
-                            ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
-                            ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
-                            ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
-                            ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
+                            if page != PublishPage::Word {
+                                ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
+                                ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                                ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                                ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
+                            } else if handout.per_page == 2 {
+                                handout.note_lines = false; handout.slide_notes = false; handout.alt_text = false;
+                                ui.weak("Two slides to a page leave no room for notes, alt text or lines to write on.");
+                            } else {
+                                // One slide to a page: with its notes and alt text under it, or just the slide. No lines to
+                                // write on: in Word the reader can type their own notes.
+                                handout.note_lines = false;
+                                let mut with_notes = handout.slide_notes || handout.alt_text;
+                                let before = with_notes;
+                                ui.radio_value(&mut with_notes, false, "Just the slides");
+                                ui.radio_value(&mut with_notes, true, "Slide notes and alt text under each slide");
+                                if with_notes != before { handout.slide_notes = with_notes; handout.alt_text = with_notes; }
+                                if with_notes {
+                                    ui.indent("word-notes", |ui| {
+                                        ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                                        ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                                    });
+                                }
+                                ui.weak("Long notes run on to the next page. In Word the slides stay editable around the pictures.");
+                            }
+                            ui.add_space(12.0);
+                        }
+                        if page == PublishPage::Video {
+                            ui.label(egui::RichText::new("Quality").strong());
+                            ui.horizontal(|ui| {
+                                for h in video_export::Options::HEIGHTS { ui.radio_value(&mut video.height, h, format!("{h}p")); }
+                                ui.label("at");
+                                for r in video_export::Options::RATES { ui.radio_value(&mut video.fps, r, format!("{r} frames a second")); }
+                            });
+                            ui.weak("The video is as sharp as the Studio window lets each slide be drawn, so make the window large for the best result.");
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Slides to include").strong());
+                            ui.radio_value(&mut range, HandoutRange::All, format!("All slides ({})", counts.0));
+                            ui.radio_value(&mut range, HandoutRange::Scene, format!("The current scene ({})", counts.1));
+                            ui.radio_value(&mut range, HandoutRange::Selected, format!("The selected slides ({})", counts.2));
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Time and sound").strong());
+                            ui.horizontal(|ui| {
+                                ui.label("A slide with no timeline or sound shows for");
+                                ui.add(egui::DragValue::new(&mut video.hold_secs).range(1..=120).suffix(" s"));
+                            });
+                            ui.checkbox(&mut video.audio, "Include sound").on_hover_text("Audio and video that start by themselves, at their place on the timeline");
+                            ui.weak("Sound that waits to be clicked is left out, and so is anything a learner would choose. Question slides are shown as the lesson shows them.");
                             ui.add_space(12.0);
                         }
                         ui.weak(page.next_step());
@@ -199,7 +263,7 @@ impl App {
                                 ui.end_row();
                             }
                         });
-                        if matches!(page, PublishPage::Web | PublishPage::OtherLms | PublishPage::Pdf) {
+                        if matches!(page, PublishPage::Web | PublishPage::OtherLms | PublishPage::Pdf | PublishPage::Print) {
                             ui.add_space(14.0);
                             ui.label(egui::RichText::new("Fonts").strong());
                             ui.add_space(4.0);
@@ -228,6 +292,7 @@ impl App {
         self.publish_lms = lms;
         self.handout = handout;
         self.handout_range = range;
+        self.video_options = video;
         if modal.should_close() || cancel || go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(fonts_id)); }
         if modal.should_close() || cancel { self.publish_open = false; }
         if go && page.available() {
@@ -235,9 +300,12 @@ impl App {
             match page {
                 PublishPage::Web => self.export_html(),
                 PublishPage::OtherLms => self.export_scorm(lms),
-                PublishPage::Pdf => self.print(),
+                PublishPage::Pdf => self.export_pdf(),
+                PublishPage::Print => self.print(),
                 PublishPage::PowerPoint => self.export_pptx(),
-                PublishPage::Review | PublishPage::BrainBendLms | PublishPage::Video | PublishPage::Word => {}
+                PublishPage::Word => self.export_word(),
+                PublishPage::Video => self.export_video(),
+                PublishPage::Review | PublishPage::BrainBendLms => {}
             }
         }
     }

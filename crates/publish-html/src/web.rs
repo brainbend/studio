@@ -76,7 +76,7 @@ fn on_all(bgs: &[Rgba]) -> Rgba {
     if worst(WHITE, bgs) >= worst(INK, bgs) { WHITE } else { INK }
 }
 
-/// `bg` itself when white or ink text reaches AA on it; else the nearest shade that does, with that text colour.
+/// `bg` itself when white or ink text reaches AA on it; else the nearest shade that does, with that text color.
 fn fit_fill(bg: Rgba) -> (Rgba, Rgba) {
     let fg = on_all(&[bg]);
     if worst(fg, &[bg]) >= 4.5 {
@@ -84,7 +84,7 @@ fn fit_fill(bg: Rgba) -> (Rgba, Rgba) {
     }
     let darker = (1..=20).map(|i| mix(BLACK, bg, i as f32 / 40.0)).find(|c| worst(WHITE, &[*c]) >= 4.5).map(|c| (c, WHITE));
     let lighter = (1..=20).map(|i| mix(WHITE, bg, i as f32 / 40.0)).find(|c| worst(INK, &[*c]) >= 4.5).map(|c| (c, INK));
-    // The smaller change keeps the brand colour recognisable.
+    // The smaller change keeps the brand color recognisable.
     let dist = |c: Rgba| (c.0 as i32 - bg.0 as i32).abs() + (c.1 as i32 - bg.1 as i32).abs() + (c.2 as i32 - bg.2 as i32).abs();
     match (darker, lighter) {
         (Some(d), Some(l)) => if dist(d.0) <= dist(l.0) { d } else { l },
@@ -119,10 +119,10 @@ pub(crate) fn build_web(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<
     let (mut files, font_css) = font_assets(project);
     let urls = package_assets(project, &mut files);
     let t = &project.theme;
-    // The lesson's own primary and secondary colours win over the theme's.
+    // The lesson's own primary and secondary colors win over the theme's.
     let primary = lesson.primary.unwrap_or(t.color(4));
     let secondary = lesson.secondary.unwrap_or(t.color(5));
-    // Colours that carry text are nudged until they pass WCAG AA on the surfaces they sit on.
+    // Colors that carry text are nudged until they pass WCAG AA on the surfaces they sit on.
     let (text, page, dark) = (t.color(0), t.color(1), t.color(2));
     let soft = mix(text, page, 0.05);
     let hero_end = mix(dark, primary, 0.72);
@@ -185,11 +185,11 @@ mod tests {
         let coral = Rgba(0xd6, 0x45, 0x50, 255);
         let (fill, text) = fit_fill(coral);
         assert!(contrast_ratio(text, fill) >= 4.5, "{fill:?} {text:?}");
-        assert!((fill.0 as i32 - coral.0 as i32).abs() < 40, "still recognisably the same colour: {fill:?}");
-        // A colour that already works is untouched.
+        assert!((fill.0 as i32 - coral.0 as i32).abs() < 40, "still recognisably the same color: {fill:?}");
+        // A color that already works is untouched.
         let navy = Rgba(0x03, 0x53, 0x9e, 255);
         assert_eq!(fit_fill(navy), (navy, WHITE));
-        // Every colour on a coarse grid ends up readable.
+        // Every color on a coarse grid ends up readable.
         for r in (0..=255).step_by(51) { for g in (0..=255).step_by(51) { for b in (0..=255).step_by(51) {
             let (f, t) = fit_fill(Rgba(r as u8, g as u8, b as u8, 255));
             assert!(contrast_ratio(t, f) >= 4.5, "{r},{g},{b} -> {f:?} {t:?}");
@@ -197,13 +197,13 @@ mod tests {
     }
 
     #[test]
-    fn accent_coloured_text_is_darkened_until_it_passes() {
+    fn accent_colored_text_is_darkened_until_it_passes() {
         let page = Rgba(255, 255, 255, 255);
         let pale = Rgba(0xf2, 0xa9, 0x00, 255); // an orange that fails as text on white
         assert!(contrast_ratio(pale, page) < 4.5);
         let fixed = readable_on(pale, &[page], 4.5);
         assert!(contrast_ratio(fixed, page) >= 4.5);
-        // A colour that already passes is left alone.
+        // A color that already passes is left alone.
         let navy = Rgba(0x03, 0x53, 0x9e, 255);
         assert_eq!(readable_on(navy, &[page], 4.5), navy);
         // On a dark page it is lightened instead.
@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn a_published_lesson_carries_readable_text_colours() {
+    fn a_published_lesson_carries_readable_text_colors() {
         let mut p = Project::new_web_lesson("t", brainbend_doc::ProjectKind::WebLesson);
         p.sanitize();
         let files = crate::build(&p, Lms::None).unwrap();

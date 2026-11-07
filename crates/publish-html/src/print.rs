@@ -12,15 +12,12 @@ fn css(c: Rgba) -> String {
 }
 
 /// CSS `background` value for a slide background (images are inlined).
-fn bg_css(b: Option<&brainbend_doc::Background>, p: &Project) -> String {
+fn bg_css(b: Option<&brainbend_doc::Background>, p: &Project, w: f32, h: f32) -> String {
     use brainbend_doc::Background::*;
     match b {
         None => "#fff".into(),
         Some(Solid(c)) => css(*c),
-        Some(Gradient { angle, stops }) => {
-            let list: Vec<String> = stops.iter().map(|(at, c)| format!("{} {:.1}%", css(*c), at * 100.0)).collect();
-            format!("linear-gradient({angle}deg,{})", list.join(","))
-        }
+        Some(Gradient { angle, stops, kind, geom }) => brainbend_doc::gradient_css(*kind, *angle, stops, geom, w, h),
         Some(Image { asset }) => match p.assets.get(asset) {
             Some(a) => format!("url(data:{};base64,{}) center/cover no-repeat", a.mime, base64(&a.bytes)),
             None => "#fff".into(),
@@ -45,7 +42,7 @@ fn text_html(o: &Object, link: Rgba) -> String {
     let mut s = String::new();
     let run = |r: &Run| {
         let mut css_s = String::new();
-        // A link is the theme's hyperlink colour, underlined, unless the run sets its own colour or underline.
+        // A link is the theme's hyperlink color, underlined, unless the run sets its own color or underline.
         let linked = r.link.is_some();
         if let Some(c) = r.color.or(linked.then_some(link)) { let _ = write!(css_s, "color:{};", css(c)); }
         if let Some(z) = r.size { let _ = write!(css_s, "font-size:{z}px;"); }
@@ -443,7 +440,7 @@ pub fn print_html_with(project: &Project, options: &HandoutOptions) -> String {
     let alone = !beside && !has_notes_area && !portrait; // a landscape slide with nothing else: centred
     let mut cells: Vec<String> = vec![];
     for (i, slide) in p.slides.iter().enumerate() {
-        let bg = bg_css(slide.background.as_ref(), p);
+        let bg = bg_css(slide.background.as_ref(), p, slide.width, slide.height);
         let objects = slide.layers.first().map(|l| l.objects.as_slice()).unwrap_or(&[]);
         let body = match &slide.kind {
             SlideKind::Normal => objects.iter().map(|o| object_html(o, p)).collect::<String>(),
@@ -530,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn linked_text_prints_in_the_link_colour_underlined() {
+    fn linked_text_prints_in_the_link_color_underlined() {
         let mut o = Object::new("t", "Text", Kind::Text, 0.0, 0.0, 100.0, 20.0);
         o.text = "go now".into();
         o.rich = Some(vec![Paragraph { indent: 0, runs: vec![

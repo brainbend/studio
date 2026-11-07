@@ -4,7 +4,7 @@
 //! A merged cell is one object with a `table_span`; the cells it covers simply do not exist.
 use crate::{Align, Kind, Object, Rgba, Stroke, Theme, VAlign};
 
-/// A table look: where the colours go. `None` fills and strokes are left out.
+/// A table look: where the colors go. `None` fills and strokes are left out.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum TableStyle {
     Accent,
@@ -40,7 +40,7 @@ impl Default for StyleOptions {
     fn default() -> Self { StyleOptions { header_row: true, banded_rows: true, first_column: false } }
 }
 
-/// The colours of a style.
+/// The colors of a style.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Look {
     pub header: Option<Rgba>,
@@ -86,7 +86,7 @@ pub fn apply_style(objects: &mut [Object], group: &str, style: TableStyle, opts:
 }
 
 /// A new table of `rows` x `cols` cells filling the box at (`x`, `y`) of size `w` x `h`.
-/// The first row is a header in the theme's first accent colour; the rest are banded.
+/// The first row is a header in the theme's first accent color; the rest are banded.
 pub fn new_table(group: &str, rows: u16, cols: u16, (x, y, w, h): (f32, f32, f32, f32), theme: &Theme, new_id: &mut dyn FnMut() -> String) -> Vec<Object> {
     let (cw, rh) = (w / cols as f32, h / rows as f32);
     let mut out = vec![];
@@ -573,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn styles_recolour_cells_and_keep_text_and_merges() {
+    fn styles_recolor_cells_and_keep_text_and_merges() {
         let mut t = table();
         t[0].text = "keep".into();
         merge(&mut t, "t", (1, 0), (1, 1));
