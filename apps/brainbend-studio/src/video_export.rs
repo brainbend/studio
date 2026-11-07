@@ -61,6 +61,8 @@ pub struct VideoRun {
     output: PathBuf,
     /// The lesson's name, written into the video for players to show.
     title: String,
+    /// What the video leaves out, shown to the author when it is saved.
+    report: Vec<String>,
     size: (u32, u32),
     sounds: Vec<(PathBuf, brainbend_video::plan::Clip)>,
     /// The pictures taken so far, with how long each shows.
@@ -83,6 +85,7 @@ impl VideoRun {
     pub(super) fn plan(&self) -> &Plan { &self.plan }
     pub(super) fn work_dir(&self) -> &std::path::Path { &self.dir }
     pub(super) fn title(&self) -> &str { &self.title }
+    pub(super) fn report(&self) -> &[String] { &self.report }
 }
 
 /// A file name for a folder of working files that no other run uses.
@@ -137,7 +140,9 @@ impl App {
                 if let Some(info) = encode::probe(&file) { files.insert(key, (file, info)); }
             }
         }
-        let plan = plan::plan(p, &slides, &settings, &|k| files.get(k).map(|(_, i)| *i));
+        let info = |k: &str| files.get(k).map(|(_, i)| *i);
+        let plan = plan::plan(p, &slides, &settings, &info);
+        let report = plan::left_out(p, &slides, &settings, &info);
         let Some(first) = plan.shots.first().and_then(|s| p.slides.get(s.slide)) else {
             let _ = std::fs::remove_dir_all(&dir);
             self.status = "There is nothing to put in the video.".into();
@@ -147,12 +152,16 @@ impl App {
         let sounds = plan.clips.iter().filter_map(|c| files.get(&c.asset).map(|(f, _)| (f.clone(), c.clone()))).collect();
         // The video's title is the project's name; a project with none takes the name of the file.
         let title = if p.name.trim().is_empty() { path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string() } else { p.name.trim().to_string() };
-        self.video_run = Some(VideoRun { phase: Phase::Capturing, plan, settings, dir, output: path, title, size, sounds, pictures: vec![], done: 0, shown: 0, waiting: false, rect: None });
+        self.video_run = Some(VideoRun { phase: Phase::Capturing, plan, settings, dir, output: path, title, report, size, sounds, pictures: vec![], done: 0, shown: 0, waiting: false, rect: None });
     }
 
     fn finish_video(&mut self, result: Result<(), String>) {
         let Some(run) = self.video_run.take() else { return };
         let _ = std::fs::remove_dir_all(&run.dir);
+        if result.is_ok() && !run.report.is_empty() {
+            self.export_report = run.report.clone();
+            self.export_report_for = "Video";
+        }
         self.status = match result {
             Ok(()) => format!("Published the video to {}", run.output.display()),
             Err(e) if e == "cancelled" => "Video cancelled".into(),
@@ -234,6 +243,7 @@ impl App {
             for &li in &layers { slide.layers[li].objects.retain(|o| plan::drawn_at(o, shot.at_ms)); }
         }
         let mut cancel = false;
+        self.paint_clean = true;
         egui::Area::new(egui::Id::new("video-export-page")).order(egui::Order::Tooltip).fixed_pos(screen.min).show(ctx, |ui| {
             let fill = ui.visuals().panel_fill;
             ui.painter().rect_filled(screen, 0.0, fill);
@@ -251,6 +261,7 @@ impl App {
                 self.paint_player_slide(ctx, &painter, rect.min, scale, &slide, false, false);
             }
         });
+        self.paint_clean = false;
         if cancel { self.finish_video(Err("cancelled".into())); return; }
         let Some(run) = self.video_run.as_mut() else { return };
         run.rect = Some(rect);

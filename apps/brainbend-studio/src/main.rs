@@ -199,6 +199,8 @@ struct App {
     video_options: video_export::Options,
     /// A video being made.
     video_run: Option<video_export::VideoRun>,
+    /// Painting a slide for a picture (a video), not for the editor: no play marks or placeholder names on media.
+    paint_clean: bool,
     player_pane: usize,
     /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Story View).
     tabs: Vec<doc_tabs::SlideTab>,
@@ -214,6 +216,8 @@ struct App {
     import_report: Vec<String>,
     /// What the last PowerPoint export could not carry over.
     export_report: Vec<String>,
+    /// Which export the report is about (it names the window): "PowerPoint" or "Video".
+    export_report_for: &'static str,
     ribbon_tab: usize,
     /// Dim the base layer while another layer is active ("Dim").
     dim_base: bool,
@@ -470,7 +474,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, video_options: Default::default(), video_run: None,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1284,6 +1288,7 @@ impl App {
                 Ok(()) => {
                     self.status = format!("Exported PowerPoint file to {}", path.display());
                     self.export_report = notes;
+                    self.export_report_for = "PowerPoint";
                 }
                 Err(e) => self.status = format!("Could not write {}: {e}", path.display()),
             },
@@ -4622,12 +4627,13 @@ impl App {
                 if let Some(t) = &poster {
                     painter.image(t.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 }
-                if matches!(o.kind, Kind::Video) {
+                let (play_mark, name_label) = media_decor(self.paint_clean, matches!(o.kind, Kind::Video), poster.is_some());
+                if play_mark {
                     let d = (r.height().min(r.width()) * 0.16).clamp(10.0, 48.0);
                     let c = r.center();
                     painter.add(egui::Shape::convex_polygon(vec![c + egui::vec2(-d * 0.35, -d * 0.5), c + egui::vec2(-d * 0.35, d * 0.5), c + egui::vec2(d * 0.6, 0.0)], egui::Color32::from_white_alpha(if poster.is_some() { 190 } else { 150 }), egui::Stroke::NONE));
                 }
-                if poster.is_none() {
+                if name_label {
                     let label = format!("{}  {}", if matches!(o.kind, Kind::Video) { "VIDEO" } else { "AUDIO" }, o.name);
                     let at = if matches!(o.kind, Kind::Video) { r.center_bottom() - egui::vec2(0.0, 14.0 * scale.max(0.5)) } else { r.center() };
                     painter.text(at, if matches!(o.kind, Kind::Video) { egui::Align2::CENTER_BOTTOM } else { egui::Align2::CENTER_CENTER }, label, egui::FontId::proportional((20.0 * scale).clamp(11.0, 32.0)), egui::Color32::from_gray(210));
@@ -6268,8 +6274,9 @@ impl App {
 
         if !self.export_report.is_empty() {
             let mut close = false;
-            egui::Window::new("PowerPoint export").collapsible(false).resizable(true).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).default_width(460.0).show(ctx, |ui| {
-                ui.label("The file was saved. These things have no PowerPoint equivalent and were left out or simplified:");
+            let video = self.export_report_for == "Video";
+            egui::Window::new(format!("{} export", self.export_report_for)).collapsible(false).resizable(true).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).default_width(460.0).show(ctx, |ui| {
+                ui.label(if video { "The video was saved. These things are not in it, or are not as they are in the lesson:" } else { "The file was saved. These things have no PowerPoint equivalent and were left out or simplified:" });
                 ui.add_space(4.0);
                 for n in &self.export_report { ui.label(format!("• {n}")); }
                 ui.add_space(6.0);
@@ -7739,6 +7746,10 @@ impl App {
 }
 
 /// A project name made safe to use as a file or folder name on any system.
+/// What the editor adds to a video or audio object besides its picture: a play mark on a video, and the object's name when
+/// there is no picture. A picture of the slide for a video (`clean`) has neither, as they are for the editor's eyes.
+fn media_decor(clean: bool, video: bool, has_picture: bool) -> (bool, bool) { (video && !clean, !has_picture && !clean) }
+
 pub(crate) fn file_safe_name(name: &str) -> String {
     let cleaned: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
     let cleaned = cleaned.trim().trim_matches('.').trim();
@@ -11543,6 +11554,31 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_of_a_slide_for_a_video_has_no_play_mark_or_placeholder_name_on_media() {
+        assert_eq!(media_decor(false, true, true), (true, false), "the editor marks a video that has a picture with a play mark");
+        assert_eq!(media_decor(false, true, false), (true, true), "and names one that has none");
+        assert_eq!(media_decor(false, false, false), (false, true), "audio is named in the editor");
+        for (video, picture) in [(true, true), (true, false), (false, false)] {
+            assert_eq!(media_decor(true, video, picture), (false, false), "the video has neither");
+        }
+    }
+
+    #[test]
+    fn the_video_report_says_what_the_video_leaves_out() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.export_report = vec!["Slide 1 (A): 2 effects are not played.".into()];
+        a.export_report_for = "Video";
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("The video was saved. These things are not in it").is_some());
+        assert!(h.query_by_label_contains("Slide 1 (A): 2 effects are not played.").is_some());
+        h.get_by_label("OK").click();
+        h.run_steps(2);
+        assert!(h.state().export_report.is_empty() && h.query_by_label_contains("The video was saved").is_none(), "OK closes it");
+    }
+
+    #[test]
     fn a_destination_that_is_not_ready_cannot_be_published_to_and_other_lms_picks_the_scorm_version() {
         use egui_kittest::kittest::{NodeT, Queryable};
         let disabled_publish = |h: &egui_kittest::Harness<'_, App>| h.get_all_by_label("Publish").any(|n| n.accesskit_node().is_disabled());
@@ -11714,6 +11750,9 @@ mod tests {
             stays.fill = Some(Rgba(30, 90, 170, 255));
             stays.text = "Stays all slide".into();
             l.objects.push(stays);
+            let mut ghost = blank_object("g".into(), "Ghost", Kind::Text, 100.0, 700.0, 300.0, 60.0);
+            ghost.hidden = true;
+            l.objects.push(ghost);
             let mut second = Slide::new("s2", "Second", 1920.0, 1080.0);
             second.fade_ms = 500;
             second.transition = Transition { kind: TransitionKind::Push, from: Edge::Right, inward: false };
@@ -11730,6 +11769,7 @@ mod tests {
         assert_eq!(plan.shots.iter().map(|s| (s.slide, s.at_ms, s.length_ms)).collect::<Vec<_>>(), vec![(0, 0, 1000), (0, 1000, 2000), (1, 0, 2000)]);
         assert_eq!(plan.blends.iter().map(|b| (b.shot, b.name, b.ms)).collect::<Vec<_>>(), vec![(2, "slideleft", 500)], "the second slide pushes in");
         assert_eq!(h.state().video_run.as_ref().unwrap().title(), "Safety Basics", "the video is named for the project");
+        assert_eq!(h.state().video_run.as_ref().unwrap().report(), ["Slide 1: 1 object starts hidden and a trigger shows it, so it is not in the video.".to_string()]);
         let mut shots = 0;
         for _ in 0..400 {
             h.step();
@@ -11752,6 +11792,8 @@ mod tests {
         assert!(h.state().video_run.is_none(), "the video is finished: {}", h.state().status);
         if brainbend_video::ffmpeg().is_some() {
             assert!(h.state().status.starts_with("Published the video"), "{}", h.state().status);
+            assert_eq!(h.state().export_report_for, "Video");
+            assert_eq!(h.state().export_report.len(), 1, "the author is told what was left out: {:?}", h.state().export_report);
             let info = brainbend_video::encode::probe(&path).expect("the video can be read");
             assert!((4800..5400).contains(&info.duration_ms), "the slides' 3 s and 2 s: {info:?}");
             let details = std::process::Command::new(brainbend_video::ffmpeg().unwrap()).args(["-nostdin", "-hide_banner", "-i"]).arg(&path).output().unwrap();

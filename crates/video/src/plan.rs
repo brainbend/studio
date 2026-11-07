@@ -124,6 +124,59 @@ fn plays_sound(o: &Object) -> bool {
     matches!(o.kind, Kind::Audio | Kind::Video) && o.asset.is_some() && o.media.autoplay && !o.media.muted && o.media.volume > 0.0 && !o.hidden
 }
 
+/// What the video leaves out, one line for each thing and slide, for the author to read after it is made. `info` is the
+/// same as for [`plan`]: a sound it knows nothing about could not be read.
+pub fn left_out(project: &Project, slides: &[usize], settings: &Settings, info: &dyn Fn(&str) -> Option<MediaInfo>) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    if !settings.audio { out.push("Sound was turned off, so none of the slides' sound is in the video.".into()); }
+    let first_shape = slides.iter().find_map(|&i| project.slides.get(i)).map(|s| if s.height > 0.0 { s.width / s.height } else { 1.0 });
+    let plural = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
+    for &si in slides {
+        let Some(slide) = project.slides.get(si) else { continue };
+        // The slide's number, with its name unless that only says the number again.
+        let name = if slide.name.trim().is_empty() || slide.name.trim() == format!("Slide {}", si + 1) { format!("Slide {}", si + 1) } else { format!("Slide {} ({})", si + 1, slide.name.trim()) };
+        if let (Some(a), true) = (first_shape, slide.height > 0.0) {
+            if (slide.width / slide.height - a).abs() > a * 0.01 { out.push(format!("{name} is a different shape from the first slide, so it is centred on white.")); }
+        }
+        match &slide.kind {
+            SlideKind::Question(_) => { out.push(format!("{name} is a question. It shows unanswered for {} s; nothing can be answered in a video.", settings.hold_ms / 1000)); continue; }
+            SlideKind::Results => { out.push(format!("{name} is a results slide. It shows for {} s without a score.", settings.hold_ms / 1000)); continue; }
+            SlideKind::Normal => {}
+        }
+        let shown = slide.start_layers();
+        let objects = || shown.iter().flat_map(|&li| slide.layers[li].objects.iter());
+        let effects = objects().filter(|o| draws(o)).map(|o| [o.entrance.is_some(), o.exit.is_some(), o.emphasis.is_some(), o.motion.is_some()].iter().filter(|b| **b).count()).sum::<usize>();
+        if effects > 0 {
+            out.push(format!("{name}: {} (entrance, exit, emphasis or motion path) {} not played. Objects appear and disappear at their times on the timeline.", plural(effects, "effect", "effects"), if effects == 1 { "is" } else { "are" }));
+        }
+        let later: Vec<&str> = slide.layers.iter().enumerate().filter(|(li, _)| !shown.contains(li)).map(|(_, l)| l.name.as_str()).collect();
+        if !later.is_empty() {
+            out.push(format!("{name}: {} only {} when something triggers {}, so {} not in the video.", later.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", "), if later.len() == 1 { "shows" } else { "show" }, if later.len() == 1 { "it" } else { "them" }, if later.len() == 1 { "it is" } else { "they are" }));
+        }
+        let hidden = objects().filter(|o| o.hidden && !matches!(o.kind, Kind::Hotspot)).count();
+        if hidden > 0 {
+            out.push(format!("{name}: {} {} hidden and a trigger shows {}, so {} not in the video.", plural(hidden, "object", "objects"), if hidden == 1 { "starts" } else { "start" }, if hidden == 1 { "it" } else { "them" }, if hidden == 1 { "it is" } else { "they are" }));
+        }
+        let triggers = slide.triggers.iter().filter(|t| !matches!((&t.event, &t.action), (brainbend_doc::Event::SlideStart, brainbend_doc::Action::ShowLayer(_)))).count();
+        if triggers > 0 { out.push(format!("{name}: {} (buttons, variables, conditions) {} nothing in a video.", plural(triggers, "trigger", "triggers"), if triggers == 1 { "does" } else { "do" })); }
+        for o in objects().filter(|o| matches!(o.kind, Kind::Video | Kind::Audio) && o.asset.is_some() && !o.hidden) {
+            let what = if matches!(o.kind, Kind::Video) { "video" } else { "audio" };
+            let known = info(o.asset.as_deref().unwrap_or_default());
+            if matches!(o.kind, Kind::Video) { out.push(format!("{name}: the video \"{}\" shows its picture and does not play.", o.name)); }
+            if o.captions.is_some() { out.push(format!("{name}: the captions of \"{}\" are not in the video.", o.name)); }
+            if !settings.audio || o.media.muted { continue; }
+            if !o.media.autoplay {
+                if known.is_none_or(|m| m.has_audio) { out.push(format!("{name}: the {what} \"{}\" waits to be clicked, so its sound is not in the video.", o.name)); }
+            } else if known.is_none() {
+                out.push(format!("{name}: the sound of the {what} \"{}\" could not be read, so it is not in the video.", o.name));
+            } else if matches!(o.kind, Kind::Audio) && known.is_some_and(|m| !m.has_audio) {
+                out.push(format!("{name}: the audio \"{}\" has no sound, so it is not in the video.", o.name));
+            }
+        }
+    }
+    out
+}
+
 /// The assets whose sound could play in the video of `slides`, each once: what [`plan`] will ask `info` about.
 pub fn sound_assets(project: &Project, slides: &[usize]) -> Vec<String> {
     let mut keys: Vec<String> = vec![];
@@ -383,6 +436,109 @@ mod tests {
         assert_eq!(xfade_name(&Transition::default()), "fade");
         assert_eq!(xfade_name(&Transition { kind: TransitionKind::Push, from: Edge::Right, inward: false }), "slideleft");
         assert_eq!(xfade_name(&Transition { kind: TransitionKind::Split, from: Edge::Left, inward: true }), "vertclose");
+    }
+
+    fn lines(p: &Project, settings: &Settings, info: &dyn Fn(&str) -> Option<MediaInfo>) -> Vec<String> { left_out(p, &[0, 1, 2, 3], settings, info) }
+
+    #[test]
+    fn a_plain_lesson_has_nothing_to_report() {
+        let a = Slide::new("a", "A", 1280.0, 720.0);
+        let b = Slide::new("b", "B", 1280.0, 720.0);
+        assert!(left_out(&project(vec![a, b]), &[0, 1], &Settings::default(), &no_media).is_empty());
+    }
+
+    #[test]
+    fn effects_hidden_objects_other_layers_and_triggers_are_reported_by_slide() {
+        use brainbend_doc::{Action, Entrance, EffectKind, Event, Layer, Owner, Trigger};
+        let _ = EffectKind::Fade;
+        let mut s = Slide::new("s", "Intro", 1280.0, 720.0);
+        let mut fx = obj("fx", Kind::Rect, None);
+        fx.entrance = Some(Entrance { kind: EffectKind::Fade, delay_ms: 0, duration_ms: 500 });
+        let mut gone = obj("gone", Kind::Text, None);
+        gone.hidden = true;
+        s.layers[0].objects.extend([fx, gone]);
+        s.layers.push(Layer { id: "pop".into(), name: "Pop-up".into(), objects: vec![], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] });
+        s.triggers.push(Trigger { id: "t1".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::ShowLayer("s-base".into()), conditions: vec![] });
+        s.triggers.push(Trigger { id: "t2".into(), owner: Owner::Slide, event: Event::SlideStart, action: Action::ShowLayer("pop".into()), conditions: vec![] });
+        s.triggers.push(Trigger { id: "t3".into(), owner: Owner::Slide, event: Event::SlideEnd, action: Action::ShowLayer("pop".into()), conditions: vec![] });
+        let r = lines(&project(vec![s]), &Settings::default(), &no_media);
+        assert_eq!(r.len(), 3, "{r:?}");
+        assert_eq!(r[0], "Slide 1 (Intro): 1 effect (entrance, exit, emphasis or motion path) is not played. Objects appear and disappear at their times on the timeline.");
+        assert_eq!(r[1], "Slide 1 (Intro): 1 object starts hidden and a trigger shows it, so it is not in the video.");
+        assert_eq!(r[2], "Slide 1 (Intro): 1 trigger (buttons, variables, conditions) does nothing in a video.");
+    }
+
+    #[test]
+    fn a_slide_is_named_by_number_alone_when_its_name_says_the_same() {
+        let mut s = Slide::new("s", "Slide 1", 1280.0, 720.0);
+        let mut ghost = obj("ghost", Kind::Text, None);
+        ghost.hidden = true;
+        s.layers[0].objects.push(ghost);
+        let mut unnamed = Slide::new("u", "  ", 1280.0, 720.0);
+        let mut ghost = obj("ghost", Kind::Text, None);
+        ghost.hidden = true;
+        unnamed.layers[0].objects.push(ghost);
+        let r = lines(&project(vec![s, unnamed]), &Settings::default(), &no_media);
+        assert!(r[0].starts_with("Slide 1: ") && r[1].starts_with("Slide 2: "), "{r:?}");
+    }
+
+    #[test]
+    fn a_layer_that_shows_only_when_triggered_is_named() {
+        use brainbend_doc::Layer;
+        let mut s = Slide::new("s", "Intro", 1280.0, 720.0);
+        s.layers.push(Layer { id: "pop".into(), name: "Pop-up".into(), objects: vec![], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] });
+        let r = lines(&project(vec![s]), &Settings::default(), &no_media);
+        assert_eq!(r, vec!["Slide 1 (Intro): \"Pop-up\" only shows when something triggers it, so it is not in the video.".to_string()]);
+    }
+
+    #[test]
+    fn questions_and_results_and_other_shaped_slides_are_reported() {
+        let a = Slide::new("a", "A", 1280.0, 720.0);
+        let mut q = Slide::new("q", "Quiz", 1280.0, 720.0);
+        q.kind = SlideKind::Question(brainbend_doc::Question::new_single());
+        let mut res = Slide::new("r", "Score", 1280.0, 720.0);
+        res.kind = SlideKind::Results;
+        let tall = Slide::new("t", "Tall", 720.0, 1280.0);
+        let r = lines(&project(vec![a, q, res, tall]), &Settings { hold_ms: 4000, ..Default::default() }, &no_media);
+        assert_eq!(r, vec![
+            "Slide 2 (Quiz) is a question. It shows unanswered for 4 s; nothing can be answered in a video.".to_string(),
+            "Slide 3 (Score) is a results slide. It shows for 4 s without a score.".to_string(),
+            "Slide 4 (Tall) is a different shape from the first slide, so it is centred on white.".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn media_is_reported_for_what_does_not_play_and_what_sound_is_missing() {
+        let mut s = Slide::new("s", "Media", 1280.0, 720.0);
+        let mut video = obj("v", Kind::Video, None);
+        video.asset = Some("clip".into());
+        video.captions = Some("cc".into());
+        let click = { let mut o = sound("click", "ding", None); o.media.autoplay = false; o };
+        let broken = sound("broken", "bad", None);
+        let silent = sound("silent", "quiet", None);
+        let muted = { let mut o = sound("muted", "ding", None); o.media.muted = true; o };
+        s.layers[0].objects.extend([video, click, broken, silent, muted]);
+        let info = |k: &str| match k { "bad" => None, "quiet" => Some(MediaInfo { duration_ms: 1000, has_audio: false }), _ => Some(MediaInfo { duration_ms: 1000, has_audio: true }) };
+        let r = lines(&project(vec![s]), &Settings::default(), &info);
+        assert_eq!(r, vec![
+            "Slide 1 (Media): the video \"v\" shows its picture and does not play.".to_string(),
+            "Slide 1 (Media): the captions of \"v\" are not in the video.".to_string(),
+            "Slide 1 (Media): the video \"v\" waits to be clicked, so its sound is not in the video.".to_string(),
+            "Slide 1 (Media): the audio \"click\" waits to be clicked, so its sound is not in the video.".to_string(),
+            "Slide 1 (Media): the sound of the audio \"broken\" could not be read, so it is not in the video.".to_string(),
+            "Slide 1 (Media): the audio \"silent\" has no sound, so it is not in the video.".to_string(),
+        ], "a muted sound was meant to be silent, so it is not reported");
+    }
+
+    #[test]
+    fn with_sound_turned_off_one_line_says_so_instead_of_one_for_each_sound() {
+        let mut s = Slide::new("s", "S", 1280.0, 720.0);
+        let mut click = sound("click", "ding", None);
+        click.media.autoplay = false;
+        s.layers[0].objects.extend([click, sound("a", "ding", None)]);
+        let info = |_: &str| Some(MediaInfo { duration_ms: 1000, has_audio: true });
+        let r = lines(&project(vec![s]), &Settings { audio: false, ..Default::default() }, &info);
+        assert_eq!(r, vec!["Sound was turned off, so none of the slides' sound is in the video.".to_string()]);
     }
 
     #[test]
