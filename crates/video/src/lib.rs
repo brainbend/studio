@@ -6,6 +6,9 @@
 //! <https://github.com/brainbend/studio-components>, checks it against the SHA-256 built into the app (`ffmpeg-manifest.json`),
 //! and keeps it in `~/.brainbend-studio/components/`. The checksums come with the app, not from the download site, so a
 //! changed file there cannot be installed. Moving to a newer ffmpeg means a new app release.
+pub mod encode;
+pub mod plan;
+
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

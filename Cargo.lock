@@ -630,6 +630,7 @@ dependencies = [
 name = "brainbend-video"
 version = "0.1.0"
 dependencies = [
+ "brainbend-doc",
  "serde_json",
  "sha2",
  "ureq",

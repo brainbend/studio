@@ -1583,6 +1583,20 @@ impl Default for SlideNav {
 }
 
 impl Slide {
+    /// Layers shown when the slide starts: the base layer plus any a slide-start trigger shows, in layer order.
+    pub fn start_layers(&self) -> Vec<usize> {
+        let mut out = vec![0];
+        for t in &self.triggers {
+            if let (Event::SlideStart, Action::ShowLayer(id), Owner::Slide) = (&t.event, &t.action, &t.owner) {
+                if let Some(i) = self.layers.iter().position(|l| &l.id == id) {
+                    if !out.contains(&i) { out.push(i); }
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
     /// The distinct click numbers the base layer's animations use, in order (empty = nothing waits for a click).
     pub fn click_steps(&self) -> Vec<u32> {
         let mut v: Vec<u32> = self.layers.first().into_iter().flat_map(|l| l.objects.iter())
