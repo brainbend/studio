@@ -1397,7 +1397,6 @@ impl App {
         if !self.background_open { return; }
         let cur = self.slide;
         let Some(key) = self.project.as_ref().filter(|p| cur < p.slides.len()).map(|p| match &p.slides[cur].background { Some(Background::Image { asset }) => asset.clone(), _ => String::new() }) else { self.background_open = false; return };
-        let tex = if key.is_empty() { None } else { self.texture(ctx, &key) };
         let Some(proj) = self.project.as_mut() else { return };
         let picture_name = proj.assets.get(&key).map(|a| a.name.clone());
         let before = Snap::of(proj);
@@ -1408,7 +1407,7 @@ impl App {
         let mut want_picture = false;
         let slide_size = (proj.slides[cur].width, proj.slides[cur].height);
         let bg = &mut proj.slides[cur].background;
-        egui::Window::new("Background").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::tool_window_at(ctx, "background", "Background", [352.0, 660.0], true, &mut open, |ui| {
             const W: f32 = 320.0;
             ui.set_min_width(W);
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), W));
@@ -1543,7 +1542,7 @@ impl App {
         let mut swap: Option<(usize, usize)> = None;
         let mut add = false;
         let n = proj.palette.len();
-        egui::Window::new("Brand Colors").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 420.0], true, &mut open, |ui| {
             ui.set_min_width(300.0);
             ui.weak("Your project's colors. They show first in every color menu. Colors already on slides do not change.");
             if n == 0 { ui.add_space(4.0); ui.label("No colors yet. Add one here, or press + in any color menu."); }
@@ -1583,7 +1582,7 @@ impl App {
         let before = Snap::of(proj);
         let mut next = proj.theme.clone();
         let mut moved = false;
-        egui::Window::new("Fonts").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::tool_window_at(ctx, "theme-fonts", "Fonts", [360.0, 220.0], true, &mut open, |ui| {
             ui.set_min_width(300.0);
             ui.weak("The fonts of the master and layouts, and of slides that still follow them. Other text keeps its font.");
             ui.add_space(4.0);

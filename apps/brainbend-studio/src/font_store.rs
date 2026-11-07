@@ -393,7 +393,7 @@ impl App {
         let mut open = true;
         let mut add: Option<Listed> = None;
         let mut refresh = false;
-        egui::Window::new("More fonts from Google Fonts").id(egui::Id::new("google-fonts")).open(&mut open).collapsible(false).resizable(true).default_size([520.0, 560.0]).show(ctx, |ui| {
+        crate::tool_window(ctx, "google-fonts", "More fonts from Google Fonts", [520.0, 560.0], &mut open, |ui| {
             let store = &mut self.font_store;
             ui.label("Add open-licensed fonts from Google Fonts. They are saved on this computer, show up in every font menu, and travel with the lessons you publish.");
             ui.add_space(6.0);

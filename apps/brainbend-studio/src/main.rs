@@ -664,6 +664,86 @@ fn gradient_at(stops: &[(f32, Rgba)], t: f32) -> egui::Color32 {
 }
 
 /// Where along a CSS-angle gradient over `rect` the point `p` lies (0..1).
+/// A window that changes how the slide looks (Background, Fonts, Brand Colors): it opens at the right of the slide area,
+/// beside the inspector, so most of the slide stays in view while it is used.
+pub(crate) fn side_window(ctx: &egui::Context, title: &str) -> egui::Window<'static> {
+    let mut keep_in = ctx.content_rect();
+    keep_in.min.y = (keep_in.min.y + 44.0).min(keep_in.max.y);
+    egui::Window::new(title.to_string())
+        .pivot(egui::Align2::RIGHT_TOP)
+        .default_pos(egui::pos2(keep_in.max.x - 326.0 - 24.0, keep_in.min.y + 190.0))
+        .constrain_to(keep_in)
+}
+
+thread_local! {
+    /// Which of the app's windows had the keyboard focus when they were last drawn, and which were drawn since the main one was.
+    static FOCUS: std::cell::RefCell<(std::collections::HashMap<egui::ViewportId, bool>, std::collections::HashSet<egui::ViewportId>)> = Default::default();
+}
+
+/// Record whether a window has the keyboard focus, and say whether any of the app's windows (the main one or a tool window) does:
+/// a tool window stays in front of the app while the app is in use and steps back when another program is.
+fn app_has_focus(me: egui::ViewportId, mine: bool) -> bool {
+    FOCUS.with(|f| {
+        let mut f = f.borrow_mut();
+        if me == egui::ViewportId::ROOT {
+            // A new round: forget the tool windows that were not drawn since the last one (they are closed).
+            let seen = std::mem::take(&mut f.1);
+            f.0.retain(|id, _| *id == egui::ViewportId::ROOT || seen.contains(id));
+        } else {
+            f.1.insert(me);
+        }
+        f.0.insert(me, mine);
+        f.0.values().any(|&b| b)
+    })
+}
+
+/// A tool window (settings, spelling, search, project check...). On a desktop it is its own window: it can be moved out of
+/// the app and onto another screen, and it stays in front of the app while the app is in use. Where windows cannot be
+/// separate, it is a window inside the app.
+pub(crate) fn tool_window(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    tool_window_at(ctx, id, title, size, false, open, content)
+}
+
+/// `tool_window`, optionally opening (inside the app) beside the inspector instead of in the middle: for windows that change
+/// how the slide looks, so the slide stays in view.
+pub(crate) fn tool_window_at(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], beside: bool, open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    if ctx.embed_viewports() {
+        (if beside { side_window(ctx, title) } else { dialog_window(ctx, title) }).id(egui::Id::new(id)).open(open).collapsible(false).resizable(true).default_size(size).show(ctx, content);
+        return;
+    }
+    let vid = egui::ViewportId::from_hash_of(id);
+    let builder = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_inner_size(size)
+        .with_min_inner_size([260.0, 160.0])
+        .with_window_level(egui::viewport::WindowLevel::AlwaysOnTop);
+    let mut content = Some(content);
+    ctx.show_viewport_immediate(vid, builder, |ui, _class| {
+        let level = if app_has_focus(vid, ui.input(|i| i.viewport().focused.unwrap_or(false))) { egui::viewport::WindowLevel::AlwaysOnTop } else { egui::viewport::WindowLevel::Normal };
+        let last: Option<bool> = ui.data(|d| d.get_temp(egui::Id::new(("tool-window-front", id))));
+        if last != Some(level == egui::viewport::WindowLevel::AlwaysOnTop) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+            ui.data_mut(|d| d.insert_temp(egui::Id::new(("tool-window-front", id)), level == egui::viewport::WindowLevel::AlwaysOnTop));
+        }
+        if ui.input(|i| i.viewport().close_requested()) { *open = false; }
+        egui::CentralPanel::default().show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| { if let Some(f) = content.take() { f(ui); } });
+        });
+    });
+}
+
+/// A dialog window: it opens in the middle of the app (whatever its size), below the title bar and its window buttons,
+/// and can then be dragged anywhere in the app.
+pub(crate) fn dialog_window(ctx: &egui::Context, title: &str) -> egui::Window<'static> {
+    let screen = ctx.content_rect();
+    let mut keep_in = screen;
+    keep_in.min.y = (screen.min.y + 44.0).min(screen.max.y);
+    egui::Window::new(title.to_string())
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(screen.center())
+        .constrain_to(keep_in)
+}
+
 fn gradient_t(rect: egui::Rect, angle: f32, p: egui::Pos2) -> f32 {
     let a = angle.to_radians();
     let dir = egui::vec2(a.sin(), -a.cos());
@@ -3675,7 +3755,7 @@ impl App {
         let mut skip: Option<usize> = None;
         let mut pick: Option<usize> = None;
         let mut reset = false;
-        egui::Window::new("Focus Order").id(egui::Id::new("focus-order")).open(&mut open).collapsible(false).resizable(true).default_size([340.0, 360.0]).default_pos(ctx.content_rect().center() - egui::vec2(170.0, 180.0)).show(ctx, |ui| {
+        crate::tool_window(ctx, "focus-order", "Focus Order", [340.0, 360.0], &mut open, |ui| {
             ui.weak(format!("The order the Tab key and screen readers move through \"{title}\", first to last."));
             ui.add_space(4.0);
             let last = rows.len().saturating_sub(1);
@@ -3722,7 +3802,7 @@ impl App {
         if !self.variables_open { return; }
         if self.project.is_none() { self.variables_open = false; return; }
         let mut open = true;
-        egui::Window::new("Variables").id(egui::Id::new("project-variables")).open(&mut open).collapsible(false).resizable(true).default_size([420.0, 360.0]).default_pos(ctx.content_rect().center() - egui::vec2(210.0, 180.0)).show(ctx, |ui| {
+        crate::tool_window(ctx, "project-variables", "Variables", [420.0, 360.0], &mut open, |ui| {
             ui.weak("Variables belong to the whole project. Triggers read and change them.");
             ui.add_space(4.0);
             self.variables_panel(ui, ctx);
@@ -5720,6 +5800,7 @@ impl App {
     /// One frame of the whole UI (separate from `eframe::App::ui` so tests can drive it).
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
+        app_has_focus(egui::ViewportId::ROOT, root.input(|i| i.viewport().focused.unwrap_or(false)));
         // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
         font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
@@ -5851,7 +5932,7 @@ impl App {
             let mut change: Option<(brainbend_spell::Misspelling, String)> = None;
             let mut add: Option<String> = None;
             let mut ignore: Option<String> = None;
-            egui::Window::new("Spelling").open(&mut open).default_width(460.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "spelling", "Spelling", [460.0, 440.0], &mut open, |ui| {
                 if found.is_empty() {
                     ui.label("No misspelled words found.");
                 } else {
@@ -5915,7 +5996,7 @@ impl App {
             let web = self.project.as_ref().unwrap().is_web();
             let mut st = self.find.take().unwrap();
             let hits = self.project.as_ref().unwrap().find_text(&st.query, st.opts);
-            egui::Window::new("Find and Replace").open(&mut open).default_width(420.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "find-replace", "Find and Replace", [420.0, 320.0], &mut open, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Find     ");
                     let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(f32::INFINITY));
@@ -5979,7 +6060,7 @@ impl App {
             let mut open = true;
             let mut jump: Option<brainbend_doc::check::Location> = None;
             let web_check = self.project.as_ref().is_some_and(|p| p.is_web());
-            egui::Window::new("Project check").open(&mut open).default_width(520.0).show(ctx, |ui| {
+            crate::tool_window(ctx, "project-check", "Project check", [520.0, 440.0], &mut open, |ui| {
                 if issues.is_empty() {
                     ui.label("No problems found.");
                 } else {

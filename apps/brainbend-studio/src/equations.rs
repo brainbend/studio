@@ -297,7 +297,7 @@ impl App {
         let id = egui::Id::new("eq-latex");
         let mut snippet: Option<&str> = None;
         let mut open = true;
-        egui::Window::new("Equation").id(egui::Id::new("equation-dialog")).open(&mut open).collapsible(false).resizable(false)
+        crate::dialog_window(ctx, "Equation").id(egui::Id::new("equation-dialog")).open(&mut open).collapsible(false).resizable(false)
             .default_pos(ctx.content_rect().center() - egui::vec2(290.0, 250.0)).show(ctx, |ui| {
             ui.set_width(560.0);
             ui.add(egui::TextEdit::multiline(&mut dlg.latex).id(id).font(egui::TextStyle::Monospace).desired_rows(4).desired_width(f32::INFINITY).hint_text(r"LaTeX, for example  \frac{a}{b}  or  \int_0^1 x^2\,dx"));

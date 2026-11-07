@@ -33,7 +33,7 @@ impl App {
         let banner_name = proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone());
         let name = proj.name.clone();
         let pane = &mut self.player_pane;
-        egui::Window::new("Player Properties").id(egui::Id::new("player-properties")).open(&mut open).collapsible(false).resizable(true).default_size([920.0, 600.0]).show(ctx, |ui| {
+        crate::tool_window(ctx, "player-properties", "Player Properties", [920.0, 600.0], &mut open, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(pane, 0, "Features");
                 ui.selectable_value(pane, 1, "Colors & Effects");

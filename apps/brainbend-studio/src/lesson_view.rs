@@ -641,7 +641,7 @@ impl App {
         let before = Snap::of(self.project.as_ref().unwrap());
         let mut want_cover = false;
         let mut changed = false;
-        egui::Window::new("Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| {
+        crate::dialog_window(ctx, "Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| {
             let p = self.project.as_mut().unwrap();
             changed |= single(ui, "Lesson title", &mut p.name);
             ui.separator();
