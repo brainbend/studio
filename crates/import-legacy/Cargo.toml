@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 brainbend-doc = { path = "../doc" }
+brainbend-video = { path = "../video" }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"
 md-5 = "0.10"
