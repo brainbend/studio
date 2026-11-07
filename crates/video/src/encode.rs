@@ -255,7 +255,9 @@ mod tests {
         let mut j = job(vec![(PathBuf::from("/t/n.mp3"), clip(0, 1000, false))]);
         j.blends = vec![Blend { shot: 1, name: "wipeleft", ms: 500 }];
         let a = text(&args(&j, Path::new("/t/o.part")));
-        assert!(a.contains("-f concat -safe 0 -i /t/list.txt -f concat -safe 0 -i /t/list-1.txt -i /t/n.mp3"), "{a}");
+        // The second list sits beside the first, written with the system's own separator.
+        let second = j.list.with_file_name("list-1.txt");
+        assert!(a.contains(&format!("-f concat -safe 0 -i /t/list.txt -f concat -safe 0 -i {} -i /t/n.mp3", second.display())), "{a}");
         assert!(a.contains("[1:v]fps=30") && a.contains("settb=AVTB[v1]") && a.contains("settb=AVTB[v0]"), "{a}");
         assert!(a.contains("[v0]tpad=stop_mode=clone:stop_duration=0.500[p1];[p1][v1]xfade=transition=wipeleft:duration=0.500:offset=2.500[v]"), "{a}");
         assert!(a.contains("[2:a]atrim"), "the sound's input follows the pictures': {a}");
