@@ -1845,7 +1845,7 @@
     fullscreen: '<path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
   };
   function setButton(btn, label, icon) {
-    var style = PL.buttons || 'Text';
+    var style = PL.buttons || 'Icon';
     btn.textContent = '';
     if (style !== 'Text' && icon && ICONS[icon]) {
       var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

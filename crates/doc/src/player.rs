@@ -26,9 +26,9 @@ pub enum SidebarSide {
 /// How the player's buttons are drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ButtonStyle {
+    #[default]
     Icon,
     IconText,
-    #[default]
     Text,
 }
 
@@ -117,7 +117,7 @@ impl Default for PlayerSettings {
             accent: Rgba(3, 83, 158, 255),
             font: "Open Sans".into(),
             font_scale: 100,
-            buttons: ButtonStyle::Text,
+            buttons: ButtonStyle::Icon,
             show_title: false,
             title: String::new(),
             sidebar: SidebarSide::Off,

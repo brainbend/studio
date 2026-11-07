@@ -30,7 +30,7 @@ test('keyboard activation works on click-trigger objects', () => {
 
 test('quiz: navigation is gated, answers are scored, results and retry work', () => {
   const { w, errors } = boot(fixture('quiz'));
-  const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+  const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   assert.equal(currentSlide(w), 0);
   click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
   assert.equal(currentSlide(w), 1);
@@ -69,7 +69,7 @@ for (const mode of ['1.2', '2004']) {
     const { w, store, log, errors } = boot(dir(), mode);
     assert.ok(log.some((l) => l === `${key('cmi.core.lesson_status', 'cmi.completion_status')}=incomplete`));
     click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
-    const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+    const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
     const q1 = $$(w, '.slide')[1];
     q1.querySelector('input[value=a]').checked = true; click(w, q1.querySelector('.q-submit')); click(w, next());
     const q2 = $$(w, '.slide')[2];
@@ -89,7 +89,7 @@ for (const mode of ['1.2', '2004']) {
     click(first.w, $$(first.w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
     const q1 = $$(first.w, '.slide')[1];
     q1.querySelector('input[value=b]').checked = true; click(first.w, q1.querySelector('.q-submit'));
-    click(first.w, $$(first.w, '#nav button').find((b) => b.textContent === 'Next'));
+    click(first.w, $$(first.w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
     await sleep(700);
     const init = {
       'cmi.suspend_data': first.store['cmi.suspend_data'],
@@ -104,7 +104,7 @@ for (const mode of ['1.2', '2004']) {
 test('failing score is reported as failed', () => {
   const { w, store } = boot(fixture('quiz12'), '1.2');
   click(w, $$(w, '.obj').find((o) => /Start quiz/.test(o.textContent)));
-  const next = () => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+  const next = () => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   const q1 = $$(w, '.slide')[1];
   q1.querySelector('input[value=b]').checked = true; click(w, q1.querySelector('.q-submit')); click(w, next());
   const q2 = $$(w, '.slide')[2];
@@ -174,7 +174,7 @@ test('timeline: objects appear and leave on schedule, the end event fires, auto-
 
 test('timeline timers are cleared when the slide is left', async () => {
   const { w } = boot(fixture('timeline'));
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next')); // Next, before A's timeline ends
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next')); // Next, before A's timeline ends
   assert.equal(currentSlide(w), 1);
   await sleep(450);
   assert.equal(currentSlide(w), 1, 'a stale A timer must not push the course forward');
@@ -185,7 +185,7 @@ test('timeline timers are cleared when the slide is left', async () => {
 const slideEl = (w, i) => $$(w, '.slide')[i];
 const submit = (w, i) => click(w, slideEl(w, i).querySelector('.q-submit'));
 const feedback = (w, i) => slideEl(w, i).querySelector('.q-feedback').textContent;
-const nextBtn = (w) => $$(w, '#nav button').find((b) => b.textContent === 'Next');
+const nextBtn = (w) => $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
 
 function sortSequence(w, i, wanted) {
   // Bubble the shuffled list into `wanted` order by pressing the move buttons, as a learner would.
@@ -268,7 +268,7 @@ test('slide menu: lists slides, blocks skipping past unanswered questions, marks
   const menu = w.document.getElementById('menu');
   assert.ok(menu && menu.hidden, 'the menu starts closed');
   const menuBtn = $$(w, '#nav button')[0];
-  assert.equal(menuBtn.textContent, 'Menu');
+  assert.equal(menuBtn.getAttribute('aria-label'), 'Menu');
   click(w, menuBtn);
   assert.equal(menu.hidden, false);
   assert.equal(menuBtn.getAttribute('aria-expanded'), 'true');
@@ -442,7 +442,7 @@ test('slide navigation rules: next after the timeline, no way back, resume or st
   click(w, nextBtn(w));
   // B: no way back; it resumes where it was left.
   assert.equal(currentSlide(w), 1);
-  assert.equal($$(w, '#nav button').find((b) => b.textContent === 'Previous').disabled, true, 'Previous is off');
+  assert.equal($$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous').disabled, true, 'Previous is off');
   assert.equal(box('b').style.display, 'none');
   reveal('b');
   assert.equal(box('b').style.display, '');
@@ -661,7 +661,7 @@ test('click steps: each click plays the effects numbered for it before the slide
   click(w, nextBtn(w));
   assert.equal(currentSlide(w), 1);
   // Coming back starts the steps over.
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous'));
   assert.equal(currentSlide(w), 0);
   assert.equal(hidden('one'), true);
   assert.equal(hidden('three'), false);
@@ -1492,7 +1492,7 @@ test('tabs: a real press on a two-line tab shows its layer, one at a time, and h
 
 test('a button with a Visited state shows it after the first press, and Hover still applies while the pointer is on it', () => {
   const { w, errors } = boot(fixture('tabs'));
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   const v = $$(w, '.obj').find((o) => o.textContent === 'Visit me');
   const look = () => (v.style.background.match(/\d+, \d+, \d+/) || [''])[0];
   assert.equal(look(), '10, 20, 30', 'Normal at first');
@@ -1507,8 +1507,8 @@ test('a button with a Visited state shows it after the first press, and Hover st
 
 test('layers that do not hide the others stack; the Previous button runs its slide trigger instead of moving back', () => {
   const { w, errors } = boot(fixture('tabs'));
-  const next = $$(w, '#nav button').find((b) => b.textContent === 'Next');
-  const prev = $$(w, '#nav button').find((b) => b.textContent === 'Previous');
+  const next = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
+  const prev = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous');
   click(w, next);
   assert.equal(currentSlide(w), 1);
   const btn = (text) => $$(w, '.obj').find((o) => o.textContent === text);
@@ -1687,10 +1687,10 @@ test('player controls: replay starts the slide again, and slides with nothing to
   assert.ok(Number(t.seek.value) < 500);
   assert.equal(t.play.getAttribute('aria-label'), 'Pause', 'and playing');
   // The second slide has no timeline and no media.
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.equal(currentSlide(w), 1);
   assert.equal(t.play.disabled && t.replay.disabled && t.seek.disabled, true, 'nothing to play: all three are greyed out');
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Previous'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Previous'));
   assert.equal(t.play.disabled || t.replay.disabled || t.seek.disabled, false, 'and back on the timed slide they work again');
   assert.deepEqual(errors, []);
 });
@@ -1703,7 +1703,7 @@ test('player controls: a slide with a video is driven through the video', () => 
     Object.defineProperty(win.HTMLMediaElement.prototype, 'duration', { configurable: true, get() { return 90; } });
   });
   const t = transport(w);
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   const slide = $$(w, '.slide')[1];
   const v = w.document.createElement('video'); slide.querySelector('.layer').appendChild(v);
   w.document.dispatchEvent(new w.Event('loadedmetadata'));
@@ -1811,9 +1811,9 @@ test('player sidebar: menu and notes tabs, the title and the logo, a toggle that
   // Notes: the current slide's, and a hint when it has none.
   click(w, tab('Notes'));
   assert.match($(w, '#menu .notes').textContent, /Greet the learners/);
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.equal($(w, '#menu .notes').textContent, 'No notes for this slide.');
-  click(w, $$(w, '#nav button').find((b) => b.textContent === 'Next'));
+  click(w, $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next'));
   assert.match($(w, '#menu .notes').textContent, /Summarise the three rules/);
   // The glossary has its own tab (alphabetical); resources sit at the right of the top bar, web links only.
   click(w, tab('Glossary'));
@@ -1849,12 +1849,13 @@ test('player sidebar: menu and notes tabs, the title and the logo, a toggle that
   assert.ok($(right, '#menu').classList.contains('side-right'));
 });
 
-test('player buttons and controls: text by default, icons with words on request; volume, captions and speed; the theme colors', () => {
+test('player buttons and controls: icons by default, icons with words on request; volume, captions and speed; the theme colors', () => {
   const plain = boot(fixture('playerui')).w;
-  assert.deepEqual($$(plain, '#nav button').map((b) => b.textContent), ['Previous', 'Next'], 'text buttons by default');
+  assert.deepEqual($$(plain, '#nav button').map((b) => b.getAttribute('aria-label')), ['Previous', 'Next'], 'the buttons keep their names');
+  assert.ok($$(plain, '#nav button').every((b) => b.querySelector('svg') && b.textContent === ''), 'icons by default, without words');
   assert.equal($(plain, '#nav .nav-controls'), null, 'no controls unless asked for');
   const { w, errors } = boot(fixture('playerui-icons'));
-  const next = $$(w, '#nav button').find((b) => b.textContent === 'Next');
+  const next = $$(w, '#nav button').find((b) => b.getAttribute('aria-label') === 'Next');
   assert.ok(next.querySelector('svg') && next.textContent === 'Next', 'icon and words');
   assert.ok($(w, '#menu').hidden && !$(w, '#menu').classList.contains('sidebar'), 'no sidebar was asked for: the slide menu is a drawer, closed');
   const ctl = (id) => $(w, `#nav .ctl-${id}`);
