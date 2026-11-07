@@ -1841,6 +1841,7 @@
     volume: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5c1.4 1.4 1.4 3.6 0 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     muted: '<path d="M3 8h3l4-3v10l-4-3H3z" fill="currentColor"/><path d="M13 7.5l4 5M17 7.5l-4 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
     captions: '<rect x="2" y="4" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><text x="10" y="13" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" font-family="Arial,sans-serif">CC</text>',
+    settings: '<circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
     fullscreen: '<path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
   };
   function setButton(btn, label, icon) {
@@ -2134,6 +2135,13 @@
         }
       };
       controlUpdaters.push(tRefresh);
+      // K plays and pauses (Space already advances click steps).
+      if (PC.play_pause) document.addEventListener('keydown', function (ev) {
+        if (ev.defaultPrevented || ev.ctrlKey || ev.metaKey || ev.altKey || (ev.key !== 'k' && ev.key !== 'K')) return;
+        var t = ev.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || (t.closest && t.closest('[role=textbox],[role=slider]')))) return;
+        ev.preventDefault(); tToggle();
+      });
       ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange'].forEach(function (n) { document.addEventListener(n, tRefresh, true); });
       tRefresh();
     }
@@ -2145,18 +2153,48 @@
         setButton(vb, playerMuted ? 'Unmute' : 'Mute', playerMuted ? 'muted' : 'volume'); vb.setAttribute('aria-pressed', String(playerMuted));
       });
     }
-    if (PC.captions) {
-      var cb = control('captions', 'Captions', 'captions'); cb.setAttribute('aria-pressed', 'true');
-      cb.addEventListener('click', function () {
-        captionsOn = !captionsOn; medias().forEach(applyMedia); cb.setAttribute('aria-pressed', String(captionsOn));
+    var setSpeed = function (i) { speedAt = i; medias().forEach(applyMedia); };
+    var setCaptions = function (on) { captionsOn = on; medias().forEach(applyMedia); };
+    if (PC.captions && PC.speed) {
+      // With both on, they share one settings menu so the bar stays short.
+      var gb = control('settings', 'Settings', 'settings'); gb.setAttribute('aria-haspopup', 'menu'); gb.setAttribute('aria-expanded', 'false');
+      var gm = el('div', 'ctl-menu'); gm.setAttribute('role', 'menu'); gm.setAttribute('aria-label', 'Settings'); gm.hidden = true; cbox.appendChild(gm);
+      var gItems = function () { return Array.prototype.slice.call(gm.querySelectorAll('[role^=menuitem]')); };
+      var gMark = function (b, on) { b.setAttribute('aria-checked', String(on)); };
+      var capItem = el('button', 'ctl-item ctl-captions'); capItem.type = 'button'; capItem.setAttribute('role', 'menuitemcheckbox'); capItem.textContent = 'Captions'; gMark(capItem, true);
+      capItem.addEventListener('click', function () { setCaptions(!captionsOn); gMark(capItem, captionsOn); });
+      gm.appendChild(capItem);
+      gm.appendChild(el('div', 'ctl-menu-head', 'Speed'));
+      var speedItems = SPEEDS.map(function (v, i) {
+        var b = el('button', 'ctl-item ctl-speed'); b.type = 'button'; b.setAttribute('role', 'menuitemradio'); b.textContent = v + 'x'; b.setAttribute('aria-label', 'Playback speed ' + v + 'x'); gMark(b, i === speedAt);
+        b.addEventListener('click', function () { setSpeed(i); speedItems.forEach(function (o, j) { gMark(o, j === i); }); });
+        gm.appendChild(b); return b;
       });
-    }
-    if (PC.speed) {
-      var sb = control('speed', 'Speed', null); sb.textContent = '1x'; sb.setAttribute('aria-label', 'Playback speed 1x');
-      sb.addEventListener('click', function () {
-        speedAt = (speedAt + 1) % SPEEDS.length; medias().forEach(applyMedia);
-        sb.textContent = SPEEDS[speedAt] + 'x'; sb.setAttribute('aria-label', 'Playback speed ' + SPEEDS[speedAt] + 'x');
+      var gClose = function (back) { gm.hidden = true; gb.setAttribute('aria-expanded', 'false'); if (back) gb.focus(); };
+      var gOpen = function () { gm.hidden = false; gb.setAttribute('aria-expanded', 'true'); var f = gItems()[0]; if (f) f.focus(); };
+      gb.addEventListener('click', function () { if (gm.hidden) gOpen(); else gClose(true); });
+      gm.addEventListener('keydown', function (ev) {
+        var items = gItems(), at = items.indexOf(document.activeElement);
+        if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); gClose(true); }
+        else if (ev.key === 'ArrowDown') { ev.preventDefault(); items[(at + 1) % items.length].focus(); }
+        else if (ev.key === 'ArrowUp') { ev.preventDefault(); items[(at - 1 + items.length) % items.length].focus(); }
+        else if (ev.key === 'Home') { ev.preventDefault(); items[0].focus(); }
+        else if (ev.key === 'End') { ev.preventDefault(); items[items.length - 1].focus(); }
+        else if (ev.key === 'Tab') gClose(false);
       });
+      document.addEventListener('click', function (ev) { if (!gm.hidden && !cbox.contains(ev.target)) gClose(false); });
+    } else {
+      if (PC.captions) {
+        var cb = control('captions', 'Captions', 'captions'); cb.setAttribute('aria-pressed', 'true');
+        cb.addEventListener('click', function () { setCaptions(!captionsOn); cb.setAttribute('aria-pressed', String(captionsOn)); });
+      }
+      if (PC.speed) {
+        var sb = control('speed', 'Speed', null); sb.textContent = '1x'; sb.setAttribute('aria-label', 'Playback speed 1x');
+        sb.addEventListener('click', function () {
+          setSpeed((speedAt + 1) % SPEEDS.length);
+          sb.textContent = SPEEDS[speedAt] + 'x'; sb.setAttribute('aria-label', 'Playback speed ' + SPEEDS[speedAt] + 'x');
+        });
+      }
     }
     if (PC.fullscreen && document.fullscreenEnabled !== false && document.documentElement.requestFullscreen) {
       var fb = control('fullscreen', 'Full screen', 'fullscreen');

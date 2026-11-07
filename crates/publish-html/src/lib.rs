@@ -232,6 +232,13 @@ body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #nav .nav-controls .ctl-seek{{width:200px;max-width:28vw;accent-color:var(--p-accent)}}
 #nav .nav-controls .ctl-time{{font-size:.85em;color:var(--p-muted);white-space:nowrap;font-variant-numeric:tabular-nums}}
 #nav .nav-controls .ctl-volume[aria-pressed=true]{{background:var(--p-hover);color:var(--p-fg);border-color:var(--p-line)}}
+#nav .nav-controls{{position:relative}}
+#nav .nav-controls .ctl-menu{{position:absolute;left:0;bottom:calc(100% + 14px);min-width:160px;padding:6px 0;background:var(--p-panel);color:var(--p-fg);border:1px solid var(--p-line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;flex-direction:column;z-index:7}}
+#nav .nav-controls .ctl-menu[hidden]{{display:none}}
+#nav .nav-controls .ctl-menu-head{{padding:6px 16px 2px;font-size:.8em;letter-spacing:.06em;text-transform:uppercase;color:var(--p-muted)}}
+#nav .nav-controls button.ctl-item{{border:0;border-radius:0;text-align:left;padding:8px 16px 8px 34px;position:relative;min-width:0}}
+#nav .nav-controls button.ctl-item[aria-checked=true]{{background:transparent;color:var(--p-fg);font-weight:700}}
+#nav .nav-controls button.ctl-item[aria-checked=true]::before{{content:"\2713";position:absolute;left:12px}}
 #nav button:focus-visible{{outline:3px solid #6aa8e6}}
 .obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.hidden-by-layer{{display:none !important}}
 .obj:focus-visible{{outline:3px solid #1a1a1a;outline-offset:3px}}
