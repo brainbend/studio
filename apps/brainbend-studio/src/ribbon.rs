@@ -1407,10 +1407,10 @@ impl App {
         let mut want_picture = false;
         let slide_size = (proj.slides[cur].width, proj.slides[cur].height);
         let bg = &mut proj.slides[cur].background;
-        crate::tool_window_at(ctx, "background", "Background", [352.0, 660.0], true, &mut open, |ui| {
-            const W: f32 = 320.0;
-            ui.set_min_width(W);
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), W));
+        crate::tool_window_at(ctx, "background", "Background", [352.0, 420.0], true, &mut open, |ui| {
+            // The picker takes the width the window has, so there is no empty strip beside it.
+            let w = ui.available_width().clamp(240.0, 720.0);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
             // What kind of background. A slide with none uses its layout's (or plain white on the master).
             let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
             let mut pick = kind;
@@ -1531,45 +1531,94 @@ impl App {
         }
     }
 
-    /// The author's brand colors: add, change, reorder and remove them. Every color menu offers them first.
+    /// The author's brand colors: pick one to change it with the picker, add more, remove one, and drag them into order.
+    /// Every color menu offers them first.
     pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context) {
         if !self.theme_colors_open { return; }
         let Some(proj) = self.project.as_mut() else { self.theme_colors_open = false; return };
         let mut open = true;
         let before = Snap::of(proj);
         let mut changed = false;
-        let mut remove: Option<usize> = None;
-        let mut swap: Option<(usize, usize)> = None;
+        let sel_id = egui::Id::new("brand-colors-selected");
+        let draft_id = egui::Id::new("brand-colors-draft");
+        let mut sel: usize = ctx.data(|d| d.get_temp(sel_id)).unwrap_or(0);
+        let mut draft: Rgba = ctx.data(|d| d.get_temp(draft_id)).unwrap_or(Rgba(79, 129, 189, 255));
+        let mut mv: Option<(usize, usize)> = None;
+        let mut remove = false;
         let mut add = false;
-        let n = proj.palette.len();
-        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 420.0], true, &mut open, |ui| {
-            ui.set_min_width(300.0);
+        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 260.0], true, &mut open, |ui| {
+            // The picker takes the width the window has, so there is no empty strip beside it.
+            let w = ui.available_width().clamp(240.0, 720.0);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
             ui.weak("Your project's colors. They show first in every color menu. Colors already on slides do not change.");
-            if n == 0 { ui.add_space(4.0); ui.label("No colors yet. Add one here, or press + in any color menu."); }
-            ui.add_space(4.0);
-            for i in 0..n {
-                ui.horizontal(|ui| {
-                    let c = &mut proj.palette[i];
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(40.0, 24.0), egui::Sense::click());
-                    ui.painter().rect_filled(rect, 3.0, color(*c));
-                    ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
-                    egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                        ui.set_min_width(230.0);
-                        changed |= color_entry(ui, c);
-                    });
-                    ui.label(egui::RichText::new(c.hex()).monospace());
-                    let glyph = |name: &str, fallback: char| egui::RichText::new(crate::panos::icon_char(name).unwrap_or(fallback).to_string()).family(icons());
-                    if ui.add_enabled(i > 0, egui::Button::new(glyph("caret-left", '<')).small()).on_hover_text("Move earlier").clicked() { swap = Some((i, i - 1)); }
-                    if ui.add_enabled(i + 1 < n, egui::Button::new(glyph("caret-right", '>')).small()).on_hover_text("Move later").clicked() { swap = Some((i, i + 1)); }
-                    if ui.add(egui::Button::new(glyph("x", 'x')).small()).on_hover_text("Remove from the palette").clicked() { remove = Some(i); }
+            ui.add_space(6.0);
+            let n = proj.palette.len();
+            sel = sel.min(n.saturating_sub(1));
+            if n == 0 {
+                ui.label("No colors yet. Choose one below and add it.");
+            } else {
+                // The palette: click one to change it; drag one to a new place to reorder.
+                let mut rects: Vec<egui::Rect> = Vec::new();
+                let mut dragged: Option<usize> = None;
+                let mut dropped = false;
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                    for i in 0..n {
+                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click_and_drag());
+                        rects.push(rect);
+                        ui.painter().rect_filled(rect, 4.0, color(proj.palette[i]));
+                        let on = i == sel;
+                        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(if on { 3.0 } else { 1.0 }, if on { ACCENT } else { ui.visuals().weak_text_color() }), egui::StrokeKind::Inside);
+                        let name = format!("Brand color {}", proj.palette[i].hex());
+                        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                        if resp.clicked() { sel = i; }
+                        if resp.dragged() { dragged = Some(i); sel = i; ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing); }
+                        if resp.drag_stopped() { dragged = Some(i); dropped = true; }
+                        resp.on_hover_text(format!("{}\nDrag to reorder", proj.palette[i].hex()));
+                    }
                 });
+                if let (Some(from), Some(p)) = (dragged, ui.input(|i| i.pointer.latest_pos())) {
+                    if let Some(to) = rects.iter().position(|r| r.expand(3.0).contains(p)).filter(|&t| t != from) {
+                        if dropped { mv = Some((from, to)); }
+                        else { ui.painter().rect_stroke(rects[to].expand(2.0), 5.0, egui::Stroke::new(2.0, egui::Color32::WHITE), egui::StrokeKind::Outside); }
+                    }
+                }
             }
-            ui.add_space(4.0);
-            if ui.add_enabled(n < Project::PALETTE_MAX, egui::Button::new("+ Add color")).clicked() { add = true; }
+            ui.add_space(8.0);
+            // The picker: for the chosen color, or, with an empty palette, for the color about to be added.
+            if n > 0 {
+                if color_entry(ui, &mut proj.palette[sel]) { changed = true; }
+            } else {
+                color_entry(ui, &mut draft);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if n == 0 {
+                    if ui.button("Add to palette").clicked() { add = true; }
+                } else {
+                    if ui.add_enabled(n < Project::PALETTE_MAX, egui::Button::new("+ Add color")).on_hover_text("Add a copy of this color, then change it").clicked() { add = true; }
+                    if ui.button("Remove").on_hover_text("Remove this color from the palette").clicked() { remove = true; }
+                }
+            });
         });
-        if add { proj.palette.push(Rgba(128, 128, 128, 255)); changed = true; }
-        if let Some(i) = remove { proj.palette.remove(i); changed = true; }
-        if let Some((a, b)) = swap { proj.palette.swap(a, b); changed = true; }
+        if add {
+            let c = if proj.palette.is_empty() { draft } else { proj.palette[sel.min(proj.palette.len() - 1)] };
+            proj.palette.push(c);
+            sel = proj.palette.len() - 1;
+            changed = true;
+        }
+        if remove && !proj.palette.is_empty() {
+            proj.palette.remove(sel.min(proj.palette.len() - 1));
+            sel = sel.saturating_sub(1);
+            changed = true;
+        }
+        if let Some((from, to)) = mv {
+            let c = proj.palette.remove(from);
+            proj.palette.insert(to, c);
+            sel = to;
+            changed = true;
+        }
+        ctx.data_mut(|d| { d.insert_temp(sel_id, sel); d.insert_temp(draft_id, draft); });
         if changed { self.commit_project_edit(ctx, before); }
         if !open { self.theme_colors_open = false; }
     }

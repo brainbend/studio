@@ -727,7 +727,19 @@ pub(crate) fn tool_window_at(ctx: &egui::Context, id: &'static str, title: &str,
         }
         if ui.input(|i| i.viewport().close_requested()) { *open = false; }
         egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| { if let Some(f) = content.take() { f(ui); } });
+            let out = egui::ScrollArea::vertical().auto_shrink([false, beside]).show(ui, |ui| { if let Some(f) = content.take() { f(ui); } });
+            if beside {
+                // These windows are exactly as tall as what is in them (and follow it as it changes), with no empty strip below.
+                let margin = egui::Frame::central_panel(ui.style()).inner_margin;
+                let want = (out.content_size.y + margin.sum().y + 2.0).clamp(120.0, 900.0).round();
+                let key = egui::Id::new(("tool-window-height", id));
+                let last: Option<f32> = ui.data(|d| d.get_temp(key));
+                if last.is_none_or(|l| (l - want).abs() > 1.0) {
+                    let width = ui.ctx().input(|i| i.viewport().inner_rect.map(|r| r.width())).unwrap_or(size[0]);
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(width, want)));
+                    ui.data_mut(|d| d.insert_temp(key, want));
+                }
+            }
         });
     });
 }
@@ -11246,6 +11258,34 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_brand_color_onto_another_reorders_the_palette() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.ribbon_tab = ribbon::THEME_TAB;
+        let (red, green, blue) = (Rgba(255, 0, 0, 255), Rgba(0, 255, 0, 255), Rgba(0, 0, 255, 255));
+        a.project.as_mut().unwrap().palette = vec![red, green, blue];
+        a.theme_colors_open = true;
+        let mut h = harness_fast(a);
+        h.run_steps(4);
+        let centre = |h: &egui_kittest::Harness<'_, App>, c: Rgba| h.get_by_label(&format!("Brand color {}", c.hex())).rect().center();
+        let (from, to) = (centre(&h, red), centre(&h, blue));
+        let (from, to) = (egui::pos2(from.x as f32, from.y as f32), egui::pos2(to.x as f32, to.y as f32));
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        let mid = from + (to - from) * 0.5;
+        h.event(egui::Event::PointerMoved(mid));
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(3);
+        assert_eq!(h.state().project.as_ref().unwrap().palette, vec![green, blue, red], "red dropped on blue takes blue's place");
+    }
+
+    #[test]
     fn gui_brand_colors_recent_colors_and_the_color_menu_notes() {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
@@ -11259,14 +11299,22 @@ mod tests {
         h.get_by_label_contains("Colors").click();
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
+        // With no colors yet the picker is already showing, and what it shows is added.
+        h.get_by_label("Add to palette").click();
+        h.run_steps(3);
+        assert_eq!(proj(&h).palette, vec![Rgba(79, 129, 189, 255)]);
+        // Then "+ Add color" adds a copy to change, and Remove takes the chosen one away.
         h.get_by_label("+ Add color").click();
+        h.run_steps(3);
+        assert_eq!(proj(&h).palette.len(), 2);
+        h.get_by_label("Remove").click();
         h.run_steps(3);
         assert_eq!(proj(&h).palette.len(), 1);
         // A color menu's + adds the color it is showing.
         let teal = Rgba(0, 128, 128, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("palette-add"), teal));
         h.run_steps(3);
-        assert_eq!(proj(&h).palette, vec![Rgba(128, 128, 128, 255), teal]);
+        assert_eq!(proj(&h).palette, vec![Rgba(79, 129, 189, 255), teal]);
         // Using a color makes it recent (not if it is in the palette).
         let coral = Rgba(255, 127, 80, 255);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("picked-color"), coral));
