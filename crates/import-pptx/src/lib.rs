@@ -446,7 +446,7 @@ pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> 
         }
         let notes = shapes::read_notes(&cx);
         let title = objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).map(|o| o.text.lines().next().unwrap_or("").trim().to_string()).filter(|t| !t.is_empty());
-        let fade_ms = shapes::read_transition(sroot, &mut cx);
+        let (fade_ms, transition) = shapes::read_transition(sroot, &mut cx);
         shapes::read_animations(sroot, &mut cx, &mut objects, (width, height));
         let mut slide = Slide::new(&slide_id, &title.map(|t| t.chars().take(60).collect::<String>()).unwrap_or_else(|| format!("Slide {}", converted.len() + 1)), width, height);
         slide.layers[0].objects = objects;
@@ -454,6 +454,7 @@ pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> 
         slide.layout = m.layouts.get(li).map(|l| l.1.id.clone());
         slide.notes = notes;
         slide.fade_ms = fade_ms;
+        slide.transition = transition;
         let links = std::mem::take(&mut cx.links);
         slide_id_of_part.insert(part.clone(), slide_id.clone());
         converted.push((sld_id.clone(), part.clone(), slide, links));

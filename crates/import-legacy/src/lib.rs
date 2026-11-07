@@ -94,7 +94,7 @@ pub fn import<R: Read + Seek>(reader: R, name: &str) -> Result<Project, String> 
                 })
                 .map(brainbend_doc::Background::Solid),
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: sld.attribute("advMode") == Some("auto"), nav: Default::default(),
             notes: String::new(),
             scene: String::new(),

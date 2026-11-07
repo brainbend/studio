@@ -1377,7 +1377,7 @@ impl App {
             kind: SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -2767,7 +2767,8 @@ impl App {
     fn timeline_panel(&mut self, ui: &mut egui::Ui, slide_idx: usize) {
         const ROW_H: f32 = 22.0;
         const LABEL_W: f32 = 170.0;
-        const SNAP_MS: f32 = 50.0;
+        // Times snap to a tenth of a second, so a drag moves in clear steps; hold Shift for fine control.
+        let snap_ms: f32 = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 100.0 };
         let Some(proj) = self.project.as_ref() else { return };
         let slide = &proj.slides[slide_idx];
         let li = self.layer.min(slide.layers.len() - 1);
@@ -2796,14 +2797,39 @@ impl App {
             }
         }
         let max_end = layer.objects.iter().filter_map(|o| o.timing).map(|t| t.start_ms + t.dur_ms.unwrap_or(0)).max().unwrap_or(0);
-        let total = layer.duration_ms.unwrap_or(((max_end.max(4000) as f32 / 1000.0).ceil() as u32 + 1) * 1000) as f32;
+        let mut total = layer.duration_ms.unwrap_or(((max_end.max(4000) as f32 / 1000.0).ceil() as u32 + 1) * 1000) as f32;
+        // An automatic timeline grows with its objects. While a bar is being dragged its scale is held, so the bar stays under the pointer.
+        let frozen_id = egui::Id::new("timeline-frozen-total");
+        if self.tl_drag.is_some() || self.tl_gdrag.is_some() {
+            if let Some(t) = ui.data(|d| d.get_temp::<f32>(frozen_id)) { total = t; }
+        } else {
+            ui.data_mut(|d| d.insert_temp(frozen_id, total));
+        }
         let layer_name = layer.name.clone();
         let timed_layer = layer.duration_ms.is_some();
 
+        let mut len_edit: Option<Option<u32>> = None;
+        let mut len_snap = false;
         ui.horizontal(|ui| {
             ui.strong(format!("Timeline: {layer_name}"));
-            if timed_layer { ui.label(format!("{:.1} s", total / 1000.0)); } else { ui.weak("no length set (Slide/Layer, Timeline, in Properties)"); }
+            ui.label("Length");
+            let mut secs = total / 1000.0;
+            let r = ui.add(egui::DragValue::new(&mut secs).range(1.0..=3600.0).speed(0.1).max_decimals(1).suffix(" s"))
+                .on_hover_text("How long this timeline runs. Objects can start and leave anywhere along it");
+            if r.drag_started() || r.gained_focus() { len_snap = true; }
+            if r.changed() { len_edit = Some(Some((secs * 1000.0).round() as u32)); }
+            // Shorten (or lengthen) the timeline to where the last object leaves.
+            let fit = ((max_end as f32 / 100.0).ceil() * 100.0).max(1000.0) as u32;
+            if max_end > 0 && (total - fit as f32).abs() > 1.0 && ui.small_button("Fit to objects").on_hover_text("Make the timeline as long as the last object to leave. Objects that last until the end simply stay").clicked() {
+                len_edit = Some(Some(fit));
+                len_snap = true;
+            }
         });
+        if len_snap { self.snapshot(); }
+        if let Some(v) = len_edit {
+            if let Some(l) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)) { l.duration_ms = v; }
+            self.dirty = true;
+        }
         let avail = ui.available_width();
         let track_w = (avail - LABEL_W - 24.0).max(120.0);
         let px = track_w / total;
@@ -2893,11 +2919,14 @@ impl App {
                         let (a, b) = if spans.is_empty() { (0.0, total) } else { (spans.iter().map(|s| s.0).fold(f32::MAX, f32::min), spans.iter().map(|s| s.1).fold(0.0, f32::max)) };
                         let bar = egui::Rect::from_min_max(egui::pos2(left + a * px, track.top()), egui::pos2((left + b * px).max(left + a * px + 4.0), track.bottom()));
                         ui.painter().rect_filled(bar, 3.0, if spans.is_empty() { egui::Color32::from_gray(80) } else { ribbon::ACCENT });
-                        let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
+                        let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 10.0, bar.top()), bar.right_bottom());
+                // A grip on the end of the bar shows that it can be dragged: that is where the object leaves.
+                for dx in [3.0, 6.0] { ui.painter().vline(bar.right() - dx, bar.shrink2(egui::vec2(0.0, 5.0)).y_range(), egui::Stroke::new(1.0, egui::Color32::from_white_alpha(150))); }
                         let gid_id = ui.id().with(("tlg", gid.as_str()));
                         let edge_resp = ui.interact(edge, gid_id.with("edge"), egui::Sense::drag());
                         let body_resp = ui.interact(bar, gid_id.with("body"), egui::Sense::click_and_drag());
                         if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
+                let edge_resp = edge_resp.on_hover_text("Drag to set when it leaves (hold Shift for fine steps). An exit effect plays just before");
                         if body_resp.clicked() || edge_resp.clicked() { self.selected = Some((li, top)); self.multi.clear(); }
                         let begun = if edge_resp.drag_started() { Some(1u8) } else if body_resp.drag_started() { Some(0u8) } else { None };
                         if let Some(kind) = begun {
@@ -2909,15 +2938,15 @@ impl App {
                             if let Some((g, kind, originals, acc)) = self.tl_gdrag.as_mut().filter(|d| d.0 == gid) {
                                 let _ = g;
                                 *acc += if *kind == 1 { edge_resp.drag_delta().x } else { body_resp.drag_delta().x };
-                                let ms = ((*acc / px) / SNAP_MS).round() * SNAP_MS;
+                                let ms = ((*acc / px) / snap_ms).round() * snap_ms;
                                 let group_end = b;
                                 let writes: Vec<(usize, Timing)> = originals.iter().map(|(m, t)| {
                                     let (s0, d0) = t.map(|t| (t.start_ms as f32, t.dur_ms.map(|d| d as f32))).unwrap_or((0.0, None));
                                     if *kind == 0 {
                                         (*m, Timing { start_ms: (s0 + ms).max(0.0) as u32, dur_ms: d0.map(|d| d as u32) })
                                     } else {
-                                        let end = (group_end + ms).max(SNAP_MS);
-                                        (*m, Timing { start_ms: s0 as u32, dur_ms: Some((end - s0).max(SNAP_MS) as u32) })
+                                        let end = (group_end + ms).max(snap_ms);
+                                        (*m, Timing { start_ms: s0 as u32, dur_ms: Some((end - s0).max(snap_ms) as u32) })
                                     }
                                 }).collect();
                                 if let Some(l) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)) {
@@ -2992,8 +3021,9 @@ impl App {
                 // Interaction: right-edge handle (duration) first, then the body (move / select).
                 let edge = egui::Rect::from_min_max(egui::pos2(bar.right() - 6.0, bar.top()), bar.right_bottom());
                 let id = ui.id().with(("tl", oi));
-                let edge_resp = ui.interact(edge, id.with("edge"), egui::Sense::drag());
+                // Registered last, so where they overlap the end handle wins over the body of the bar.
                 let body_resp = ui.interact(bar, id.with("body"), egui::Sense::click_and_drag());
+                let edge_resp = ui.interact(edge, id.with("edge"), egui::Sense::drag());
                 if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
                 if body_resp.clicked() || edge_resp.clicked() || body_resp.secondary_clicked() { self.selected = Some((li, oi)); }
                 let timed_now = timing.is_some();
@@ -3001,8 +3031,9 @@ impl App {
                     if timed_now {
                         if ui.button("Show for the whole timeline").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.timing = None; } self.dirty = true; ui.close(); }
                         if ui.button("Start at the beginning").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.start_ms = 0; } } self.dirty = true; ui.close(); }
+                        if timing.is_some_and(|t| t.dur_ms.is_none()) && ui.button("Leave after 2 seconds").on_hover_text("Gives it an end, so an exit effect can play. Drag the end of its bar to change it").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.dur_ms = Some(2000); } } self.dirty = true; ui.close(); }
                         if ui.button("Last until the end").clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { if let Some(t) = o.timing.as_mut() { t.dur_ms = None; } } self.dirty = true; ui.close(); }
-                    } else if ui.button("Set start and length").clicked() {
+                    } else if ui.button("Show for part of the timeline").on_hover_text("Gives it a start and an end (2 seconds to begin with). Drag the bar to move it, and drag its end to change when it leaves").clicked() {
                         self.snapshot();
                         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.timing = Some(Timing { start_ms: 0, dur_ms: Some(2000) }); }
                         self.dirty = true;
@@ -3023,12 +3054,12 @@ impl App {
                 if moving {
                     if let Some((doi, kind, s0, d0, acc)) = self.tl_drag.as_mut().filter(|d| d.0 == oi) {
                         *acc += if *kind == 1 { edge_resp.drag_delta().x } else { body_resp.drag_delta().x };
-                        let ms = ((*acc / px) / SNAP_MS).round() * SNAP_MS;
+                        let ms = ((*acc / px) / snap_ms).round() * snap_ms;
                         let (new_start, new_dur) = if *kind == 0 {
-                            ((*s0 as f32 + ms).max(0.0) as u32, *d0)
+                            ((*s0 as f32 + ms).clamp(0.0, (total - d0.map_or(snap_ms, |d| d as f32)).max(0.0)) as u32, *d0)
                         } else {
-                            let base = d0.map(|d| d as f32).unwrap_or((total - *s0 as f32).max(SNAP_MS));
-                            (*s0, Some((base + ms).max(SNAP_MS) as u32))
+                            let base = d0.map(|d| d as f32).unwrap_or((total - *s0 as f32).max(snap_ms));
+                            (*s0, Some((base + ms).clamp(snap_ms, (total - *s0 as f32).max(snap_ms)) as u32))
                         };
                         let _ = doi;
                         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
@@ -5200,38 +5231,11 @@ fn effect_label(k: EffectKind) -> &'static str {
     }
 }
 
-/// Entrance/exit effect: none or a kind plus a duration (and a delay for entrances).
-fn effect_picker(ui: &mut egui::Ui, salt: &str, effect: &mut Option<Entrance>, with_delay: bool) -> bool {
-    let mut changed = false;
-    const ALL: [EffectKind; 15] = [
-        EffectKind::Fade, EffectKind::SlideLeft, EffectKind::SlideRight, EffectKind::SlideUp, EffectKind::SlideDown, EffectKind::Zoom, EffectKind::Wipe,
-        EffectKind::SpinQuarter, EffectKind::SpinHalf, EffectKind::SpinFull, EffectKind::Wheel,
-        EffectKind::SplitVerticalOut, EffectKind::SplitVerticalIn, EffectKind::SplitHorizontalOut, EffectKind::SplitHorizontalIn,
-    ];
-    ui.horizontal(|ui| {
-        ui.label(salt);
-        let text = effect.map(|e| effect_label(e.kind)).unwrap_or("none");
-        combo(("effect", salt)).selected_text(text).show_ui(ui, |ui| {
-            if ui.selectable_label(effect.is_none(), "none").clicked() { *effect = None; changed = true; }
-            for k in ALL {
-                if ui.selectable_label(effect.map(|e| e.kind) == Some(k), effect_label(k)).clicked() {
-                    let prev = *effect;
-                    *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) });
-                    changed = true;
-                }
-            }
-        });
-        if let Some(en) = effect.as_mut() {
-            if with_delay {
-                ui.label("delay");
-                changed |= ui.add(egui::DragValue::new(&mut en.delay_ms).range(0..=20000).speed(10.0).suffix(" ms")).changed();
-            }
-            ui.label("for");
-            changed |= ui.add(egui::DragValue::new(&mut en.duration_ms).range(50..=10000).speed(10.0).suffix(" ms")).changed();
-        }
-    });
-    changed
-}
+pub(crate) const EFFECT_KINDS: [EffectKind; 15] = [
+    EffectKind::Fade, EffectKind::SlideLeft, EffectKind::SlideRight, EffectKind::SlideUp, EffectKind::SlideDown, EffectKind::Zoom, EffectKind::Wipe,
+    EffectKind::SpinQuarter, EffectKind::SpinHalf, EffectKind::SpinFull, EffectKind::Wheel,
+    EffectKind::SplitVerticalOut, EffectKind::SplitVerticalIn, EffectKind::SplitHorizontalOut, EffectKind::SplitHorizontalIn,
+];
 
 fn owner_eq(a: &Owner, b: &Owner) -> bool {
     match (a, b) {
@@ -11283,6 +11287,105 @@ mod tests {
         h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
         h.run_steps(3);
         assert_eq!(h.state().project.as_ref().unwrap().palette, vec![green, blue, red], "red dropped on blue takes blue's place");
+    }
+
+    #[test]
+    fn a_timeline_bar_end_can_be_dragged_and_the_timeline_length_set() {
+        let mut a = app();
+        a.file_view = false;
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(Object::new("o1", "Box", Kind::Rect, 100.0, 100.0, 200.0, 100.0));
+        let mut h = harness(a);
+        h.run_steps(4);
+        // The only bar runs the whole (automatic) timeline; find its right end from where the row is drawn.
+        let img = h.render().expect("renderer");
+        let (w, hgt) = (img.width() as f32, img.height() as f32);
+        let mut best: Option<(f32, f32)> = None;
+        for y in (hgt * 0.7) as u32..hgt as u32 {
+            for x in 0..img.width() {
+                let p = img.get_pixel(x, y);
+                if p.0[0] == 0x50 && p.0[1] == 0x50 && p.0[2] == 0x50 { if best.map_or(true, |b| x as f32 > b.0 || (x as f32 == b.0 && false)) { best = Some((x as f32, y as f32)); } }
+            }
+        }
+        let (rx, ry) = best.expect("a bar");
+        let ppp = img.width() as f32 / h.ctx.content_rect().width();
+        let from = egui::pos2((rx - 4.0 * ppp) / ppp, ry / ppp);
+        let to = egui::pos2(from.x - 200.0, from.y);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(to));
+        h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(3);
+        let t = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].timing.expect("dragging the end gives it a time");
+        assert_eq!(t.start_ms, 0, "the start stays put");
+        assert!(t.dur_ms.is_some_and(|d| d < 5000 && d > 0), "the end moved left: {t:?}");
+    }
+
+    #[test]
+    fn the_object_animation_buttons_open_their_panels_in_place() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::ANIMATIONS_TAB;
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(Object::new("o1", "Box", Kind::Rect, 100.0, 100.0, 200.0, 100.0));
+        a.selected = Some((0, 0));
+        let mut h = harness(a);
+        h.run_steps(3);
+        for name in ["Emphasis", "Motion", "Exit", "Entrance"] {
+            h.get_all_by_label(name).next().unwrap().click();
+            h.run_steps(3);
+            assert!(!h.query_all_by_label("none").collect::<Vec<_>>().is_empty(), "{name} opens a panel with a none choice");
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+                h.render().expect("renderer").save(std::path::Path::new(&dir).join(format!("anim-{name}.png"))).unwrap();
+            }
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        for (btn, pick) in [("Emphasis", "Pulse"), ("Motion", "Line right")] {
+            h.get_all_by_label(btn).next().unwrap().click();
+            h.run_steps(3);
+            h.get_by_label(pick).click();
+            h.run_steps(4);
+            { let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0]; assert!(if btn == "Emphasis" { o.emphasis.is_some() } else { o.motion.is_some() }, "choosing from {btn} sets it"); }
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+                h.render().expect("renderer").save(std::path::Path::new(&dir).join(format!("anim-{btn}-set.png"))).unwrap();
+            }
+            h.key_press(egui::Key::Escape);
+            h.run_steps(3);
+        }
+        // Choosing an exit for an object that stays to the end gives it an end to leave at.
+        h.get_all_by_label("Exit").next().unwrap().click();
+        h.run_steps(3);
+        h.get_by_label("fade").click();
+        h.run_steps(3);
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.exit.is_some());
+        assert!(o.timing.and_then(|t| t.dur_ms).is_some(), "an exit needs a time to play at");
+    }
+
+    #[test]
+    fn the_transition_menu_names_the_chosen_kind_and_options_follow_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::ANIMATIONS_TAB;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("None").is_some(), "a slide with no transition says None");
+        {
+            let sl = &mut h.state_mut().project.as_mut().unwrap().slides[0];
+            sl.fade_ms = 600;
+            sl.transition = brainbend_doc::Transition::of(brainbend_doc::TransitionKind::Split);
+        }
+        h.run_steps(3);
+        assert!(h.query_by_label("Split").is_some(), "the menu button names the kind");
+        assert!(h.query_by_label_contains("Effect").is_some());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.run_steps(2);
+            h.render().expect("renderer").save(std::path::Path::new(&dir).join("transition-menu.png")).unwrap();
+        }
     }
 
     #[test]

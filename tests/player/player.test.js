@@ -2102,3 +2102,36 @@ test('accessibility: a 360° image passes the automated audit with and without W
     assert.deepEqual(await audit(w), [], before ? 'with WebGL' : 'flat');
   }
 });
+
+test('slide transitions: each kind moves the new slide (and the old one, when it should) and clears up afterwards', () => {
+  const os = require('node:os');
+  const src = fs.readFileSync(path.join(fixture('a11y'), 'index.html'), 'utf8');
+  const kinds = [
+    ['Push', { from: 'Right' }, 2, 'transform'],
+    ['Cover', { from: 'Left' }, 1, 'transform'],
+    ['Uncover', { from: 'Top' }, 1, 'transform'],
+    ['Wipe', { from: 'Bottom' }, 1, 'clipPath'],
+    ['Split', { from: 'Left', inward: false }, 1, 'clipPath'],
+    ['Split', { from: 'Top', inward: true }, 1, 'clipPath'],
+    ['Zoom', { inward: true }, 1, 'transform'],
+    ['Zoom', { inward: false }, 1, 'transform'],
+    ['Dissolve', {}, 1, 'opacity'],
+  ];
+  for (const [kind, opts, count, prop] of kinds) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-transition-'));
+    let n = 0;
+    const html = src.replace(/"fade_ms":0/g, (m) => (n++ === 1 ? `"fade_ms":400,"transition":${JSON.stringify({ kind, from: 'Right', inward: false, ...opts })}` : m));
+    assert.ok(n >= 2);
+    fs.writeFileSync(path.join(dir, 'index.html'), html);
+    const { w, errors } = boot(dir);
+    w.__animations.length = 0;
+    click(w, nextBtn(w));
+    assert.equal(currentSlide(w), 1);
+    const mine = w.__animations.filter((a) => a.keyframes.some((k) => prop in k));
+    assert.equal(mine.length, count, `${kind} ${JSON.stringify(opts)} plays ${count} animation(s) of ${prop}`);
+    const [oldEl, newEl] = $$(w, '.slide');
+    assert.equal(newEl.style.display, 'block');
+    if (kind !== 'Dissolve') assert.equal(oldEl.style.display, 'block', `${kind}: the old slide stays in view while the new one arrives`);
+    assert.deepEqual(errors, [], kind);
+  }
+});

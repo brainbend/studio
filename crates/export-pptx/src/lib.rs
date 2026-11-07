@@ -48,6 +48,24 @@ fn solid(c: Rgba) -> String {
 
 /// A background gradient: radial uses a circular path; reflected is spelled out as stops; angular has no equivalent in
 /// PowerPoint and falls back to linear.
+/// `<p:transition>` for a slide: none for a cut, else the kind PowerPoint calls the same.
+fn transition_xml(ms: u32, t: brainbend_doc::Transition) -> String {
+    use brainbend_doc::TransitionKind::*;
+    if ms == 0 { return String::new(); }
+    let spd = if ms >= 900 { "slow" } else if ms <= 550 { "fast" } else { "med" };
+    let inner = match t.kind {
+        Fade => "<p:fade/>".to_string(),
+        Dissolve => "<p:dissolve/>".to_string(),
+        Push => format!("<p:push dir=\"{}\"/>", t.from.ooxml()),
+        Wipe => format!("<p:wipe dir=\"{}\"/>", t.from.ooxml()),
+        Cover => format!("<p:cover dir=\"{}\"/>", t.from.ooxml()),
+        Uncover => format!("<p:pull dir=\"{}\"/>", t.from.ooxml()),
+        Split => format!("<p:split orient=\"{}\" dir=\"{}\"/>", if matches!(t.from, brainbend_doc::Edge::Left | brainbend_doc::Edge::Right) { "vert" } else { "horz" }, if t.inward { "in" } else { "out" }),
+        Zoom => format!("<p:zoom dir=\"{}\"/>", if t.inward { "in" } else { "out" }),
+    };
+    format!("<p:transition spd=\"{spd}\">{inner}</p:transition>")
+}
+
 fn background_gradient_xml(kind: brainbend_doc::GradientKind, angle: f32, stops: &[(f32, Rgba)], geom: &brainbend_doc::GradientGeom) -> String {
     use brainbend_doc::GradientKind::*;
     match kind {
@@ -559,6 +577,7 @@ fn layers_to_slides(project: &mut Project) -> std::collections::BTreeSet<String>
             s.notes = String::new();
             s.auto_advance = false;
             s.fade_ms = 0;
+            s.transition = Default::default();
             let mut objects = slide.layers[0].objects.clone();
             objects.extend(layer.objects.iter().cloned());
             s.layers = vec![Layer { id: slide.layers[0].id.clone(), name: slide.layers[0].name.clone(), objects, duration_ms: layer.duration_ms, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] }];
@@ -674,7 +693,7 @@ pub fn export(project: &Project) -> Result<(Vec<u8>, Vec<String>), String> {
         let bg = slide.background.clone().map(|b| part.background(&b)).unwrap_or_default();
         let tree = part.tree(&objects, false);
         let timing = anim::timing_xml(&objects, slide.layers[0].duration_ms, &part.spids, sw, sh).unwrap_or_default();
-        let transition = if slide.fade_ms > 0 { format!("<p:transition spd=\"{}\"><p:fade/></p:transition>", if slide.fade_ms >= 900 { "slow" } else if slide.fade_ms <= 550 { "fast" } else { "med" }) } else { String::new() };
+        let transition = transition_xml(slide.fade_ms, slide.transition);
         if slide.notes.trim().is_empty() == false {
             part.rels.add("notesSlide", &format!("../notesSlides/notesSlide{n}.xml"), false);
         }

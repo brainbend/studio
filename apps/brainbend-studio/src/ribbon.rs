@@ -222,7 +222,7 @@ fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
             ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
         }
         let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
-        let icon_col = if enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
+        let icon_col = if !selected && enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
         ui.painter().text(egui::pos2(rect.center().x, rect.top() + 4.0), egui::Align2::CENTER_TOP, icon, egui::FontId::new(22.0, icons()), icon_col);
         let n = lines.len();
         for (i, line) in lines.iter().enumerate() {
@@ -240,6 +240,85 @@ fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
         }
     }
     resp
+}
+
+/// A big ribbon button whose picture is drawn by `draw` (given the painter, the 30 x 20 frame it may draw in, the colour of the
+/// new slide and the colour of the old one), for a gallery of things no icon font has a glyph for.
+fn big_drawn_button(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, draw: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32, egui::Color32)) -> egui::Response {
+    let w = big_width(ui, label, false);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, BIG_H), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    if ui.is_rect_visible(rect) {
+        let vis = ui.style().interact_selectable(&resp, selected);
+        if resp.hovered() || resp.has_focus() || selected {
+            ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
+        }
+        let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
+        let frame = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 18.0), egui::vec2(30.0, 20.0));
+        let old = if selected { col.gamma_multiply(0.45) } else { text_col(ui).gamma_multiply(0.35) };
+        let new = if selected { col } else { ACCENT };
+        draw(&ui.painter().with_clip_rect(frame.expand(1.5)), frame, new, old);
+        ui.painter().rect_stroke(frame, 2.0, egui::Stroke::new(1.2, col), egui::StrokeKind::Outside);
+        ui.painter().text(egui::pos2(rect.center().x, rect.top() + 31.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(11.5), col);
+    }
+    resp.on_hover_text(tip)
+}
+
+/// What each kind of slide transition looks like in the ribbon: the old slide in grey, the new one in colour, part way through.
+fn draw_transition(kind: brainbend_doc::TransitionKind, p: &egui::Painter, f: egui::Rect, new: egui::Color32, old: egui::Color32) {
+    use brainbend_doc::TransitionKind::*;
+    let part = |x0: f32, x1: f32, y0: f32, y1: f32| egui::Rect::from_min_max(egui::pos2(f.left() + f.width() * x0, f.top() + f.height() * y0), egui::pos2(f.left() + f.width() * x1, f.top() + f.height() * y1));
+    match kind {
+        Fade => {
+            const N: usize = 10;
+            for i in 0..N {
+                let t = i as f32 / (N - 1) as f32;
+                let c = egui::Color32::from_rgba_unmultiplied(new.r(), new.g(), new.b(), (255.0 * t) as u8);
+                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, old);
+                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, c);
+            }
+        }
+        Push => {
+            p.rect_filled(part(-0.45, 0.5, 0.0, 1.0), 0.0, old);
+            p.rect_filled(part(0.5, 1.45, 0.0, 1.0), 0.0, new);
+            p.line_segment([part(0.5, 0.5, 0.0, 0.0).min, part(0.5, 0.5, 1.0, 1.0).min + egui::vec2(0.0, 0.0)], egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)));
+        }
+        Cover => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.4, 1.0, 0.0, 1.0), 0.0, new);
+            p.line_segment([part(0.4, 0.4, 0.0, 0.0).min, part(0.4, 0.4, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
+        }
+        Uncover => {
+            p.rect_filled(f, 0.0, new);
+            p.rect_filled(part(-0.4, 0.55, 0.0, 1.0), 0.0, old);
+            p.line_segment([part(0.55, 0.55, 0.0, 0.0).min, part(0.55, 0.55, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
+        }
+        Wipe => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.0, 0.58, 0.0, 1.0), 0.0, new);
+            for k in 0..4 { let y = k as f32 / 4.0; p.rect_filled(part(0.58, 0.75, y + 0.06, y + 0.19), 0.0, new.gamma_multiply(0.55)); }
+        }
+        Split => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.3, 0.7, 0.0, 1.0), 0.0, new);
+            let s = egui::Stroke::new(1.3, egui::Color32::WHITE);
+            p.line_segment([part(0.3, 0.3, 0.5, 0.5).min, part(0.12, 0.12, 0.5, 0.5).min], s);
+            p.line_segment([part(0.7, 0.7, 0.5, 0.5).min, part(0.88, 0.88, 0.5, 0.5).min], s);
+        }
+        Zoom => {
+            p.rect_filled(f, 0.0, old);
+            p.rect_filled(part(0.28, 0.72, 0.18, 0.82), 1.0, new);
+            let s = egui::Stroke::new(1.0, new);
+            p.rect_stroke(part(0.12, 0.88, 0.08, 0.92), 1.0, s, egui::StrokeKind::Inside);
+        }
+        Dissolve => {
+            p.rect_filled(f, 0.0, old);
+            // Scattered squares of the new slide, in a fixed pattern.
+            for i in 0..6 { for j in 0..4 {
+                if (i * 7 + j * 5 + i * j) % 3 != 0 { p.rect_filled(part(i as f32 / 6.0, (i + 1) as f32 / 6.0, j as f32 / 4.0, (j + 1) as f32 / 4.0), 0.0, new); }
+            } }
+        }
+    }
 }
 
 /// `c` mixed towards black by `t` (0 to 1), still fully opaque.
@@ -313,6 +392,47 @@ fn caret_job(ui: &egui::Ui, text: &str, icon: Option<char>) -> egui::text::Layou
     job.append("  ", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
     job.append(&CARET.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(9.0, icons()), color: col, ..Default::default() });
     job
+}
+
+/// An entrance or exit as one button; its panel holds the effects, how it starts and how long it takes.
+/// There is no delay to set: when the object is shown is the timeline's job.
+fn effect_menu(ui: &mut egui::Ui, icon: char, title: &str, tip: &str, effect: &mut Option<Entrance>, step: &mut u32, with_delay: bool) -> bool {
+    let mut changed = false;
+    let tip = match effect { Some(e) => format!("{title}: {}", effect_label(e.kind)), None => tip.to_string() };
+    let btn = big_widget(ui, icon, title, true, effect.is_some()).on_hover_text(tip);
+    egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        ui.set_min_width(210.0);
+        if ui.selectable_label(effect.is_none(), "none").clicked() { *effect = None; changed = true; }
+        for k in EFFECT_KINDS {
+            if ui.selectable_label(effect.map(|e| e.kind) == Some(k), effect_label(k)).clicked() {
+                let prev = *effect;
+                *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) });
+                changed = true;
+            }
+        }
+        if let Some(en) = effect.as_mut() {
+            ui.separator();
+            changed |= click_row(ui, &format!("ck-{title}"), "Starts", step);
+            ui.horizontal(|ui| {
+                ui.label("takes");
+                changed |= ui.add(egui::DragValue::new(&mut en.duration_ms).range(50..=10000).speed(10.0).suffix(" ms")).changed();
+            });
+            if with_delay { changed |= delay_leftover(ui, &mut en.delay_ms); }
+            else { ui.weak("Leaves when its bar ends on the timeline."); }
+        }
+    });
+    changed
+}
+
+/// A delay saved by an earlier version is still honored, so it is shown (and can be cleared); nothing offers to set a new one.
+fn delay_leftover(ui: &mut egui::Ui, delay: &mut u32) -> bool {
+    if *delay == 0 { return false; }
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.weak(format!("Delayed {} ms", *delay));
+        if ui.small_button("Clear").on_hover_text("Remove the delay. Set when it shows by dragging its bar on the timeline").clicked() { *delay = 0; changed = true; }
+    });
+    changed
 }
 
 impl App {
@@ -999,7 +1119,7 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
 /// Copy the fields that differ between `a` (before) and `b` (after) onto `t`.
 fn apply_diff(a: &Object, b: &Object, t: &mut Object) {
     macro_rules! field { ($($f:ident),*) => { $( if a.$f != b.$f { t.$f = b.$f.clone(); } )* } }
-    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
+    field!(fill, stroke, dash, shadow, glow, soft_edge, reflection, radius, hidden, entrance, exit, emphasis, motion, click_steps, timing, alt, gradient, rotation, line_spacing, x, y, w, h, media, captions, text_rotation);
     // Picking a flat color replaces a gradient.
     if a.fill != b.fill && a.gradient == b.gradient { t.gradient = None; }
     macro_rules! sfield { ($($f:ident),*) => { $( if a.style.$f != b.style.$f { t.style.$f = b.style.$f.clone(); } )* } }
@@ -2734,12 +2854,37 @@ impl App {
         let mut changed = false;
         let mut apply_all = false;
         group(ui, "Slide Transition", |ui| {
+            use brainbend_doc::{Transition, TransitionKind};
             ui.horizontal(|ui| {
                 let fade = proj.slides[slide_idx].fade_ms;
-                let none = big_toggle(ui, SQUARE_BORDER, "None", "No transition", fade == 0);
-                if none.clicked() { proj.slides[slide_idx].fade_ms = 0; changed = true; }
-                let fadeb = big_toggle(ui, FILM, "Fade", "Fade in", fade > 0);
-                if fadeb.clicked() && fade == 0 { proj.slides[slide_idx].fade_ms = 500; changed = true; }
+                let cur = proj.slides[slide_idx].transition;
+                if big_toggle(ui, SQUARE_BORDER, "None", "No transition: the next slide just appears", fade == 0).clicked() { proj.slides[slide_idx].fade_ms = 0; changed = true; }
+                for k in TransitionKind::ALL {
+                    let tip = match k {
+                        TransitionKind::Fade => "The slide fades in",
+                        TransitionKind::Push => "The new slide pushes the old one out",
+                        TransitionKind::Wipe => "The new slide is wiped in",
+                        TransitionKind::Split => "The new slide opens from the middle, or closes in from the sides",
+                        TransitionKind::Cover => "The new slide slides over the old one",
+                        TransitionKind::Uncover => "The old slide slides away to show the new one",
+                        TransitionKind::Zoom => "The new slide zooms in, or the old one zooms away",
+                        TransitionKind::Dissolve => "The new slide appears in scattered pieces",
+                    };
+                    if big_drawn_button(ui, k.label(), tip, fade > 0 && cur.kind == k, |p, f, new, old| draw_transition(k, p, f, new, old)).clicked() {
+                        proj.slides[slide_idx].transition = Transition::of(k);
+                        if fade == 0 { proj.slides[slide_idx].fade_ms = 500; }
+                        changed = true;
+                    }
+                }
+                // The choices a kind has: where it comes from, or whether it goes in or out.
+                let variants = Transition::variants(cur.kind);
+                ui.add_enabled_ui(fade > 0 && variants.len() > 1, |ui| {
+                    big_menu(ui, SLIDERS, "Effect\nOptions", "Direction, or in and out, for this transition", |ui| {
+                        for v in variants {
+                            if ui.selectable_label(v.variant_label() == cur.variant_label(), v.variant_label()).clicked() { proj.slides[slide_idx].transition = v; changed = true; }
+                        }
+                    });
+                });
             });
         });
         group(ui, "Transition Timing", |ui| {
@@ -2756,8 +2901,8 @@ impl App {
             if ui.button("Apply to all slides").clicked() { apply_all = true; }
         });
         if apply_all {
-            let ms = proj.slides[slide_idx].fade_ms;
-            for sl in proj.slides.iter_mut() { sl.fade_ms = ms; }
+            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
+            for sl in proj.slides.iter_mut() { sl.fade_ms = ms; sl.transition = tr; }
             changed = true;
         }
         if changed { self.commit_project_edit(ctx, before); }
@@ -2770,107 +2915,85 @@ impl App {
         let obj = obj.unwrap_or(&mut stand_in);
         ui.add_enabled_ui(enabled, |ui| {
         group(ui, "Entrance and Exit", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                *changed |= effect_picker(ui, "Entrance", &mut obj.entrance, true);
-                if obj.entrance.is_some() { *changed |= click_row(ui, "ck-entrance", "Entrance starts", &mut obj.click_steps.entrance); }
-                *changed |= effect_picker(ui, "Exit", &mut obj.exit, false);
-                if obj.exit.is_some() { *changed |= click_row(ui, "ck-exit", "Exit starts", &mut obj.click_steps.exit); }
+            ui.horizontal(|ui| {
+                *changed |= effect_menu(ui, ARROW_DOWN, "Entrance", "How the object appears", &mut obj.entrance, &mut obj.click_steps.entrance, true);
+                let had_exit = obj.exit.is_some();
+                let exit_changed = effect_menu(ui, ARROW_UP, "Exit", "How the object leaves", &mut obj.exit, &mut obj.click_steps.exit, false);
+                // An exit plays when the object leaves, so an object that stays to the end of the timeline is given an end to leave at.
+                if exit_changed && !had_exit && obj.exit.is_some() && obj.click_steps.exit == 0 && obj.timing.map_or(true, |t| t.dur_ms.is_none()) {
+                    let start = obj.timing.map_or(0, |t| t.start_ms);
+                    obj.timing = Some(Timing { start_ms: start, dur_ms: Some(2000) });
+                }
+                *changed |= exit_changed;
             });
         });
         group(ui, "Emphasis", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let label = obj.emphasis.map(|e| e.kind.label()).unwrap_or("none");
-                    combo("emphasis-kind").selected_text(label).width(90.0).show_ui(ui, |ui| {
-                        if ui.selectable_label(obj.emphasis.is_none(), "none").clicked() { obj.emphasis = None; *changed = true; }
-                        for k in EmphasisKind::ALL {
-                            if ui.selectable_label(obj.emphasis.map(|e| e.kind) == Some(k), k.label()).clicked() {
-                                let old = obj.emphasis;
-                                obj.emphasis = Some(Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) });
-                                *changed = true;
-                            }
+            ui.horizontal(|ui| {
+                let on = obj.emphasis.is_some();
+                let tip = obj.emphasis.map(|e| format!("Emphasis: {}", e.kind.label())).unwrap_or_else(|| "Draw attention to the object while it is showing".into());
+                let btn = big_widget(ui, STAR, "Emphasis", true, on).on_hover_text(tip);
+                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.set_min_width(210.0);
+                    if ui.selectable_label(obj.emphasis.is_none(), "none").clicked() { obj.emphasis = None; *changed = true; }
+                    for k in EmphasisKind::ALL {
+                        let r = ui.selectable_label(obj.emphasis.map(|e| e.kind) == Some(k), k.label());
+                        if r.clicked() {
+                            let old = obj.emphasis;
+                            obj.emphasis = Some(Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) });
+                            *changed = true;
                         }
-                    });
-                    if obj.emphasis.is_some() { *changed |= click_row(ui, "ck-emphasis", "Starts", &mut obj.click_steps.emphasis); }
+                    }
+                    if let Some(e) = obj.emphasis.as_mut() {
+                        ui.separator();
+                        *changed |= click_row(ui, "ck-emphasis", "Starts", &mut obj.click_steps.emphasis);
+                        ui.horizontal(|ui| {
+                            ui.label("lasts");
+                            *changed |= ui.add(egui::DragValue::new(&mut e.duration_ms).range(100..=60_000).speed(50.0).suffix(" ms")).changed();
+                            ui.label("plays");
+                            *changed |= ui.add(egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed();
+                        });
+                        *changed |= delay_leftover(ui, &mut e.delay_ms);
+                    }
                 });
-                if let Some(e) = obj.emphasis.as_mut() {
-                    ui.horizontal(|ui| {
-                        ui.label("delay");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.delay_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("lasts");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.duration_ms).range(100..=60_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("plays");
-                        *changed |= ui.add(egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed();
-                    });
-                }
             });
         });
         group(ui, "Motion path", |ui| {
-            rows(ui);
-            framed(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let label = if obj.motion.is_some() { "path" } else { "none" };
-                    combo("motion-preset").selected_text(label).width(90.0).show_ui(ui, |ui| {
-                        if ui.selectable_label(obj.motion.is_none(), "none").clicked() { obj.motion = None; *changed = true; }
-                        for k in PathPreset::ALL {
-                            if ui.selectable_label(false, k.label()).clicked() {
-                                let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
-                                let mut m = MotionPath::preset(k);
-                                m.delay_ms = delay;
-                                m.duration_ms = dur;
-                                obj.motion = Some(m);
+            ui.horizontal(|ui| {
+                let on = obj.motion.is_some();
+                let btn = big_widget(ui, POLYLINE, "Motion", true, on).on_hover_text("Move the object along a path. Drag the points on the slide to shape it");
+                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+                    ui.set_min_width(210.0);
+                    if ui.selectable_label(obj.motion.is_none(), "none").clicked() { obj.motion = None; *changed = true; }
+                    for k in PathPreset::ALL {
+                        if ui.selectable_label(false, k.label()).clicked() {
+                            let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
+                            let mut m = MotionPath::preset(k);
+                            m.delay_ms = delay;
+                            m.duration_ms = dur;
+                            obj.motion = Some(m);
+                            *changed = true;
+                        }
+                    }
+                    if let Some(m) = obj.motion.as_mut() {
+                        ui.separator();
+                        *changed |= click_row(ui, "ck-motion", "Starts", &mut obj.click_steps.motion);
+                        ui.horizontal(|ui| {
+                            ui.label("takes");
+                            *changed |= ui.add(egui::DragValue::new(&mut m.duration_ms).range(100..=120_000).speed(50.0).suffix(" ms")).changed();
+                            *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points").changed();
+                        });
+                        ui.horizontal(|ui| {
+                            if ui.small_button("+ Point").on_hover_text("Add a point after the last one").clicked() {
+                                let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
+                                m.points.push((lx + 120.0, ly));
                                 *changed = true;
                             }
-                        }
-                    });
-                    if obj.motion.is_some() { *changed |= click_row(ui, "ck-motion", "Starts", &mut obj.click_steps.motion); }
+                            if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
+                        });
+                        *changed |= delay_leftover(ui, &mut m.delay_ms);
+                    }
                 });
-                if let Some(m) = obj.motion.as_mut() {
-                    ui.horizontal(|ui| {
-                        ui.label("delay");
-                        *changed |= ui.add(egui::DragValue::new(&mut m.delay_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        ui.label("takes");
-                        *changed |= ui.add(egui::DragValue::new(&mut m.duration_ms).range(100..=120_000).speed(50.0).suffix(" ms")).changed();
-                        *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points. Drag the points on the slide to shape the path").changed();
-                        if ui.small_button("+ Point").on_hover_text("Add a point after the last one").clicked() {
-                            let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
-                            m.points.push((lx + 120.0, ly));
-                            *changed = true;
-                        }
-                        if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
-                    });
-                }
             });
-        });
-        group(ui, "Timing", |ui| {
-            rows(ui);
-            ui.horizontal(|ui| {
-                ui.label(icon_text(TIMER, 17.0));
-                let mut timed = obj.timing.is_some();
-                if ui.checkbox(&mut timed, "On the timeline").on_hover_text("Appears and leaves at set times").changed() {
-                    obj.timing = if timed { Some(Timing { start_ms: 0, dur_ms: None }) } else { None };
-                    *changed = true;
-                }
-            });
-            if let Some(t) = obj.timing.as_mut() {
-                ui.horizontal(|ui| {
-                    framed(ui, |ui| {
-                        ui.label("start");
-                        *changed |= ui.add(egui::DragValue::new(&mut t.start_ms).range(0..=600_000).speed(50.0).suffix(" ms")).changed();
-                        let mut until_end = t.dur_ms.is_none();
-                        if ui.checkbox(&mut until_end, "until end").changed() {
-                            t.dur_ms = if until_end { None } else { Some(2000) };
-                            *changed = true;
-                        }
-                        if let Some(d) = t.dur_ms.as_mut() {
-                            ui.label("for");
-                            *changed |= ui.add(egui::DragValue::new(d).range(50..=600_000).speed(50.0).suffix(" ms")).changed();
-                        }
-                    });
-                });
-            }
         });
         group(ui, "Visibility", |ui| {
             rows(ui);

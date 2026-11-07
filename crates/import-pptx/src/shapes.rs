@@ -867,15 +867,31 @@ pub fn read_notes(cx: &Cx) -> String {
 }
 
 /// Fade time for the slide's transition (only fades are supported).
-pub fn read_transition(root: Node, cx: &mut Cx) -> u32 {
-    let Some(t) = root.descendants().find(|n| n.is_element() && n.tag_name().name() == "transition") else { return 0 };
-    let kind = t.children().find(|c| c.is_element()).map(|c| c.tag_name().name().to_string());
+pub fn read_transition(root: Node, cx: &mut Cx) -> (u32, brainbend_doc::Transition) {
+    use brainbend_doc::{Edge, Transition, TransitionKind};
+    let none = (0, Transition::default());
+    let Some(t) = root.descendants().find(|n| n.is_element() && n.tag_name().name() == "transition") else { return none };
+    let Some(k) = t.children().find(|c| c.is_element()) else { return none };
+    let kind = k.tag_name().name().to_string();
     let ms = t.attributes().find(|a| a.name() == "dur").and_then(|a| a.value().parse::<u32>().ok()).unwrap_or(match t.attribute("spd") { Some("slow") => 1000, Some("fast") => 500, _ => 700 });
-    match kind.as_deref() {
-        Some("fade") | Some("dissolve") => ms,
-        Some(other) => { cx.report.add(format!("The \"{other}\" slide transition is not supported (slides cut instead).")); 0 }
-        None => 0,
-    }
+    // A direction named the way PowerPoint does (the way things move); the usual one when it is missing.
+    let edge = |default: Edge| k.attribute("dir").and_then(Edge::from_ooxml).unwrap_or(default);
+    let tr = match kind.as_str() {
+        "fade" => Transition::default(),
+        "dissolve" => Transition::of(TransitionKind::Dissolve),
+        "push" => Transition { kind: TransitionKind::Push, from: edge(Edge::Right), inward: false },
+        "wipe" => Transition { kind: TransitionKind::Wipe, from: edge(Edge::Right), inward: false },
+        "cover" => Transition { kind: TransitionKind::Cover, from: edge(Edge::Right), inward: false },
+        "pull" => Transition { kind: TransitionKind::Uncover, from: edge(Edge::Right), inward: false },
+        "split" => Transition {
+            kind: TransitionKind::Split,
+            from: if k.attribute("orient") == Some("horz") || k.attribute("orient").is_none() { Edge::Top } else { Edge::Left },
+            inward: k.attribute("dir") == Some("in"),
+        },
+        "zoom" => Transition { kind: TransitionKind::Zoom, from: Edge::Right, inward: k.attribute("dir") != Some("out") },
+        other => { cx.report.add(format!("The \"{other}\" slide transition is not supported (slides cut instead).")); return none }
+    };
+    (ms, tr)
 }
 
 fn tn_list<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {

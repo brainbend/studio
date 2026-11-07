@@ -116,6 +116,91 @@ pub struct TextStyle {
     pub valign: VAlign,
 }
 
+/// The way one slide gives way to the next.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransitionKind {
+    #[default]
+    Fade,
+    /// The new slide pushes the old one out.
+    Push,
+    /// The new slide is uncovered by a moving edge.
+    Wipe,
+    /// The new slide opens from the middle (out) or closes in from the edges (in).
+    Split,
+    /// The new slide slides over the old one.
+    Cover,
+    /// The old slide slides away, showing the new one.
+    Uncover,
+    /// The new slide grows from the middle (in) or the old one shrinks away (out).
+    Zoom,
+    /// The new slide appears in scattered pieces.
+    Dissolve,
+}
+
+impl TransitionKind {
+    pub const ALL: [TransitionKind; 8] = [Self::Fade, Self::Push, Self::Wipe, Self::Split, Self::Cover, Self::Uncover, Self::Zoom, Self::Dissolve];
+    pub fn label(self) -> &'static str {
+        match self { Self::Fade => "Fade", Self::Push => "Push", Self::Wipe => "Wipe", Self::Split => "Split", Self::Cover => "Cover", Self::Uncover => "Uncover", Self::Zoom => "Zoom", Self::Dissolve => "Dissolve" }
+    }
+    /// Whether the kind has a direction to choose (an edge it comes from).
+    pub fn has_edge(self) -> bool { matches!(self, Self::Push | Self::Wipe | Self::Cover | Self::Uncover) }
+}
+
+/// The edge a transition comes from, as PowerPoint's "From Right" says it. For a split, left or right means vertical
+/// lines and top or bottom horizontal ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Edge { Left, Right, Top, Bottom }
+
+impl Edge {
+    pub const ALL: [Edge; 4] = [Edge::Right, Edge::Left, Edge::Bottom, Edge::Top];
+    pub fn label(self) -> &'static str { match self { Edge::Left => "From Left", Edge::Right => "From Right", Edge::Top => "From Top", Edge::Bottom => "From Bottom" } }
+    /// PowerPoint names the way things move, which is the opposite of the edge they come from.
+    pub fn ooxml(self) -> &'static str { match self { Edge::Left => "r", Edge::Right => "l", Edge::Top => "d", Edge::Bottom => "u" } }
+    pub fn from_ooxml(dir: &str) -> Option<Edge> { match dir { "r" => Some(Edge::Left), "l" => Some(Edge::Right), "d" => Some(Edge::Top), "u" => Some(Edge::Bottom), _ => None } }
+}
+
+/// A slide transition: its kind, the edge it comes from, and (for a split or zoom) whether it goes in or out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transition {
+    pub kind: TransitionKind,
+    #[serde(default = "Transition::default_edge")]
+    pub from: Edge,
+    #[serde(default)]
+    pub inward: bool,
+}
+
+impl Default for Transition {
+    fn default() -> Self { Transition { kind: TransitionKind::Fade, from: Edge::Right, inward: false } }
+}
+
+impl Transition {
+    fn default_edge() -> Edge { Edge::Right }
+    pub fn is_default(&self) -> bool { *self == Transition::default() }
+    /// The usual choice when a kind is picked: the one PowerPoint opens on.
+    pub fn of(kind: TransitionKind) -> Transition {
+        Transition { kind, from: Edge::Right, inward: kind == TransitionKind::Zoom }
+    }
+    /// What the options of this transition are called, for a choice among a kind's variants.
+    pub fn variant_label(&self) -> String {
+        match self.kind {
+            TransitionKind::Split => format!("{} {}", if matches!(self.from, Edge::Left | Edge::Right) { "Vertical" } else { "Horizontal" }, if self.inward { "In" } else { "Out" }),
+            TransitionKind::Zoom => if self.inward { "Zoom In".into() } else { "Zoom Out".into() },
+            k if k.has_edge() => self.from.label().into(),
+            _ => String::new(),
+        }
+    }
+    /// All the variants of a kind.
+    pub fn variants(kind: TransitionKind) -> Vec<Transition> {
+        let t = |from, inward| Transition { kind, from, inward };
+        match kind {
+            TransitionKind::Split => vec![t(Edge::Left, false), t(Edge::Left, true), t(Edge::Top, false), t(Edge::Top, true)],
+            TransitionKind::Zoom => vec![t(Edge::Right, true), t(Edge::Right, false)],
+            k if k.has_edge() => Edge::ALL.iter().map(|&e| t(e, false)).collect(),
+            _ => vec![t(Edge::Right, false)],
+        }
+    }
+}
+
 /// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, color)`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gradient {
@@ -1441,9 +1526,12 @@ pub struct Slide {
     /// Id of the layout this slide follows, if any.
     #[serde(default)]
     pub layout: Option<String>,
-    /// Fade-in time when navigating to this slide; 0 = cut.
+    /// How long the transition into this slide takes; 0 = cut.
     #[serde(default)]
     pub fade_ms: u32,
+    /// Which transition it is (a fade unless said otherwise, which is what files from before had).
+    #[serde(default, skip_serializing_if = "Transition::is_default")]
+    pub transition: Transition,
     /// Do not draw the master's and layout's shapes on this slide (Hide Background Graphics).
     #[serde(default)]
     pub hide_backdrop: bool,
@@ -1516,7 +1604,7 @@ impl Slide {
             kind: SlideKind::Normal,
             background: None,
             layout: None,
-            fade_ms: 0, hide_backdrop: false,
+            fade_ms: 0, transition: Default::default(), hide_backdrop: false,
             auto_advance: false, nav: Default::default(),
             notes: String::new(),
             scene: String::new(),
@@ -2498,6 +2586,28 @@ mod object_effects_tests {
 #[cfg(test)]
 mod streamed_package_tests {
     use super::*;
+
+    #[test]
+    fn a_transition_is_saved_only_when_not_the_default_fade_and_older_slides_read_as_fades() {
+        let mut s = Slide::new("a", "A", 1920.0, 1080.0);
+        s.fade_ms = 500;
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("transition"), "a plain fade writes nothing new");
+        let old: Slide = serde_json::from_str(&json).unwrap();
+        assert_eq!(old.transition, Transition::default());
+        s.transition = Transition { kind: TransitionKind::Push, from: Edge::Bottom, inward: false };
+        let back: Slide = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.transition, s.transition);
+        // Every kind offers at least one variant and names them distinctly.
+        for k in TransitionKind::ALL {
+            let v = Transition::variants(k);
+            assert!(!v.is_empty());
+            let mut names: Vec<String> = v.iter().map(|t| t.variant_label()).collect();
+            names.sort();
+            names.dedup();
+            assert_eq!(names.len(), v.len(), "{k:?}");
+        }
+    }
 
     #[test]
     fn a_streamed_package_reads_back_like_the_buffered_one_and_leaves_the_project_whole() {

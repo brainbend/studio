@@ -2218,11 +2218,80 @@
     lms.commit();
   }
 
+  // ---- slide transitions: the new slide arrives over, beside or instead of the old one ----------
+  var endTransitionNow = null;
+  function endTransition() { if (endTransitionNow) { var f = endTransitionNow; endTransitionNow = null; f(); } }
+  function runTransition(tr, ms, oldEl, newEl) {
+    var kind = tr.kind, edge = tr.from || 'Right', inward = !!tr.inward;
+    // Without a canvas to make the mask with, a dissolve is a fade.
+    if (kind === 'Dissolve' && !document.createElement('canvas').getContext('2d')) kind = 'Fade';
+    // Where things come from, as a move of the whole slide (percent of its size), and as an edge to reveal.
+    var vec = { Right: [100, 0], Left: [-100, 0], Bottom: [0, 100], Top: [0, -100] }[edge] || [100, 0];
+    var shift = function (k) { return 'translate(' + (vec[0] * k) + '%,' + (vec[1] * k) + '%)'; };
+    var clip = { Right: 'inset(0 0 0 100%)', Left: 'inset(0 100% 0 0)', Bottom: 'inset(100% 0 0 0)', Top: 'inset(0 0 100% 0)' }[edge] || 'inset(0 0 0 100%)';
+    var vertical = edge === 'Left' || edge === 'Right';
+    var band = vertical ? 'inset(0 50% 0 50%)' : 'inset(50% 0 50% 0)';
+    var opts = { duration: ms, easing: 'ease-in-out' };
+    var anims = [], undo = [];
+    function play(el, frames) { var a = el.animate(frames, opts); if (a) anims.push(a); }
+    function over(el, z) { el.style.zIndex = z; undo.push(function () { el.style.zIndex = ''; }); }
+    oldEl.style.display = 'block'; oldEl.style.pointerEvents = 'none';
+    undo.push(function () { oldEl.style.display = 'none'; oldEl.style.pointerEvents = ''; });
+    var raf = 0;
+    if (kind === 'Push') {
+      play(newEl, [{ transform: shift(1) }, { transform: 'none' }]); play(oldEl, [{ transform: 'none' }, { transform: shift(-1) }]);
+    } else if (kind === 'Cover') {
+      over(newEl, 2); over(oldEl, 1);
+      play(newEl, [{ transform: shift(1) }, { transform: 'none' }]);
+    } else if (kind === 'Uncover') {
+      over(oldEl, 2); over(newEl, 1);
+      play(oldEl, [{ transform: 'none' }, { transform: shift(-1) }]);
+    } else if (kind === 'Wipe') {
+      over(newEl, 2); over(oldEl, 1);
+      play(newEl, [{ clipPath: clip }, { clipPath: 'inset(0 0 0 0)' }]);
+    } else if (kind === 'Split') {
+      if (inward) { over(oldEl, 2); over(newEl, 1); play(oldEl, [{ clipPath: 'inset(0 0 0 0)' }, { clipPath: band }]); }
+      else { over(newEl, 2); over(oldEl, 1); play(newEl, [{ clipPath: band }, { clipPath: 'inset(0 0 0 0)' }]); }
+    } else if (kind === 'Zoom') {
+      if (inward) { over(newEl, 2); over(oldEl, 1); play(newEl, [{ transform: 'scale(0.15)', opacity: 0 }, { transform: 'none', opacity: 1 }]); }
+      else { over(oldEl, 2); over(newEl, 1); play(oldEl, [{ transform: 'none', opacity: 1 }, { transform: 'scale(0.15)', opacity: 0 }]); }
+    } else if (kind === 'Dissolve') {
+      // The new slide shows through a mask of small squares that fill in, in a scattered order.
+      over(newEl, 2); over(oldEl, 1);
+      var cols = 64, rows = 36, total = cols * rows, order = [];
+      for (var q = 0; q < total; q++) order.push(q);
+      for (var r = total - 1; r > 0; r--) { var j = Math.floor(Math.random() * (r + 1)), t = order[r]; order[r] = order[j]; order[j] = t; }
+      var canvas = document.createElement('canvas'); canvas.width = cols; canvas.height = rows;
+      var g = canvas.getContext('2d'), t0 = performance.now(), shown = 0;
+      var mask = function (url) { newEl.style.webkitMaskImage = url; newEl.style.maskImage = url; };
+      newEl.style.webkitMaskSize = newEl.style.maskSize = '100% 100%';
+      undo.push(function () { mask(''); newEl.style.webkitMaskSize = newEl.style.maskSize = ''; });
+      var step = function (now) {
+        var p = Math.min(1, (now - t0) / ms), n = Math.floor(p * total);
+        if (n > shown) { g.fillStyle = '#000'; for (var k = shown; k < n; k++) g.fillRect(order[k] % cols, Math.floor(order[k] / cols), 1, 1); shown = n; mask('url(' + canvas.toDataURL() + ')'); }
+        if (p < 1) raf = requestAnimationFrame(step); else endTransition();
+      };
+      mask('url(' + canvas.toDataURL() + ')');
+      raf = requestAnimationFrame(step);
+    } else {
+      play(newEl, [{ opacity: 0 }, { opacity: 1 }]);
+    }
+    var done = false;
+    endTransitionNow = function () {
+      if (done) return; done = true;
+      if (raf) cancelAnimationFrame(raf);
+      anims.forEach(function (a) { try { a.cancel(); } catch (e) { /* already finished */ } });
+      undo.forEach(function (f) { f(); });
+    };
+    if (anims.length) anims[0].onfinish = function () { endTransition(); };
+  }
+
   function goto(i) {
     markerClosers.forEach(function (f) { f(false); });
     if (i < 0 || i >= slides.length || i === cur || posOf[i] < 0) return;
     if (cur >= 0) slides[cur].layers.forEach(function (layer) { stopLayer(layer.id); });
     var held = document.activeElement, heldInSlide = !!held && held !== document.body && slideEls.some(function (e) { return e.contains(held); });
+    var from = cur;
     cur = i;
     slideEls.forEach(function (e, k) { if (k !== i) pauseMedia(e); e.style.display = k === i ? 'block' : 'none'; });
     var slide = slides[i], kind = kindOf(slide);
@@ -2235,8 +2304,11 @@
     steps = { si: i, order: computeSteps(i), done: 0 };
     if (pausing[i] && pausing[i].__user) { delete pausing[i].__user; if (!Object.keys(pausing[i]).length) layers[slide.layers[0].id].paused = false; }
     startLayer(slide.layers[0].id);
+    endTransition();
     if (slide.fade_ms > 0 && !reduceMotion && slideEls[i].animate) {
-      slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });
+      var tr = slide.transition || {};
+      if (from >= 0 && from !== i && tr.kind && tr.kind !== 'Fade') runTransition(tr, slide.fade_ms, slideEls[from], slideEls[i]);
+      else slideEls[i].animate([{ opacity: 0 }, { opacity: 1 }], { duration: slide.fade_ms, easing: 'ease-out' });
     }
     controlUpdaters.forEach(function (f) { f(); });
     updateNav();
