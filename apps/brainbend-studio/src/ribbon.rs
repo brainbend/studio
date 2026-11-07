@@ -1833,8 +1833,8 @@ impl App {
         group(ui, "Community", |ui| {
             if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
         });
-        group(ui, "AI Tools", |ui| {
-            if big_button(ui, BOLT, "AI Tools", "Open the AI tab in the side panel: connect an AI tool you choose, such as Claude, and see what it does").clicked() { self.right_tab = crate::AI_TAB; }
+        group(ui, "AI", |ui| {
+            if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
         });
         group(ui, "Updates", |ui| {
             ui.horizontal(|ui| {

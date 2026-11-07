@@ -214,9 +214,11 @@ pub struct Assistant {
     pub key_input: String,
     /// The text box for a model id that is not in the list.
     pub model_input: String,
-    /// Open (`Some(true)`) the section for connecting an outside AI tool on the next frame.
-    pub connect_open: Option<bool>,
-    /// Which outside AI tool the connect section shows the command for.
+    /// The Set up AI window is open.
+    pub setup_open: bool,
+    /// What the window is showing: 0 an API key, 1 a subscription's own tool.
+    pub setup_mode: usize,
+    /// Which outside AI tool the window shows the command for.
     pub connect_tool: usize,
     convo: Arc<Mutex<ai::Conversation>>,
     run: Option<Run>,
@@ -229,7 +231,7 @@ pub struct Assistant {
 impl Default for Assistant {
     fn default() -> Self {
         let (calls_tx, calls_rx) = channel();
-        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), model_input: String::new(), connect_open: None, connect_tool: 0, convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
+        Self { settings: Settings::default(), chat: vec![], input: String::new(), usage: Usage::default(), key_input: String::new(), model_input: String::new(), setup_open: false, setup_mode: 0, connect_tool: 0, convo: Arc::new(Mutex::new(ai::Conversation::default())), run: None, calls_tx, calls_rx, stick: true }
     }
 }
 
@@ -244,6 +246,16 @@ impl Assistant {
         self.chat.clear();
         self.usage = Usage::default();
         *self.convo.lock().unwrap_or_else(|e| e.into_inner()) = ai::Conversation::default();
+    }
+
+    /// Asks a different provider. A conversation is in one provider's form, so this starts a new one (not while working).
+    pub fn switch_provider(&mut self, to: ai::Provider) {
+        if self.busy() || to == self.settings.provider { return; }
+        let had_chat = !self.chat.is_empty();
+        self.new_chat();
+        self.settings.provider = to;
+        self.settings.save();
+        if had_chat && self.settings.key().is_some() { self.chat.push(Line::Notice(format!("Now asking {}. This is a new chat; the lesson is as you left it.", to.name()))); }
     }
 
     pub fn stop(&mut self) { if let Some(r) = &self.run { r.cancel.store(true, Ordering::Relaxed); } }
@@ -311,68 +323,62 @@ impl App {
         self.assistant.poll();
     }
 
-    /// The chat, at the top of the AI tab.
-    pub(super) fn chat_ui(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        ui.add_space(4.0);
+    /// The provider list.
+    pub(super) fn provider_picker(&mut self, ui: &mut egui::Ui) {
         let provider = self.assistant.settings.provider;
-        let busy = self.assistant.busy();
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Ask").strong());
-            let mut chosen = provider;
-            ui.add_enabled_ui(!busy, |ui| {
-                egui::ComboBox::from_id_salt("assistant-provider").selected_text(provider.label()).show_ui(ui, |ui| {
-                    for p in ai::PROVIDERS { ui.selectable_value(&mut chosen, p, p.label()); }
-                });
-            });
-            if chosen != provider {
-                // A conversation is in one provider's form, so a different provider starts a new one.
-                let had_chat = !self.assistant.chat.is_empty();
-                self.assistant.new_chat();
-                self.assistant.settings.provider = chosen;
-                self.assistant.settings.save();
-                if had_chat && self.assistant.settings.key().is_some() { self.assistant.chat.push(Line::Notice(format!("Now asking {}. This is a new chat; the lesson is as you left it.", chosen.name()))); }
-            }
-            let provider = self.assistant.settings.provider;
-            let current = self.assistant.settings.model();
-            let known = ai::find_model(provider, &current);
-            ui.add_enabled_ui(!busy, |ui| {
-                egui::ComboBox::from_id_salt(("assistant-model", provider.id())).selected_text(known.map(|m| m.name).unwrap_or(current.as_str())).show_ui(ui, |ui| {
-                    for m in provider.models() {
-                        if ui.selectable_label(m.id == current, format!("{}  ({})", m.name, m.note)).clicked() && m.id != current { self.assistant.settings.set_model(m.id); self.assistant.settings.save(); }
-                    }
-                });
+        let mut chosen = provider;
+        ui.add_enabled_ui(!self.assistant.busy(), |ui| {
+            egui::ComboBox::from_id_salt("assistant-provider").selected_text(provider.label()).show_ui(ui, |ui| {
+                for p in ai::PROVIDERS { ui.selectable_value(&mut chosen, p, p.label()); }
             });
         });
+        if chosen != provider { self.assistant.switch_provider(chosen); }
+    }
+
+    /// The list of the provider's models.
+    pub(super) fn model_picker(&mut self, ui: &mut egui::Ui) {
         let provider = self.assistant.settings.provider;
-        let name = provider.name();
-        let Some(_) = self.assistant.settings.key() else {
-            ui.label(format!("Describe what you want and {name} builds it in your lesson: slides, text, shapes, styles, animations, timing and triggers. You watch it happen, and Undo takes any of it back."));
-            ui.add_space(6.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.label(egui::RichText::new("Already pay for Claude, ChatGPT or Gemini?").strong());
-                ui.label("You can use that, with no API key. Those companies keep subscriptions for their own apps, so BrainBend Studio cannot sign in with one. Their tools can: Claude Code, Codex and Gemini CLI connect to this lesson and work on it from outside.");
-                if ui.button("Connect one of those tools").clicked() { self.assistant.connect_open = Some(true); }
-            });
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(format!("Or use your own {} API key", provider.company())).strong());
-            ui.weak(format!("What you type, and the parts of your lesson that {name} reads to do the work, are sent to {} and billed to your key. The key is kept on this computer, readable only by you.", provider.company()));
-            ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.assistant.key_input).password(true).hint_text(provider.key_hint()).desired_width(180.0));
-                let ready = !self.assistant.key_input.trim().is_empty();
-                if ui.add_enabled(ready, egui::Button::new("Save key")).clicked() {
-                    self.assistant.settings.keys[provider.index()] = self.assistant.key_input.trim().to_string();
-                    self.assistant.key_input.clear();
-                    self.assistant.settings.save();
+        let current = self.assistant.settings.model();
+        let known = ai::find_model(provider, &current);
+        ui.add_enabled_ui(!self.assistant.busy(), |ui| {
+            egui::ComboBox::from_id_salt(("assistant-model", provider.id())).selected_text(known.map(|m| m.name).unwrap_or(current.as_str())).show_ui(ui, |ui| {
+                for m in provider.models() {
+                    if ui.selectable_label(m.id == current, format!("{}  ({})", m.name, m.note)).clicked() && m.id != current { self.assistant.settings.set_model(m.id); self.assistant.settings.save(); }
                 }
             });
-            if ui.link(format!("Get an API key at {}", provider.billing_site())).clicked() { update::open_in_browser(provider.key_url()); }
-            return;
-        };
+        });
+    }
+
+    /// A box for a model id that is not in the list.
+    pub(super) fn other_model_ui(&mut self, ui: &mut egui::Ui) {
+        let busy = self.assistant.busy();
+        ui.horizontal_wrapped(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.assistant.model_input).hint_text("Another model id").desired_width(160.0));
+            if ui.add_enabled(!busy && !self.assistant.model_input.trim().is_empty(), egui::Button::new("Use")).on_hover_text("Used as typed; a wrong id is refused with an error").clicked() {
+                let typed = self.assistant.model_input.trim().to_string();
+                self.assistant.settings.set_model(&typed);
+                self.assistant.model_input.clear();
+                self.assistant.settings.save();
+            }
+        });
+    }
+
+    /// The chat, in the AI tab once a key is set.
+    pub(super) fn chat_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let provider = self.assistant.settings.provider;
+        let name = provider.name();
+        let busy = self.assistant.busy();
         let model_id = self.assistant.settings.model();
         let known = ai::find_model(provider, &model_id);
-        if !self.mcp.settings.allow_edit { ui.colored_label(ui.visuals().warn_fg_color, format!("Changes are switched off below, so {name} can look but not change anything.")); }
-        egui::ScrollArea::vertical().id_salt("assistant-chat").max_height(300.0).auto_shrink([false, true]).stick_to_bottom(self.assistant.stick).show(ui, |ui| {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            self.provider_picker(ui);
+            self.model_picker(ui);
+        });
+        if !self.mcp.settings.allow_edit { ui.colored_label(ui.visuals().warn_fg_color, format!("Changes are off, so {name} can look but not change anything.")); }
+        let room = (ui.available_height() - 150.0).max(150.0);
+        egui::ScrollArea::vertical().id_salt("assistant-chat").max_height(room).auto_shrink([false, true]).stick_to_bottom(self.assistant.stick).show(ui, |ui| {
             if self.assistant.chat.is_empty() {
                 ui.weak("Ask for something, or start with one of these:");
                 for s in ["Make a title slide for a workplace safety course", "Make every title on every slide bigger and bold", "Fade in the text on this slide, one box after another", "Add a slide that sums up the lesson in three points"] {
@@ -399,7 +405,7 @@ impl App {
         let id = ui.make_persistent_id("assistant-input");
         // Enter sends and Shift+Enter starts a new line; taking the key before the box sees it keeps the line break out.
         let send_key = ui.memory(|m| m.has_focus(id)) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        ui.add_enabled(!busy, egui::TextEdit::multiline(&mut self.assistant.input).id(id).desired_rows(3).desired_width(f32::INFINITY).hint_text("Ask for a change…  (Enter sends, Shift+Enter for a new line)"));
+        ui.add_enabled(!busy, egui::TextEdit::multiline(&mut self.assistant.input).id(id).desired_rows(3).desired_width(f32::INFINITY).hint_text("Ask for a change…"));
         ui.horizontal_wrapped(|ui| {
             if busy {
                 if ui.button("Stop").clicked() { self.assistant.stop(); }
@@ -408,28 +414,16 @@ impl App {
                 if (ui.add_enabled(can, egui::Button::new("Send")).clicked() || (send_key && can)) && can { let t = self.assistant.input.clone(); self.assistant.send(&t, &ctx); }
                 if ui.add_enabled(!self.assistant.chat.is_empty(), egui::Button::new("New chat")).on_hover_text("Clear the chat and start over").clicked() { self.assistant.new_chat(); }
             }
-            if ui.small_button("Remove key").on_hover_text(format!("Forget the {} API key kept on this computer", provider.company())).clicked() && !busy { self.assistant.settings.keys[provider.index()].clear(); self.assistant.settings.save(); }
-        });
-        ui.collapsing("Use a different model", |ui| {
-            ui.weak(format!("Type a model id from {}'s documentation. It is used as it is, so a wrong one is refused with an error.", provider.company()));
-            ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.assistant.model_input).hint_text(model_id.as_str()).desired_width(180.0));
-                if ui.add_enabled(!busy && !self.assistant.model_input.trim().is_empty(), egui::Button::new("Use")).clicked() {
-                    let typed = self.assistant.model_input.trim().to_string();
-                    self.assistant.settings.set_model(&typed);
-                    self.assistant.model_input.clear();
-                    self.assistant.settings.save();
-                }
-            });
+            if ui.small_button("Settings").on_hover_text("Keys, models and connecting other AI tools").clicked() { self.assistant.setup_open = true; }
         });
         let u = self.assistant.usage;
         let shown = known.map(|m| m.name.to_string()).unwrap_or_else(|| model_id.clone());
         if u.tokens() > 0 {
             match u.dollars(known.and_then(|m| m.price)) {
-                Some(d) => { ui.weak(format!("{} tokens this chat, about ${d:.2} at {shown}'s list price (an estimate).", u.tokens())); }
-                None => { ui.weak(format!("{} tokens this chat. The price of {shown} is not known here, so there is no cost estimate.", u.tokens())); }
+                Some(d) => { ui.weak(format!("{} tokens, about ${d:.2} at {shown}'s list price.", u.tokens())); }
+                None => { ui.weak(format!("{} tokens. No price is known for {shown}.", u.tokens())); }
             }
-        } else { ui.weak(format!("{shown}. Billed to your {} account.", provider.company())); }
+        }
     }
 }
 

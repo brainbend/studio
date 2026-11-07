@@ -6162,6 +6162,7 @@ impl App {
         self.video_support_window(ctx);
         self.mcp_frame(ctx);
         self.assistant_frame();
+        self.ai_setup_window(ctx);
         self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.video_export_frame(ctx);
@@ -8047,25 +8048,30 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         // The group heading and its button share the name; the heading ignores a click.
-        for n in h.get_all_by_label("AI Tools") { n.click(); }
+        for n in h.get_all_by_label("Set up AI") { n.click(); }
         h.run_steps(3);
         assert_eq!(h.state().right_tab, AI_TAB, "the Help tab's button opens the AI tab in the side panel");
+        assert!(h.state().assistant.setup_open, "and the setup window");
         assert!(!h.state().mcp.running(), "nothing listens until the author turns it on");
-        assert!(h.query_by_label_contains("Use a tool you already pay for").is_some());
         assert!(h.get_all_by_label("AI").next().is_some(), "the tab is in the strip");
+        h.get_by_label("Use a subscription").click();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Connect Claude Code, Codex or Gemini CLI").is_some());
+        h.get_by_label("What AI may do").click();
+        h.run_steps(3);
         assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Let AI tools connect when BrainBend Studio opens").is_some());
         assert!(h.state().mcp.settings.allow_edit && !h.state().mcp.settings.allow_files, "changes are allowed, files are not");
-        // The panel is short and the chat above takes room, so what is below it is scrolled to.
-        h.hover_at(egui::pos2(1320.0, 560.0)); h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -300.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3);
         h.get_by_label("Let AI tools connect").click();
         h.run_steps(3);
         assert!(h.state().mcp.running(), "it is on");
         let url = h.state().mcp.url().unwrap();
         assert!(url.starts_with("http://127.0.0.1:") && url.ends_with("/mcp"), "{url}");
+        h.get_by_label("Address and token").click();
+        h.run_steps(3);
         assert!(h.query_all_by_label_contains(&url).next().is_some(), "the address is shown");
         assert!(h.query_all_by_label_contains(&token).next().is_none(), "the token is hidden until Show is pressed, here and in the command");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-tab.png")).unwrap(); }
-        h.hover_at(egui::pos2(1320.0, 560.0)); h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -300.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3); h.get_by_label("Show").click();
+        h.get_by_label("Show").click();
         h.run_steps(3);
         assert!(h.query_all_by_label_contains(&token).next().is_some(), "now it shows");
         assert!(h.query_all_by_label_contains("claude mcp add").next().is_some(), "Claude Code is shown first");
@@ -8079,7 +8085,8 @@ mod tests {
         assert!(h.get_all_by_label("AI •").next().is_some(), "and the tab shows a dot while it is on");
         h.get_by_label("Hide").click();
         h.run_steps(2);
-        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 600.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3);
+        h.get_by_label("Let AI tools connect").hover();
+        h.run_steps(2);
         h.get_by_label("Let AI tools connect").click();
         h.run_steps(3);
         assert!(!h.state().mcp.running(), "and off again");
@@ -8342,40 +8349,49 @@ mod tests {
         assert_eq!(h.state().assistant.settings.provider, brainbend_assistant::Provider::OpenAi);
         assert!(!h.state().assistant.chat.iter().any(|l| matches!(l, assistant::Line::You(_))), "the old chat is gone: a conversation belongs to one provider");
         assert!(h.query_by_label_contains("Now asking GPT").is_some() && h.query_by_label("Send").is_some(), "it says so, and GPT has its own key");
-        h.state_mut().assistant.settings.keys[1].clear();
-        h.run_steps(3);
-        assert!(h.query_by_label_contains("Or use your own OpenAI API key").is_some(), "the Claude key is not used for GPT");
-        assert!(h.query_by_label_contains("sent to OpenAI and billed to your key").is_some());
-        assert!(h.query_by_label_contains("Already pay for Claude, ChatGPT or Gemini").is_some());
         let mut combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).filter(|c| c.rect().left() > 1100.0).collect();
         combos.sort_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
         combos[1].click();
         h.run_steps(2);
         assert!(h.query_by_label_contains("GPT-5 mini").is_some() && h.query_by_label_contains("Claude Opus").is_none(), "its models are listed, and not Claude's");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        // Without a key of its own, GPT is not set up, whatever other keys there are.
+        h.state_mut().assistant.settings.keys[1].clear();
+        h.run_steps(3);
+        assert!(h.query_by_label("Set up AI").is_some() && h.query_by_label("Send").is_none());
         assert_eq!(h.state().assistant.settings.keys[0], "sk-ant-test", "and the Claude key is kept for when it is chosen again");
     }
 
     #[test]
-    fn the_chat_asks_for_a_key_first_and_says_where_the_data_goes() {
+    fn the_ai_tab_is_one_button_until_ai_is_set_up_and_then_only_the_chat() {
         use egui_kittest::kittest::Queryable;
         let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _home = own_home("assistant-key");
-        std::env::remove_var("ANTHROPIC_API_KEY");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
         let mut a = app();
         a.right_tab = AI_TAB;
         a.file_view = false;
         let mut h = harness(a);
         h.run_steps(4);
-        assert!(h.query_by_label_contains("Or use your own Anthropic API key").is_some());
-        assert!(h.query_by_label_contains("Already pay for Claude, ChatGPT or Gemini").is_some(), "a subscriber is pointed to the tools that can use one");
-        assert!(h.query_by_label_contains("sent to Anthropic and billed to your key").is_some(), "it says where the lesson's content goes");
-        assert!(h.query_by_label("Save key").is_some() && h.query_by_label("Send").is_none(), "no chat until there is a key");
+        assert!(h.query_by_label("Set up AI").is_some(), "one button to set it up");
+        assert!(h.query_by_label("Send").is_none() && h.query_by_label("Save key").is_none() && h.query_by_label("What AI may do").is_none(), "and nothing else");
+        h.get_by_label("Set up AI").click();
+        h.run_steps(3);
+        assert!(h.state().assistant.setup_open);
+        assert!(h.query_by_label("Use an API key").is_some() && h.query_by_label("Use a subscription").is_some(), "two ways to set up");
+        assert!(h.query_by_label("Save key").is_some(), "the key comes first");
+        assert!(h.query_by_label_contains("goes to Anthropic and is billed to your key").is_some(), "it says where the lesson's content goes");
         h.state_mut().assistant.settings.keys[0] = "sk-ant-test".into();
         h.run_steps(3);
-        assert!(h.query_by_label_contains("Or use your own Anthropic API key").is_none());
+        assert!(h.query_by_label_contains("✓ Key saved").is_some() && h.query_by_label("Save key").is_none());
+        h.get_by_label("Done").click();
+        h.run_steps(3);
+        assert!(!h.state().assistant.setup_open);
+        assert!(h.query_by_label("Set up AI").is_none(), "once it is set up the button is gone from the tab");
         assert!(h.query_by_label("Send").is_some() && h.query_by_label("New chat").is_some());
         assert!(h.query_by_label_contains("Make a title slide").is_some(), "it offers a few ways to start");
-        assert!(h.query_by_label_contains("Claude Opus 5.5").is_some(), "the model is shown");
+        assert!(h.query_by_label("Settings").is_some(), "and the settings are one click away");
     }
 
     #[test]
