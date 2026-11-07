@@ -63,19 +63,25 @@ impl Settings {
     /// Saves them. The token is a secret, so on a system with file permissions only the author may read the file.
     pub fn save(&self) {
         let Some(path) = Self::path() else { return };
-        if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
-        let tmp = path.with_extension("json.tmp");
-        let written = (|| -> std::io::Result<()> {
-            use std::io::Write;
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-            options.open(&tmp)?.write_all(self.to_json().as_bytes())?;
-            std::fs::rename(&tmp, &path)
-        })();
-        if written.is_err() { let _ = std::fs::remove_file(&tmp); }
+        write_private(&path, &self.to_json());
     }
+}
+
+/// Writes a file that holds a secret (a token or an API key): replaced whole, and readable only by the author on a system
+/// with file permissions. Failing to write it is not worth stopping for; the secret is just not kept.
+pub fn write_private(path: &std::path::Path, text: &str) {
+    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    let tmp = path.with_extension("json.tmp");
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(&tmp)?.write_all(text.as_bytes())?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() { let _ = std::fs::remove_file(&tmp); }
 }
 
 /// One line of the activity list.
@@ -88,8 +94,6 @@ pub struct LogLine {
 #[derive(Default)]
 pub struct Mcp {
     pub settings: Settings,
-    /// The AI Tools window is showing.
-    pub open: bool,
     /// Why it could not start, or a note about the port.
     pub error: Option<String>,
     pub log: VecDeque<LogLine>,
@@ -152,7 +156,7 @@ impl Mcp {
         }
     }
 
-    fn note(&mut self, tool: &str, result: &Result<String, String>) {
+    pub(crate) fn note(&mut self, tool: &str, result: &Result<String, String>) {
         self.last_call = Some(Instant::now());
         let (ok, text) = match result {
             Ok(_) => (true, tool.to_string()),
@@ -178,11 +182,10 @@ impl App {
             self.mcp.note(&call.name, &result);
             let _ = call.reply.send(result);
         }
-        self.mcp_window(ctx);
     }
 
     /// Runs a tool if the author allows what it does.
-    fn mcp_dispatch(&mut self, name: &str, args: &serde_json::Value) -> Result<String, String> {
+    pub(crate) fn mcp_dispatch(&mut self, name: &str, args: &serde_json::Value) -> Result<String, String> {
         match mcp_tools::access(name) {
             Some(Access::Read) => {}
             Some(Access::Edit) if self.mcp.settings.allow_edit => {}
@@ -194,76 +197,74 @@ impl App {
         self.mcp_run(name, args)
     }
 
-    pub(super) fn mcp_window(&mut self, ctx: &egui::Context) {
-        if !self.mcp.open { return; }
-        let mut open = true;
+    /// The AI tab of the side panel: the chat with Claude, and below it everything about connecting an AI tool of your own.
+    pub(super) fn ai_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         let mut start = false;
         let mut stop = false;
         let mut new_token = false;
         let mut copy: Option<String> = None;
         let mut changed = false;
-        egui::Window::new("AI Tools").open(&mut open).collapsible(false).resizable(true).default_width(520.0).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-            ui.label("Let an AI tool you choose, such as Claude, work in BrainBend Studio while you watch. It connects through MCP, runs only on this computer, and only while this is on.");
+        egui::ScrollArea::vertical().id_salt("ai-tab").auto_shrink([false, false]).show(ui, |ui| {
+            self.chat_ui(ui);
             ui.add_space(6.0);
-            let mut on = self.mcp.running();
-            if ui.checkbox(&mut on, "Let AI tools connect").changed() { if on { start = true; } else { stop = true; } }
-            if let Some(e) = &self.mcp.error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
-            if let Some(url) = self.mcp.url() {
-                ui.add_space(6.0);
-                let token = self.mcp.settings.token.clone();
-                egui::Grid::new("mcp-connection").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
-                    ui.label("Address");
-                    ui.add(egui::Label::new(egui::RichText::new(&url).monospace()).selectable(true));
-                    if ui.button("Copy").clicked() { copy = Some(url.clone()); }
-                    ui.end_row();
-                    ui.label("Token");
+            ui.separator();
+            let has_key = self.assistant.settings.key().is_some();
+            egui::CollapsingHeader::new(egui::RichText::new("Connect your own AI tool").strong()).default_open(!has_key).show(ui, |ui| {
+                ui.label("Use an AI tool you already have, such as Claude Code, instead of the chat above. It connects through MCP, runs only on this computer, and only while this is on.");
+                ui.add_space(4.0);
+                let mut on = self.mcp.running();
+                if ui.checkbox(&mut on, "Let AI tools connect").changed() { if on { start = true; } else { stop = true; } }
+                if let Some(e) = &self.mcp.error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
+                if let Some(url) = self.mcp.url() {
+                    ui.add_space(4.0);
+                    let token = self.mcp.settings.token.clone();
+                    ui.label(egui::RichText::new("Address").weak());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(egui::Label::new(egui::RichText::new(&url).monospace()).selectable(true));
+                        if ui.button("Copy").clicked() { copy = Some(url.clone()); }
+                    });
+                    ui.label(egui::RichText::new("Token").weak());
                     ui.add(egui::Label::new(egui::RichText::new(if self.mcp.show_token { token.clone() } else { "•".repeat(24) }).monospace()).selectable(self.mcp.show_token));
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button(if self.mcp.show_token { "Hide" } else { "Show" }).clicked() { self.mcp.show_token = !self.mcp.show_token; }
-                        if ui.button("Copy").clicked() { copy = Some(token.clone()); }
+                        if ui.button("Copy token").clicked() { copy = Some(token.clone()); }
                         if ui.button("New token").on_hover_text("An AI tool that has the old token stops working until it is given the new one").clicked() { new_token = true; }
                     });
-                    ui.end_row();
-                });
-                ui.add_space(4.0);
-                ui.label("To connect Claude Code, run this once in a terminal:");
-                let command = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {token}\"");
-                // Shown wrapped, so all of it can be read; the token stays hidden here until Show is pressed, but Copy takes the real one.
-                let shown = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {}\"", if self.mcp.show_token { token.as_str() } else { "<token>" });
-                ui.add(egui::Label::new(egui::RichText::new(shown).monospace()).wrap().selectable(true));
-                if ui.button("Copy command").on_hover_text("Copies the whole command, with the token").clicked() { copy = Some(command); }
-                ui.weak("Another AI tool: give it the address, and have it send the token as the header  Authorization: Bearer <token>.");
-            }
-            ui.add_space(8.0);
-            ui.separator();
-            ui.label(egui::RichText::new("What AI tools may do").strong());
-            ui.weak("Looking at the project is always allowed while this is on.");
-            changed |= ui.checkbox(&mut self.mcp.settings.allow_edit, "Change the open project").on_hover_text("Add, change and delete slides and objects. Undo takes it back.").changed();
-            changed |= ui.add_enabled(false, egui::Checkbox::new(&mut self.mcp.settings.allow_files, "Open, save and publish files (coming soon)")).changed();
-            changed |= ui.checkbox(&mut self.mcp.settings.on_launch, "Turn this on when BrainBend Studio opens").changed();
-            ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Activity").strong());
-                ui.weak(match self.mcp.last_call { Some(t) => format!("Last request {}", ago(t)), None => "No requests yet".into() });
+                    ui.add_space(4.0);
+                    ui.label("To connect Claude Code, run this once in a terminal:");
+                    let command = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {token}\"");
+                    // Shown wrapped, so all of it can be read; the token stays hidden here until Show is pressed, but Copy takes the real one.
+                    let shown = format!("claude mcp add --transport http brainbend {url} --header \"Authorization: Bearer {}\"", if self.mcp.show_token { token.as_str() } else { "<token>" });
+                    ui.add(egui::Label::new(egui::RichText::new(shown).monospace()).wrap().selectable(true));
+                    if ui.button("Copy command").on_hover_text("Copies the whole command, with the token").clicked() { copy = Some(command); }
+                    ui.weak("Another AI tool: give it the address, and have it send the token as the header  Authorization: Bearer <token>.");
+                }
             });
-            egui::ScrollArea::vertical().max_height(150.0).auto_shrink([false, true]).show(ui, |ui| {
-                if self.mcp.log.is_empty() { ui.weak("What an AI tool does will be listed here."); }
-                for l in &self.mcp.log {
+            egui::CollapsingHeader::new(egui::RichText::new("What AI may do").strong()).default_open(true).show(ui, |ui| {
+                ui.weak("Looking at the lesson is always allowed. This covers the chat and any AI tool you connect.");
+                changed |= ui.checkbox(&mut self.mcp.settings.allow_edit, "Change the open project").on_hover_text("Add, change and delete slides and objects. Undo takes it back.").changed();
+                changed |= ui.add_enabled(false, egui::Checkbox::new(&mut self.mcp.settings.allow_files, "Open, save and publish files (coming soon)")).changed();
+                changed |= ui.checkbox(&mut self.mcp.settings.on_launch, "Let AI tools connect when BrainBend Studio opens").changed();
+            });
+            egui::CollapsingHeader::new(egui::RichText::new("Activity").strong()).default_open(false).show(ui, |ui| {
+                ui.weak(match self.mcp.last_call { Some(t) => format!("Last request {}", ago(t)), None => "No requests yet".into() });
+                if self.mcp.log.is_empty() { ui.weak("What the chat and any AI tool do will be listed here."); }
+                for l in self.mcp.log.iter().take(30) {
                     let text = format!("{}  {}", ago(l.at), l.text);
                     if l.ok { ui.label(text); } else { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), text); }
                 }
             });
-            ui.add_space(4.0);
-            ui.weak("Only requests that carry the token are answered, and web pages cannot reach it. Everything an AI tool changes can be undone with Undo.");
+            ui.add_space(6.0);
+            ui.weak("An outside AI tool is answered only with the token, and web pages cannot reach it. Everything AI changes can be undone with Undo.");
         });
         if let Some(text) = copy { ctx.copy_text(text); }
         if changed { self.mcp.settings.save(); }
-        if start { self.mcp.start(ctx); }
+        if start { self.mcp.start(&ctx); }
         if stop { self.mcp.stop(); self.mcp.error = None; }
-        if new_token { self.mcp.new_token(ctx); }
-        if !open { self.mcp.open = false; self.mcp.show_token = false; }
-        if self.mcp.running() { ctx.request_repaint_after(Duration::from_secs(1)); }
+        if new_token { self.mcp.new_token(&ctx); }
+        if !self.mcp.running() { self.mcp.show_token = false; }
+        if self.mcp.running() || self.assistant.busy() { ctx.request_repaint_after(Duration::from_secs(1)); }
     }
 }
 

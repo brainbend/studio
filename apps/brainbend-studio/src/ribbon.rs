@@ -1834,7 +1834,7 @@ impl App {
             if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
         });
         group(ui, "AI Tools", |ui| {
-            if big_button(ui, BOLT, "AI Tools", "Let an AI tool you choose, such as Claude, work in BrainBend Studio while you watch").clicked() { self.mcp.open = true; }
+            if big_button(ui, BOLT, "AI Tools", "Open the AI tab in the side panel: connect an AI tool you choose, such as Claude, and see what it does").clicked() { self.right_tab = crate::AI_TAB; }
         });
         group(ui, "Updates", |ui| {
             ui.horizontal(|ui| {

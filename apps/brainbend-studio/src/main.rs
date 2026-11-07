@@ -29,6 +29,7 @@ mod video_support;
 mod video_export;
 mod mcp_tools;
 mod mcp;
+mod assistant;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -70,6 +71,7 @@ fn main() -> eframe::Result {
             app.updater = update::Updater::load();
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.mcp = mcp::Mcp::load();
+            app.assistant = assistant::Assistant::load();
             app.open_to_story_view = true;
             if let Some(p) = arg {
                 app.open(&p);
@@ -200,6 +202,8 @@ struct App {
     word_capture: Option<word_export::Capture>,
     /// AI tools connecting to the app through MCP: the controller's state and its window.
     mcp: mcp::Mcp,
+    /// The chat with Claude in the AI tab.
+    assistant: assistant::Assistant,
     /// What the Video page of the Publish dialog is set to.
     video_options: video_export::Options,
     /// A video being made.
@@ -479,7 +483,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -5226,6 +5230,9 @@ fn question_editor(ui: &mut egui::Ui, q: &mut Question, new_id: &mut dyn FnMut()
     changed
 }
 
+/// The AI tab of the side panel, after Properties (0) and Triggers (1).
+const AI_TAB: usize = 2;
+
 /// Layers shown when a slide starts: the base layer plus any a slide-start trigger shows.
 fn start_layers(slide: &Slide) -> Vec<usize> { slide.start_layers() }
 
@@ -6154,6 +6161,7 @@ impl App {
         self.update_window(ctx);
         self.video_support_window(ctx);
         self.mcp_frame(ctx);
+        self.assistant_frame();
         self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.video_export_frame(ctx);
@@ -6313,7 +6321,8 @@ impl App {
             // stays put.
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
-            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers { self.right_tab = 0; }
+            // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
             if !self.in_master_view() {
@@ -6333,8 +6342,12 @@ impl App {
                         _ => false,
                     }).count()
                 };
-                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }];
+                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
                 doc_tabs::panel_tabs(ui, &labels, &mut self.right_tab);
+            }
+            if self.right_tab == AI_TAB {
+                self.ai_panel(ui);
+                return;
             }
             if self.right_tab == 1 {
                 self.triggers_panel(ui, ctx, slide_idx);
@@ -8020,7 +8033,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_tools_window_turns_the_controller_on_and_off_and_keeps_the_token_hidden() {
+    fn the_ai_tab_turns_the_controller_on_and_off_and_keeps_the_token_hidden() {
         use egui_kittest::kittest::Queryable;
         let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _home = own_home("mcp-window");
@@ -8034,10 +8047,11 @@ mod tests {
         // The group heading and its button share the name; the heading ignores a click.
         for n in h.get_all_by_label("AI Tools") { n.click(); }
         h.run_steps(3);
-        assert!(h.state().mcp.open, "the Help tab's button opens the window");
+        assert_eq!(h.state().right_tab, AI_TAB, "the Help tab's button opens the AI tab in the side panel");
         assert!(!h.state().mcp.running(), "nothing listens until the author turns it on");
-        assert!(h.query_by_label_contains("Let an AI tool you choose").is_some());
-        assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Turn this on when BrainBend Studio opens").is_some());
+        assert!(h.query_by_label_contains("Use an AI tool you already have").is_some());
+        assert!(h.get_all_by_label("AI").next().is_some(), "the tab is in the strip");
+        assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Let AI tools connect when BrainBend Studio opens").is_some());
         assert!(h.state().mcp.settings.allow_edit && !h.state().mcp.settings.allow_files, "changes are allowed, files are not");
         h.get_by_label("Let AI tools connect").click();
         h.run_steps(3);
@@ -8046,11 +8060,12 @@ mod tests {
         assert!(url.starts_with("http://127.0.0.1:") && url.ends_with("/mcp"), "{url}");
         assert!(h.query_all_by_label_contains(&url).next().is_some(), "the address is shown");
         assert!(h.query_all_by_label_contains(&token).next().is_none(), "the token is hidden until Show is pressed, here and in the command");
-        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-tools.png")).unwrap(); }
-        h.get_by_label("Show").click();
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-tab.png")).unwrap(); }
+        h.hover_at(egui::pos2(1320.0, 560.0)); h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, -300.0), phase: egui::TouchPhase::Move, modifiers: Default::default() }); h.run_steps(3); h.get_by_label("Show").click();
         h.run_steps(3);
         assert!(h.query_all_by_label_contains(&token).next().is_some(), "now it shows");
         assert!(h.state().window_title().ends_with("AI tools on"), "the window title says so while it is on: {}", h.state().window_title());
+        assert!(h.get_all_by_label("AI •").next().is_some(), "and the tab shows a dot while it is on");
         h.get_by_label("Hide").click();
         h.run_steps(2);
         h.get_by_label("Let AI tools connect").click();
@@ -8137,6 +8152,149 @@ mod tests {
         assert_eq!(mcp_tools::access("save_project"), None, "no file tools exist yet");
         h.state_mut().mcp.stop();
         assert!(!h.state().mcp.running());
+    }
+
+    /// A stand-in for the Claude API: it answers each request with the next scripted reply and keeps what it was sent.
+    fn fake_claude(replies: Vec<serde_json::Value>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for reply in replies {
+                let Ok(mut req) = server.recv() else { return };
+                let mut raw = String::new();
+                std::io::Read::read_to_string(req.as_reader(), &mut raw).unwrap();
+                log.lock().unwrap().push(serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null));
+                let mut r = tiny_http::Response::from_string(reply.to_string());
+                r.add_header(tiny_http::Header::from_bytes(&b"content-type"[..], &b"application/json"[..]).unwrap());
+                let _ = req.respond(r);
+            }
+        });
+        (url, seen)
+    }
+
+    fn claude_uses(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "role": "assistant", "stop_reason": "tool_use", "usage": { "input_tokens": 500, "output_tokens": 60 },
+            "content": [{ "type": "text", "text": "On it." }, { "type": "tool_use", "id": id, "name": name, "input": input }] })
+    }
+
+    fn claude_says(text: &str) -> serde_json::Value {
+        serde_json::json!({ "role": "assistant", "stop_reason": "end_turn", "usage": { "input_tokens": 700, "output_tokens": 30 }, "content": [{ "type": "text", "text": text }] })
+    }
+
+    fn chat_until_done(h: &mut egui_kittest::Harness<'static, App>, text: &str) {
+        let ctx = h.ctx.clone();
+        h.state_mut().assistant.send(text, &ctx);
+        for _ in 0..3000 {
+            h.step();
+            if !h.state().assistant.busy() { return; }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        panic!("the chat did not finish");
+    }
+
+    #[test]
+    fn the_chat_builds_with_the_apps_own_tools_and_all_of_it_can_be_undone() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-chat");
+        let (url, seen) = fake_claude(vec![
+            claude_uses("toolu_1", "create_object", serde_json::json!({ "slide": 1, "object": { "kind": "Text", "name": "Title", "text": "Safety first", "style": { "size": 80, "bold": true }, "entrance": { "kind": "Fade", "delay_ms": 0, "duration_ms": 600 } } })),
+            claude_says("I added a title that fades in."),
+            claude_uses("toolu_2", "create_object", serde_json::json!({ "slide": 1, "object": { "kind": "Text", "text": "Not allowed" } })),
+            claude_says("I could not change it."),
+        ]);
+        let mut a = app();
+        a.dirty = false;
+        a.undo.clear();
+        a.assistant.settings = assistant::Settings { api_key: "sk-test".into(), model: "claude-opus-5-5".into(), base_url: Some(url) };
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        chat_until_done(&mut h, "Add a title that says Safety first");
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert_eq!((o.text.as_str(), o.style.size, o.style.bold, o.entrance.is_some()), ("Safety first", 80.0, true, true), "Claude's tool call changed the lesson");
+        assert!(h.state().dirty && h.state().status.starts_with("AI tool:"), "{}", h.state().status);
+        let chat = h.state().assistant.chat.clone();
+        assert!(matches!(&chat[0], assistant::Line::You(t) if t == "Add a title that says Safety first"));
+        assert!(chat.iter().any(|l| matches!(l, assistant::Line::Tool { name, state: assistant::ToolState::Done, .. } if name == "create_object")), "{chat:?}");
+        assert!(matches!(chat.last(), Some(assistant::Line::Claude(t)) if t == "I added a title that fades in."));
+        assert!(h.state().assistant.usage.tokens() > 1000, "the use is counted");
+        assert!(h.state().mcp.log.iter().any(|l| l.ok && l.text == "assistant: create_object"), "and it shows in the activity list");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.state_mut().right_tab = AI_TAB;
+            h.run_steps(3);
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-chat.png")).unwrap();
+        }
+        {
+            let sent = seen.lock().unwrap();
+            assert_eq!(sent[0]["model"], "claude-opus-5-5");
+            assert!(sent[0]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "patch" && t["input_schema"]["type"] == "object"), "Claude is given the app's tools");
+            assert!(sent[0]["system"].as_str().unwrap().contains("BrainBend Studio"));
+            let back = &sent[1]["messages"][2]["content"][0];
+            assert_eq!((back["type"].as_str(), back["tool_use_id"].as_str()), (Some("tool_result"), Some("toolu_1")));
+            assert!(back["content"].as_str().unwrap().contains("/slides/0/layers/0/objects/0"), "Claude is told what it made: {back}");
+        }
+        // One Undo takes back the whole thing.
+        h.state_mut().undo();
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "undone");
+        // With changes switched off, Claude can look but the lesson stays as it is.
+        h.state_mut().mcp.settings.allow_edit = false;
+        chat_until_done(&mut h, "Add more");
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "nothing was added");
+        let sent = seen.lock().unwrap();
+        let refused = &sent[3]["messages"].as_array().unwrap().last().unwrap()["content"][0];
+        assert_eq!(refused["is_error"], true);
+        assert!(refused["content"].as_str().unwrap().contains("not allowed AI tools to change the project"), "{refused}");
+        assert!(h.state().assistant.chat.iter().any(|l| matches!(l, assistant::Line::Tool { state: assistant::ToolState::Failed(_), .. })), "the chat shows the step that was refused");
+    }
+
+    #[test]
+    fn a_failed_chat_says_why_and_that_changes_made_so_far_can_be_undone() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-fail");
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+        std::thread::spawn(move || {
+            for n in 0..2 {
+                let Ok(mut req) = server.recv() else { return };
+                let mut raw = String::new();
+                std::io::Read::read_to_string(req.as_reader(), &mut raw).unwrap();
+                let (status, body) = if n == 0 { (200, claude_uses("toolu_1", "add_slide", serde_json::json!({})).to_string()) } else { (401, r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#.to_string()) };
+                let _ = req.respond(tiny_http::Response::from_string(body).with_status_code(status));
+            }
+        });
+        let mut a = app();
+        a.assistant.settings = assistant::Settings { api_key: "sk-bad".into(), model: "claude-opus-5-5".into(), base_url: Some(url) };
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        let before = h.state().project.as_ref().unwrap().slides.len();
+        chat_until_done(&mut h, "Add a slide");
+        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), before + 1, "the first step did run");
+        let last = h.state().assistant.chat.last().cloned();
+        assert!(matches!(&last, Some(assistant::Line::Error(e)) if e.contains("API key was not accepted") && e.contains("Undo takes it back")), "{last:?}");
+        assert!(!h.state().assistant.busy(), "and it can be used again");
+    }
+
+    #[test]
+    fn the_chat_asks_for_a_key_first_and_says_where_the_data_goes() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-key");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let mut a = app();
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("This needs your own Claude API key.").is_some());
+        assert!(h.query_by_label_contains("sent to Anthropic and billed to your key").is_some(), "it says where the lesson's content goes");
+        assert!(h.query_by_label("Save key").is_some() && h.query_by_label("Send").is_none(), "no chat until there is a key");
+        h.state_mut().assistant.settings.api_key = "sk-ant-test".into();
+        h.run_steps(3);
+        assert!(h.query_by_label("This needs your own Claude API key.").is_none());
+        assert!(h.query_by_label("Send").is_some() && h.query_by_label("New chat").is_some());
+        assert!(h.query_by_label_contains("Make a title slide").is_some(), "it offers a few ways to start");
+        assert!(h.query_by_label_contains("Claude Opus 5.5").is_some(), "the model is shown");
     }
 
     #[test]
