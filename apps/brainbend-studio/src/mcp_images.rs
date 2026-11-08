@@ -151,3 +151,50 @@ impl App {
         done(json!({ "added": described, "picture_pixels": [pic.w, pic.h], "credit_in_notes": credit.is_some() }))
     }
 }
+
+// ---- icons ----
+
+impl App {
+    /// Searches the icon gallery (Phosphor icons) by words in their names.
+    pub(super) fn mcp_find_icons(&mut self, a: &Value) -> Result<String, String> {
+        let query = text_arg(a, "query")?.map(|q| q.trim().to_string()).filter(|q| !q.is_empty()).ok_or("`query` must be a word or two, such as \"house\" or \"arrow right\".")?;
+        let count = num_arg(a, "count", 1.0, 40.0)?.unwrap_or(12.0) as usize;
+        let all = crate::icons::search(&query);
+        let names: Vec<&str> = all.iter().take(count).map(|i| i.names[0]).collect();
+        done(json!({ "found": all.len(), "icons": names, "next": if names.is_empty() { "Nothing matched. Try one simpler word." } else { "Use add_icon with one of these names." } }))
+    }
+
+    /// Adds an icon from the gallery to a slide as a vector shape.
+    pub(super) fn mcp_add_icon(&mut self, a: &Value, count: usize) -> Result<String, String> {
+        let i = slide_arg(a, "slide", count)?;
+        let name = text_arg(a, "icon")?.map(|n| n.trim().to_lowercase().replace(' ', "-")).filter(|n| !n.is_empty()).ok_or("`icon` must be an icon's name, such as \"house\" (find_icons searches the names).")?;
+        let icon = crate::icons::all().iter().find(|ic| ic.names.contains(&name.as_str())).ok_or_else(|| {
+            let near: Vec<&str> = crate::icons::search(&name.replace('-', " ")).iter().take(8).map(|i| i.names[0]).collect();
+            if near.is_empty() { format!("There is no icon called {name:?}. Use find_icons to search the names.") } else { format!("There is no icon called {name:?}. Close names: {}.", near.join(", ")) }
+        })?;
+        let (cmds, aspect) = crate::icons::outline(icon).ok_or("That icon could not be drawn.")?;
+        let (sw, sh) = { let s = &self.project.as_ref().unwrap().slides[i]; (s.width, s.height) };
+        let size = num_arg(a, "size", 8.0, 4000.0)?.unwrap_or(120.0);
+        let (w, h) = if aspect >= 1.0 { (size, size / aspect) } else { (size * aspect, size) };
+        let (w, h) = (w.round().max(1.0), h.round().max(1.0));
+        let (x, y) = (num_arg(a, "x", -20_000.0, 20_000.0)?, num_arg(a, "y", -20_000.0, 20_000.0)?);
+        let color = color_arg(a, "color")?.unwrap_or_else(|| self.project.as_ref().map(|p| p.theme.text()).unwrap_or(Rgba(34, 34, 34, 255)));
+        let decorative = bool_arg(a, "decorative")?.unwrap_or(false);
+        let alt = text_arg(a, "alt")?.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        let mut o = blank_object(self.new_id("obj"), text_arg(a, "name")?.as_deref().unwrap_or(&icon.title()), Kind::Path(cmds), 0.0, 0.0, w, h);
+        o.fill = Some(color);
+        o.decorative = decorative;
+        o.alt = if decorative { String::new() } else { alt.unwrap_or_else(|| icon.title()) };
+        o.x = x.unwrap_or(((sw - w) / 2.0).max(0.0)).round();
+        o.y = y.unwrap_or(((sh - h) / 2.0).max(0.0)).round();
+        let described = describe_object(&o);
+        self.snapshot();
+        let slide = &mut self.project.as_mut().unwrap().slides[i];
+        if bool_arg(a, "send_to_back")?.unwrap_or(false) { slide.layers[0].objects.insert(0, o); self.selected = Some((0, 0)); } else { slide.layers[0].objects.push(o); self.selected = Some((0, slide.layers[0].objects.len() - 1)); }
+        self.slide = i;
+        self.layer = 0;
+        self.dirty = true;
+        self.status = format!("AI tool: added the {} icon to slide {}", icon.title(), i + 1);
+        done(described)
+    }
+}

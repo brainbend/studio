@@ -112,6 +112,20 @@ fn table() -> Vec<(Access, ToolDef)> {
                 "name": { "type": "string", "description": "A name for the object." },
                 "send_to_back": { "type": "boolean", "description": "Put it behind the slide's other objects, such as for a background picture." },
             }), &["slide"]), false),
+        tool(Access::Read, "find_icons", "Searches the icon library by words in the icons' names (house, arrow-right, check, phone, warning, ...) and returns names to use with add_icon. Use an icon instead of a symbol or emoji character in text, which the fonts often cannot draw.",
+            schema(json!({ "query": { "type": "string", "description": "A word or two, such as house or arrow right." }, "count": { "type": "integer", "minimum": 1, "maximum": 40, "description": "How many names to return (default 12)." } }), &["query"]), true),
+        tool(Access::Edit, "add_icon", "Adds an icon from the library to a slide as a vector shape that scales without blurring and takes a fill color. `icon` is a name from find_icons. It is `size` pixels on its longest side (default 120) and centred on the slide unless x and y are given. It is in the lesson's text color unless you give `color` (use a theme or palette color). Its alt text is the icon's name unless you give `alt` or mark it decorative. For an icon button, put the icon next to or on a shape and give the shape the click trigger.",
+            schema(json!({
+                "slide": slide_prop(),
+                "icon": { "type": "string", "description": "The icon's name, such as house or arrow-right." },
+                "size": { "type": "number", "description": "Pixels on the icon's longest side (default 120)." },
+                "x": { "type": "number" }, "y": { "type": "number" },
+                "color": color_prop("The icon's color"),
+                "alt": { "type": "string", "description": "What the icon means for people who cannot see it, such as Back to the home slide." },
+                "decorative": { "type": "boolean", "description": "True when the icon only decorates." },
+                "name": { "type": "string", "description": "A name for the object." },
+                "send_to_back": { "type": "boolean" },
+            }), &["slide", "icon"]), false),
         tool(Access::Edit, "delete_slide", "Deletes a slide. The last slide cannot be deleted.", schema(json!({ "slide": slide_prop() }), &["slide"]), false),
         tool(Access::Edit, "rename_slide", "Gives a slide a new name.", schema(json!({ "slide": slide_prop(), "name": { "type": "string" } }), &["slide", "name"]), false),
         tool(Access::Edit, "set_slide_notes", "Sets the notes of a slide (the speaker notes shown in the player's Notes tab).", schema(json!({ "slide": slide_prop(), "notes": { "type": "string" } }), &["slide", "notes"]), false),
@@ -173,7 +187,17 @@ Then set the player to fit how the lesson is used. A lesson meant to be followed
 A lesson that is not in order (a hub that links to topics, a menu of choices, a presentation the author moves through with their own buttons, a kiosk or quiz bank) should have show_nav false and show_progress false, because those mean nothing there. \
 If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
 Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
-Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give alt text, and never use a picture you do not have the right to use.";
+Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give alt text, and never use a picture you do not have the right to use. \
+In text and on buttons use plain words, not symbols or emoji (such as a house or arrow character): the lesson's fonts cannot draw many of them and they show as an empty square. For an icon (home, back, next, check, warning, phone) call find_icons and add_icon, which place a vector icon in the lesson's colors; give an icon that stands alone alt text saying what it does.";
+
+/// A warning when `text` has symbols the fonts Studio ships with usually lack, which would show as an empty square.
+pub(super) fn symbol_warning(text: &str) -> Option<String> {
+    let risky: Vec<char> = text.chars().filter(|&c| matches!(c as u32, 0x2300..=0x23FF | 0x2460..=0x24FF | 0x2600..=0x27BF | 0x2B00..=0x2BFF | 0x1F000..=0x1FAFF | 0xFE00..=0xFE0F)).collect();
+    if risky.is_empty() { return None; }
+    let mut shown: Vec<String> = vec![];
+    for c in risky { let s = c.to_string(); if !shown.contains(&s) { shown.push(s); } }
+    Some(format!("The text has symbols ({}) that the lesson's fonts probably cannot draw, so they may show as an empty square. Use plain words instead, or an icon from find_icons and add_icon.", shown.join(" ")))
+}
 
 // ---- reading what a tool was given ----
 
@@ -251,6 +275,8 @@ pub(super) fn describe_object(o: &Object) -> Value {
     });
     if !o.text.is_empty() { v["text"] = json!(o.text); }
     if let Some(k) = o.placeholder { v["placeholder"] = json!(k.label()); }
+    if !o.alt.is_empty() { v["alt"] = json!(o.alt); }
+    if o.decorative { v["decorative"] = json!(true); }
     if matches!(o.kind, Kind::Text) { v["font"] = json!(o.style.font_family); v["size"] = json!(o.style.size); v["text_color"] = json!(o.style.color.hex()); }
     if let Some(f) = o.fill { v["fill"] = json!(f.hex()); }
     if let Some(t) = o.timing { v["start_ms"] = json!(t.start_ms); v["duration_ms"] = json!(t.dur_ms); }
@@ -311,6 +337,8 @@ impl App {
             "apply_layout" => self.mcp_apply_layout(a, count),
             "find_images" => self.mcp_find_images(a),
             "add_image" => self.mcp_add_image(a, count),
+            "find_icons" => self.mcp_find_icons(a),
+            "add_icon" => self.mcp_add_icon(a, count),
             "add_slide" => {
                 let after = match a.get("after") { None | Some(Value::Null) => count, Some(_) => slide_arg(a, "after", count)? + 1 };
                 let title = text_arg(a, "name")?;
@@ -428,7 +456,8 @@ impl App {
         let existing = self.project.as_ref().unwrap().slides[i].layers[0].objects.len();
         o.x = x.unwrap_or(sw * 0.08 + (existing % 8) as f32 * 36.0).round();
         o.y = y.unwrap_or(sh * 0.08 + (existing % 8) as f32 * 36.0).round();
-        let described = describe_object(&o);
+        let mut described = describe_object(&o);
+        if let Some(w) = symbol_warning(&o.text) { described["warning"] = json!(w); }
         self.snapshot();
         let slide = &mut self.project.as_mut().unwrap().slides[i];
         slide.layers[0].objects.push(o);
@@ -467,7 +496,8 @@ impl App {
                 o.timing = Some(Timing { start_ms: start.unwrap_or(current.start_ms), dur_ms: duration.unwrap_or(current.dur_ms) });
             }
         }
-        let described = describe_object(&o);
+        let mut described = describe_object(&o);
+        if let Some(w) = symbol_warning(&o.text) { described["warning"] = json!(w); }
         self.snapshot();
         self.project.as_mut().unwrap().slides[i].layers[li].objects[oi] = o;
         self.slide = i;
@@ -610,7 +640,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 27);
+        assert_eq!(t.len(), 29);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -1250,6 +1280,54 @@ mod tests {
             assert!(e.contains(expect), "{e}");
         }
         assert!(INSTRUCTIONS.contains("title_is_missing") && INSTRUCTIONS.contains("not in order"));
+    }
+
+    #[test]
+    fn text_with_symbols_the_fonts_cannot_draw_gets_a_warning() {
+        let mut a = app_with(1);
+        let r = run(&mut a, "add_shape", json!({ "slide": 1, "shape": "rounded_rectangle", "text": "\u{2302} Home" })).unwrap();
+        assert!(r["warning"].as_str().unwrap().contains("\u{2302}"), "{r}");
+        for ok in ["Home", "Next \u{2192}", "Caf\u{e9} \u{2013} 50% \u{2022} done", "\u{4e2d}\u{6587}"] {
+            let r = run(&mut a, "add_text", json!({ "slide": 1, "text": ok })).unwrap();
+            assert!(r.get("warning").is_none(), "{ok}: {r}");
+        }
+        let r = run(&mut a, "add_text", json!({ "slide": 1, "text": "Done \u{2705}" })).unwrap();
+        assert!(r["warning"].is_string());
+        let id = r["id"].as_str().unwrap().to_string();
+        let r = run(&mut a, "set_object", json!({ "slide": 1, "object": id, "text": "Done \u{1F44D}" })).unwrap();
+        assert!(r["warning"].is_string(), "a change to the text is checked too");
+        let r = run(&mut a, "set_object", json!({ "slide": 1, "object": id, "text": "Done" })).unwrap();
+        assert!(r.get("warning").is_none());
+        assert!(INSTRUCTIONS.contains("plain words, not symbols") && INSTRUCTIONS.contains("add_icon"));
+    }
+
+    #[test]
+    fn icons_are_found_by_name_and_added_as_vector_shapes_in_the_lessons_colors() {
+        let mut a = app_with(1);
+        let r = run(&mut a, "find_icons", json!({ "query": "house", "count": 5 })).unwrap();
+        assert!(r["icons"].as_array().unwrap().iter().any(|n| n == "house"), "{r}");
+        assert!(run(&mut a, "find_icons", json!({ "query": "zzzz-nothing" })).unwrap()["icons"].as_array().unwrap().is_empty());
+        let r = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "house", "size": 200 })).unwrap();
+        assert_eq!((r["type"].as_str(), r["alt"].as_str()), (Some("vector shape"), Some("house")), "{r}");
+        let o = a.project.as_ref().unwrap().slides[0].layers[0].objects.last().unwrap().clone();
+        assert!(matches!(o.kind, Kind::Path(_)));
+        assert_eq!(o.fill, Some(a.project.as_ref().unwrap().theme.text()), "the lesson's text color unless told otherwise");
+        assert!((o.w.max(o.h) - 200.0).abs() <= 1.0 && ((o.x + o.w / 2.0) - 960.0).abs() <= 1.0, "200 on its longest side, centred: {} {} {} {}", o.x, o.y, o.w, o.h);
+        // Chosen color, place, and the words spelled however they are written.
+        let r = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "Arrow Right", "color": "#E87722", "x": 50, "y": 60, "alt": "Next slide" })).unwrap();
+        assert_eq!((r["alt"].as_str(), r["x"].as_f64(), r["y"].as_f64()), (Some("Next slide"), Some(50.0), Some(60.0)));
+        let r = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "star", "decorative": true })).unwrap();
+        assert!(r["alt"].is_null() || r["alt"] == "", "{r}");
+        assert!(a.project.as_ref().unwrap().slides[0].layers[0].objects.last().unwrap().decorative);
+        // A name that is not an icon says what is close.
+        let e = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "hous" })).unwrap_err();
+        assert!(e.contains("no icon called") && e.contains("house") || e.contains("find_icons"), "{e}");
+        let e = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "" })).unwrap_err();
+        assert!(e.contains("`icon`"), "{e}");
+        // One undo step takes an icon back.
+        let n = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), n - 1);
     }
 
     #[test]
