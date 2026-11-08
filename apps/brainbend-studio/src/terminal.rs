@@ -20,8 +20,38 @@ use std::io::{Read, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 const FONT_SIZE: f32 = 12.5;
-const DEFAULT_BG: egui::Color32 = egui::Color32::from_rgb(24, 24, 24);
-const DEFAULT_FG: egui::Color32 = egui::Color32::from_rgb(204, 204, 204);
+/// The colours of a terminal in the app's dark or light mode.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub bg: egui::Color32,
+    pub fg: egui::Color32,
+    pub selection_bg: egui::Color32,
+    pub selection_fg: egui::Color32,
+    ansi: [(u8, u8, u8); 16],
+}
+
+/// The ANSI colours as a terminal usually shows them: on a dark background, and on a light one (where yellow and white
+/// have to be darker to be read).
+const ANSI_DARK: [(u8, u8, u8); 16] = [
+    (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16), (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
+    (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67), (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
+];
+const ANSI_LIGHT: [(u8, u8, u8); 16] = [
+    (0, 0, 0), (205, 49, 49), (0, 140, 0), (148, 152, 0), (4, 81, 165), (188, 5, 188), (5, 152, 188), (85, 85, 85),
+    (102, 102, 102), (205, 49, 49), (20, 160, 20), (181, 186, 0), (4, 81, 165), (188, 5, 188), (5, 152, 188), (60, 60, 60),
+];
+
+impl Palette {
+    pub fn new(dark: bool) -> Palette {
+        if dark {
+            Palette { bg: egui::Color32::from_rgb(24, 24, 24), fg: egui::Color32::from_rgb(204, 204, 204), selection_bg: egui::Color32::from_rgb(38, 79, 120), selection_fg: egui::Color32::WHITE, ansi: ANSI_DARK }
+        } else {
+            Palette { bg: egui::Color32::from_rgb(252, 252, 252), fg: egui::Color32::from_rgb(36, 36, 36), selection_bg: egui::Color32::from_rgb(173, 214, 255), selection_fg: egui::Color32::BLACK, ansi: ANSI_LIGHT }
+        }
+    }
+
+    fn ansi(&self, i: usize) -> egui::Color32 { let (r, g, b) = self.ansi[i.min(15)]; egui::Color32::from_rgb(r, g, b) }
+}
 
 /// The tools that can be started in the tab: a name, the program, and whether this app connects it by itself.
 pub struct Tool {
@@ -68,6 +98,9 @@ pub struct Terminal {
     child: Box<dyn Child + Send + Sync>,
     size: (usize, usize),
     cell: (f32, f32),
+    /// The app's mode now, and when this was started (the program chose its own colours then).
+    dark: bool,
+    pub spawned_dark: bool,
     want_focus: bool,
 }
 
@@ -82,7 +115,7 @@ impl Terminal {
     /// Runs `program` with `args` in a terminal. The program is found the way the author's own shell would find it (their
     /// login shell reads their profile, so the PATH set up for the command line is used even though this app was opened from
     /// the desktop). With no program, it is the shell itself.
-    pub fn spawn(name: &str, program: &str, args: &[String], cwd: Option<std::path::PathBuf>, env: &[(String, String)], ctx: &egui::Context) -> Result<Terminal, String> {
+    pub fn spawn(name: &str, program: &str, args: &[String], cwd: Option<std::path::PathBuf>, env: &[(String, String)], dark: bool, ctx: &egui::Context) -> Result<Terminal, String> {
         let mut cmd = if cfg!(windows) {
             let mut c = CommandBuilder::new("cmd");
             if !program.is_empty() { c.arg("/C"); c.arg(program); c.args(args); }
@@ -103,6 +136,8 @@ impl Terminal {
         };
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // The old, widely read way for a program to learn whether the background is light (foreground;background).
+        cmd.env("COLORFGBG", if dark { "15;0" } else { "0;15" });
         for (k, v) in env { cmd.env(k, v); }
         if let Some(dir) = cwd { cmd.cwd(dir); }
         let (cols, rows) = (80usize, 24usize);
@@ -123,7 +158,7 @@ impl Terminal {
         });
         let (etx, events) = channel();
         let term = Term::new(Config::default(), &Size { columns: cols, lines: rows }, Listener(etx));
-        Ok(Terminal { name: name.to_string(), title: String::new(), exited: None, term, parser: Processor::new(), bytes, events, writer, master: pair.master, child, size: (cols, rows), cell: (8.0, 16.0), want_focus: true })
+        Ok(Terminal { name: name.to_string(), title: String::new(), exited: None, term, parser: Processor::new(), bytes, events, writer, master: pair.master, child, size: (cols, rows), cell: (8.0, 16.0), dark, spawned_dark: dark, want_focus: true })
     }
 
     /// Takes in what the program has printed and answers what the terminal itself is asked.
@@ -136,7 +171,8 @@ impl Terminal {
                 TermEvent::ResetTitle => self.title.clear(),
                 // A program may ask what colour the terminal is, to choose its own; it gets the answer a dark one gives.
                 TermEvent::ColorRequest(index, format) => {
-                    let c = match index { 257 => DEFAULT_BG, _ => DEFAULT_FG };
+                    let pal = Palette::new(self.dark);
+                    let c = match index { 257 => pal.bg, _ => pal.fg };
                     self.send(format(Rgb { r: c.r(), g: c.g(), b: c.b() }).as_bytes());
                 }
                 TermEvent::TextAreaSizeRequest(format) => {
@@ -185,6 +221,8 @@ impl Terminal {
 
     /// Draws the terminal in `ui`, filling it, and takes the keyboard while it has focus.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.dark = ui.visuals().dark_mode;
+        let pal = Palette::new(self.dark);
         self.pump();
         let font = egui::FontId::monospace(FONT_SIZE);
         let (cw, ch) = ui.fonts_mut(|f| { let g = f.layout_no_wrap("M".repeat(16), font.clone(), egui::Color32::WHITE); (g.size().x / 16.0, g.size().y) });
@@ -220,17 +258,17 @@ impl Terminal {
 
         // Drawing.
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, DEFAULT_BG);
+        painter.rect_filled(rect, 0.0, pal.bg);
         let content = self.term.renderable_content();
         let selection = content.selection;
-        let mut grid = vec![vec![(' ', DEFAULT_FG, DEFAULT_BG, Flags::empty()); cols]; rows];
+        let mut grid = vec![vec![(' ', pal.fg, pal.bg, Flags::empty()); cols]; rows];
         for cell in content.display_iter {
             let row = cell.point.line.0 + content.display_offset as i32;
             let col = cell.point.column.0;
             if row < 0 || row as usize >= rows || col >= cols { continue; }
-            let (mut fg, mut bg) = (resolve(cell.fg, DEFAULT_FG, DEFAULT_BG), resolve(cell.bg, DEFAULT_FG, DEFAULT_BG));
+            let (mut fg, mut bg) = (resolve(cell.fg, &pal), resolve(cell.bg, &pal));
             if cell.flags.contains(Flags::INVERSE) { std::mem::swap(&mut fg, &mut bg); }
-            if selection.is_some_and(|s| s.contains(cell.point)) { bg = egui::Color32::from_rgb(38, 79, 120); fg = egui::Color32::WHITE; }
+            if selection.is_some_and(|s| s.contains(cell.point)) { bg = pal.selection_bg; fg = pal.selection_fg; }
             if cell.flags.contains(Flags::DIM) { fg = fg.gamma_multiply(0.6); }
             let c = if cell.flags.contains(Flags::HIDDEN) || cell.flags.contains(Flags::WIDE_CHAR_SPACER) || cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) { ' ' } else { cell.c };
             grid[row as usize][col] = (c, fg, bg, cell.flags);
@@ -243,7 +281,7 @@ impl Terminal {
                 let bg = line[c].2;
                 let mut end = c + 1;
                 while end < cols && line[end].2 == bg { end += 1; }
-                if bg != DEFAULT_BG { painter.rect_filled(egui::Rect::from_min_size(egui::pos2(origin.x + c as f32 * cw, y), egui::vec2((end - c) as f32 * cw, ch)), 0.0, bg); }
+                if bg != pal.bg { painter.rect_filled(egui::Rect::from_min_size(egui::pos2(origin.x + c as f32 * cw, y), egui::vec2((end - c) as f32 * cw, ch)), 0.0, bg); }
                 c = end;
             }
             // Then text, in runs of one colour; a wide character is drawn alone so the columns stay in step.
@@ -269,13 +307,13 @@ impl Terminal {
             let col = content.cursor.point.column.0;
             if row >= 0 && (row as usize) < rows && col < cols {
                 let r = egui::Rect::from_min_size(egui::pos2(origin.x + col as f32 * cw, origin.y + row as f32 * ch), egui::vec2(cw, ch));
-                if focused { painter.rect_filled(r, 0.0, DEFAULT_FG.gamma_multiply(0.7)); } else { painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, DEFAULT_FG), egui::StrokeKind::Inside); }
+                if focused { painter.rect_filled(r, 0.0, pal.fg.gamma_multiply(0.7)); } else { painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, pal.fg), egui::StrokeKind::Inside); }
             }
         }
         if let Some(why) = &self.exited {
             let r = egui::Rect::from_min_size(egui::pos2(rect.left(), rect.bottom() - ch * 1.6), egui::vec2(rect.width(), ch * 1.6));
-            painter.rect_filled(r, 0.0, egui::Color32::from_black_alpha(190));
-            painter.text(r.center(), egui::Align2::CENTER_CENTER, format!("{} has finished ({why})", self.name), font.clone(), DEFAULT_FG);
+            painter.rect_filled(r, 0.0, pal.bg.gamma_multiply(0.85));
+            painter.text(r.center(), egui::Align2::CENTER_CENTER, format!("{} has finished ({why})", self.name), font.clone(), pal.fg);
         }
 
         // The keyboard, while it has focus. Tab, Escape and the arrows belong to the program, not to egui's focus moving.
@@ -347,33 +385,25 @@ pub fn key_bytes(key: egui::Key, m: egui::Modifiers, app_cursor: bool) -> Option
     })
 }
 
-/// The ANSI colours, as a terminal usually shows them on a dark background.
-const ANSI: [(u8, u8, u8); 16] = [
-    (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16), (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
-    (102, 102, 102), (241, 76, 76), (35, 209, 139), (245, 245, 67), (59, 142, 234), (214, 112, 214), (41, 184, 219), (255, 255, 255),
-];
-
-fn ansi(i: usize) -> egui::Color32 { let (r, g, b) = ANSI[i.min(15)]; egui::Color32::from_rgb(r, g, b) }
-
 /// A cell's colour: one of the 16, one of the 256, a true colour, or the terminal's own.
-fn resolve(color: Color, fg: egui::Color32, bg: egui::Color32) -> egui::Color32 {
+fn resolve(color: Color, pal: &Palette) -> egui::Color32 {
     match color {
         Color::Spec(Rgb { r, g, b }) => egui::Color32::from_rgb(r, g, b),
-        Color::Indexed(i) => indexed(i as usize),
+        Color::Indexed(i) => indexed(i as usize, pal),
         Color::Named(n) => match n as usize {
-            i @ 0..=15 => ansi(i),
-            257 => bg,
-            259..=266 => ansi(n as usize - 259).gamma_multiply(0.6),
-            268 => fg.gamma_multiply(0.6),
-            _ => fg,
+            i @ 0..=15 => pal.ansi(i),
+            257 => pal.bg,
+            259..=266 => pal.ansi(n as usize - 259).gamma_multiply(0.6),
+            268 => pal.fg.gamma_multiply(0.6),
+            _ => pal.fg,
         },
     }
 }
 
 /// The 256-colour palette: the 16, a 6x6x6 cube, and 24 greys.
-fn indexed(i: usize) -> egui::Color32 {
+fn indexed(i: usize, pal: &Palette) -> egui::Color32 {
     match i {
-        0..=15 => ansi(i),
+        0..=15 => pal.ansi(i),
         16..=231 => {
             let n = i - 16;
             let level = |v: usize| if v == 0 { 0 } else { (55 + 40 * v) as u8 };
@@ -444,7 +474,7 @@ impl App {
             for file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md"] { let _ = std::fs::write(dir.join(file), instructions()); }
         }
         self.assistant.terminal = None;
-        match Terminal::spawn(tool.name, tool.program, &args, workspace, &env, ctx) {
+        match Terminal::spawn(tool.name, tool.program, &args, workspace, &env, ctx.global_style().visuals.dark_mode, ctx) {
             Ok(t) => { self.assistant.terminal = Some(t); self.assistant.terminal_error = None; self.assistant.view_terminal = true; self.assistant.term_tool = TOOLS.iter().position(|t| t.name == tool.name).unwrap_or(0); }
             Err(e) => self.assistant.terminal_error = Some(e),
         }
@@ -461,6 +491,8 @@ impl App {
             if ui.small_button("Settings").clicked() { self.assistant.setup_open = true; }
         });
         if let Some(e) = &self.assistant.terminal_error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
+        // The tool chooses its own colours when it starts, so a change of mode after that reaches only the plain text.
+        if self.assistant.terminal.as_ref().is_some_and(|t| t.spawned_dark != ui.visuals().dark_mode) { ui.weak("The theme changed. Restart the tool so its colors match."); }
         if let Some(t) = self.assistant.terminal.as_mut() { t.ui(ui); }
         if restart { let ctx = ui.ctx().clone(); let tool = self.assistant.term_tool; self.start_terminal(tool, &ctx); }
         if close { self.assistant.terminal = None; self.assistant.view_terminal = false; }
@@ -496,14 +528,46 @@ mod tests {
     #[test]
     fn colours_are_the_usual_ones() {
         use alacritty_terminal::vte::ansi::NamedColor;
-        assert_eq!(resolve(Color::Named(NamedColor::Red), DEFAULT_FG, DEFAULT_BG), ansi(1));
-        assert_eq!(resolve(Color::Named(NamedColor::Foreground), DEFAULT_FG, DEFAULT_BG), DEFAULT_FG);
-        assert_eq!(resolve(Color::Named(NamedColor::Background), DEFAULT_FG, DEFAULT_BG), DEFAULT_BG);
-        assert_eq!(resolve(Color::Spec(Rgb { r: 1, g: 2, b: 3 }), DEFAULT_FG, DEFAULT_BG), egui::Color32::from_rgb(1, 2, 3));
-        assert_eq!(indexed(16), egui::Color32::from_rgb(0, 0, 0));
-        assert_eq!(indexed(231), egui::Color32::from_rgb(255, 255, 255));
-        assert_eq!(indexed(232), egui::Color32::from_rgb(8, 8, 8));
-        assert_eq!(indexed(9), ansi(9));
+        let dark = Palette::new(true);
+        assert_eq!(resolve(Color::Named(NamedColor::Red), &dark), dark.ansi(1));
+        assert_eq!(resolve(Color::Named(NamedColor::Foreground), &dark), dark.fg);
+        assert_eq!(resolve(Color::Named(NamedColor::Background), &dark), dark.bg);
+        assert_eq!(resolve(Color::Spec(Rgb { r: 1, g: 2, b: 3 }), &dark), egui::Color32::from_rgb(1, 2, 3));
+        assert_eq!(indexed(16, &dark), egui::Color32::from_rgb(0, 0, 0));
+        assert_eq!(indexed(231, &dark), egui::Color32::from_rgb(255, 255, 255));
+        assert_eq!(indexed(232, &dark), egui::Color32::from_rgb(8, 8, 8));
+        assert_eq!(indexed(9, &dark), dark.ansi(9));
+    }
+
+    #[test]
+    fn the_terminal_has_a_palette_for_each_mode_and_the_text_can_be_read_in_both() {
+        let (dark, light) = (Palette::new(true), Palette::new(false));
+        let lum = |c: egui::Color32| 0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32;
+        assert!(lum(dark.bg) < 60.0 && lum(dark.fg) > 150.0, "dark mode: light text on a dark page");
+        assert!(lum(light.bg) > 200.0 && lum(light.fg) < 80.0, "light mode: dark text on a light page");
+        assert_ne!(resolve(Color::Named(alacritty_terminal::vte::ansi::NamedColor::Foreground), &dark), resolve(Color::Named(alacritty_terminal::vte::ansi::NamedColor::Foreground), &light));
+        for (name, pal) in [("dark", dark), ("light", light)] {
+            // Every colour a program might print with has to stand out from the page it is printed on.
+            for i in 1..16 {
+                if i == 7 && name == "dark" { continue; }
+                let gap = (lum(pal.ansi(i)) - lum(pal.bg)).abs();
+                assert!(gap > 35.0, "{name} mode: colour {i} is too close to the page ({gap})");
+            }
+            assert!((lum(pal.selection_bg) - lum(pal.selection_fg)).abs() > 80.0, "{name} mode: selected text can be read");
+        }
+    }
+
+    #[test]
+    fn a_program_is_told_whether_the_background_is_light_or_dark() {
+        let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("SHELL", "/bin/sh");
+        let ctx = egui::Context::default();
+        for (dark, expect) in [(true, "15;0"), (false, "0;15")] {
+            let mut t = Terminal::spawn("Test", "", &[], None, &[], dark, &ctx).unwrap();
+            assert_eq!(t.spawned_dark, dark);
+            t.send(b"echo mode=$COLORFGBG\r");
+            wait_for(&mut t, &format!("mode={expect}"));
+        }
     }
 
     #[test]
@@ -523,7 +587,7 @@ mod tests {
     /// Runs `sh` with a script in a terminal, without the login shell.
     fn sh(script: &str) -> Terminal {
         let ctx = egui::Context::default();
-        let mut t = Terminal::spawn("Test", "", &[], None, &[], &ctx).unwrap();
+        let mut t = Terminal::spawn("Test", "", &[], None, &[], true, &ctx).unwrap();
         // The real thing runs the author's shell; a test runs a script of its own.
         t.send(format!("{script}\n").as_bytes());
         t
@@ -575,7 +639,7 @@ mod tests {
         let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("SHELL", "/bin/sh");
         let ctx = egui::Context::default();
-        let mut t = Terminal::spawn("Nothing", "definitely-not-a-real-program-xyz", &[], None, &[], &ctx).unwrap();
+        let mut t = Terminal::spawn("Nothing", "definitely-not-a-real-program-xyz", &[], None, &[], true, &ctx).unwrap();
         wait_for(&mut t, "was not found");
     }
 

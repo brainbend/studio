@@ -25,7 +25,7 @@ fn schema(properties: Value, required: &[&str]) -> Value {
 
 fn slide_prop() -> Value { json!({ "type": "integer", "minimum": 1, "description": "The slide's number, counting from 1 as in the slide list." }) }
 fn object_prop() -> Value { json!({ "type": "string", "description": "An object's id from get_slide (or its name, when that is unique on the slide)." }) }
-fn color_prop(what: &str) -> Value { json!({ "type": "string", "description": format!("{what}, as a hex color such as #1F6FEB or 1F6FEB.") }) }
+pub(super) fn color_prop(what: &str) -> Value { json!({ "type": "string", "description": format!("{what}, as a hex color such as #1F6FEB or 1F6FEB.") }) }
 fn number_prop(what: &str) -> Value { json!({ "type": "number", "description": what }) }
 
 /// Every tool, with what it may do.
@@ -52,7 +52,51 @@ fn table() -> Vec<(Access, ToolDef)> {
         tool(Access::Read, "get_project", "Facts about the open project: its name, kind, number of slides, whether it has unsaved changes and where it is saved. Start here.", schema(json!({}), &[]), true),
         tool(Access::Read, "list_slides", "Lists the slides in order: number, id, name, kind (normal, question or results), how many objects, and how long its timeline is.", schema(json!({}), &[]), true),
         tool(Access::Read, "get_slide", "Describes one slide: its size, notes, timeline length and every object on every layer with its id, type, position, size, text, fill, whether it starts hidden and when it shows on the timeline.", schema(json!({ "slide": slide_prop() }), &["slide"]), true),
-        tool(Access::Edit, "add_slide", "Adds an empty slide and returns its number. It goes after the slide numbered `after` (default: at the end).", schema(json!({ "after": slide_prop(), "name": { "type": "string", "description": "The slide's name." } }), &[]), false),
+        tool(Access::Edit, "add_slide", "Adds an empty slide and returns its number. It goes after the slide numbered `after` (default: at the end).", schema(json!({ "after": slide_prop(), "name": { "type": "string", "description": "The slide's name." }, "layout": { "type": "string", "description": "A layout's name or id from get_design. The slide gets its placeholders, ready to fill. Without it, the slide follows the layout of the slide before it." } }), &[]), false),
+        tool(Access::Read, "get_design", "The lesson's look: how big a slide is, the theme (its ten named colors and two fonts), the brand palette, the master, every layout with its placeholders, and which layout each slide uses. Call this before building slides, and use only these colors and fonts.", schema(json!({}), &[]), true),
+        tool(Access::Edit, "set_design", "Sets the lesson's look: theme colors (an object of color names to hex colors; the names are Text, Background, Dark accent, Light accent, Accent 1 to Accent 6), heading_font and body_font, the brand palette (a list of hex colors the author sees first in every color menu, up to 24), the master's background color, and the master's decorative shapes (shown behind every layout that shows the master). Give only what you want to change. Slides and layouts that already exist keep their colors, so do this before building them. If the author already has a theme, palette or master, this is refused until you have asked them and they agree.",
+            schema(json!({
+                "theme_name": { "type": "string", "description": "A name for the theme, such as the brand's." },
+                "colors": { "type": "object", "description": "Theme colors by name, as hex colors: {\"Text\": \"#222222\", \"Background\": \"#FFFFFF\", \"Dark accent\": \"#1F3A5F\", \"Light accent\": \"#EEF2F7\", \"Accent 1\": \"#03539E\"}." },
+                "heading_font": { "type": "string", "description": "A font family for headings, such as Montserrat." },
+                "body_font": { "type": "string", "description": "A font family for body text, such as Open Sans." },
+                "palette": { "type": "array", "items": { "type": "string" }, "description": "The brand colors, as hex colors, in the order the author should see them." },
+                "master_background": color_prop("The background behind every slide that has no background of its own"),
+                "master_shapes": { "type": "array", "items": { "type": "object" }, "description": "Decorative shapes drawn on every slide, replacing the master's current ones: each has shape (rectangle, rounded_rectangle or ellipse), x, y, width, height, fill and optionally name." },
+                "approved": { "type": "boolean", "description": "Only after the author has agreed in chat to this change to the design they already have. Not needed on a lesson with no design of its own." },
+            }), &[]), false),
+        tool(Access::Edit, "create_layout", "Makes a layout, a page design that slides can follow: placeholders for titles and text (the same as the layout builder makes) with optional background and decorative shapes. On a lesson with a design of its own, ask the author first, and never replace a layout of theirs. Placeholders take the theme's fonts and colors; give size, color, align or bold to change one. Positions are in slide pixels and must fit on the slide (get_design says how big it is). `kind` is \"Heading 2\" for a slide title, \"Heading 3\" for a subtitle, \"Heading 4\", or \"Normal Text\" for body text.",
+            schema(json!({
+                "name": { "type": "string", "description": "The layout's name, such as Title and Content." },
+                "placeholders": { "type": "array", "items": { "type": "object" }, "description": "Each has kind, x, y, width, height and optionally name, size, color, align, bold." },
+                "shapes": { "type": "array", "items": { "type": "object" }, "description": "Decorative shapes behind the placeholders: shape, x, y, width, height, fill and optionally name." },
+                "background": color_prop("A background color for slides on this layout"),
+                "show_master": { "type": "boolean", "description": "Whether the master's shapes show behind this layout (default true)." },
+                "approved": { "type": "boolean", "description": "Only after the author has agreed in chat to this change to the design they already have. Not needed on a lesson with no design of its own." },
+            }), &["name", "placeholders"]), false),
+        tool(Access::Edit, "delete_layout", "Deletes a layout, by name or id. Slides that used it keep their content and stop following a layout. Ask the author first on a lesson with a design of its own.", schema(json!({ "layout": { "type": "string", "description": "The layout's name or id." }, "approved": { "type": "boolean", "description": "Only after the author has agreed in chat to this change to the design they already have. Not needed on a lesson with no design of its own." }, }), &["layout"]), false),
+        tool(Access::Edit, "apply_layout", "Puts a slide on a layout: its placeholders take the layout's places and look, keeping their text, missing placeholders are added, and empty ones the layout does not have are removed.", schema(json!({ "slide": slide_prop(), "layout": { "type": "string", "description": "The layout's name or id." } }), &["slide", "layout"]), false),
+        tool(Access::Read, "find_images", "Searches for royalty-free pictures (Openverse: Wikimedia Commons, museums and other openly licensed collections) and returns candidates with a url, title, creator, license and size. By default only pictures that need no credit (CC0 and public domain) are returned; set allow_credit_required for more choice, and then pass each chosen picture's credit to add_image. Results are matched on words only, so check the title before using one. Use this for real photographs; for a diagram or chart, draw it yourself and add the file.",
+            schema(json!({
+                "query": { "type": "string", "description": "What the picture should show, in a few plain words, such as \"forklift warehouse\"." },
+                "count": { "type": "integer", "minimum": 1, "maximum": 12, "description": "How many to return (default 6)." },
+                "shape": { "type": "string", "enum": ["wide", "tall", "square"], "description": "Only pictures of this shape." },
+                "allow_credit_required": { "type": "boolean", "description": "Also include pictures that need a credit line (CC BY). Default false." },
+            }), &["query"]), true),
+        tool(Access::Edit, "add_image", "Adds a picture to a slide, from a web address (`url`, such as one from find_images) or from a PNG or JPEG file on this computer (`path`, an absolute path: a picture you saved, drew or generated). Studio does not generate pictures itself; if you can make one, save it as PNG or JPEG and pass its path. It is fitted inside the box you give (width and height, from x and y), keeping its proportions, and centred on the slide if you give no place. Always give `alt`, a short description of what it shows. Pass `credit` for a picture that needs one, and it is added to the slide's notes. Prefer a picture over an empty box or a placeholder; do not use pictures you have no right to use.",
+            schema(json!({
+                "slide": slide_prop(),
+                "url": { "type": "string", "description": "A web address (https) of a PNG or JPEG picture." },
+                "path": { "type": "string", "description": "The full path of a PNG or JPEG file on this computer." },
+                "alt": { "type": "string", "description": "What the picture shows, for people who cannot see it." },
+                "decorative": { "type": "boolean", "description": "True for a picture that only decorates, so no alt is needed." },
+                "credit": { "type": "string", "description": "The credit line the picture's license asks for." },
+                "x": { "type": "number" }, "y": { "type": "number" },
+                "width": { "type": "number", "description": "The widest the picture may be. With a height too, it fits inside that box." },
+                "height": { "type": "number", "description": "The tallest the picture may be." },
+                "name": { "type": "string", "description": "A name for the object." },
+                "send_to_back": { "type": "boolean", "description": "Put it behind the slide's other objects, such as for a background picture." },
+            }), &["slide"]), false),
         tool(Access::Edit, "delete_slide", "Deletes a slide. The last slide cannot be deleted.", schema(json!({ "slide": slide_prop() }), &["slide"]), false),
         tool(Access::Edit, "rename_slide", "Gives a slide a new name.", schema(json!({ "slide": slide_prop(), "name": { "type": "string" } }), &["slide", "name"]), false),
         tool(Access::Edit, "set_slide_notes", "Sets the notes of a slide (the speaker notes shown in the player's Notes tab).", schema(json!({ "slide": slide_prop(), "notes": { "type": "string" } }), &["slide", "notes"]), false),
@@ -100,19 +144,26 @@ pub fn access(name: &str) -> Option<Access> { table().into_iter().find(|(_, t)| 
 
 /// What the AI tool is told about the controller when it connects.
 pub const INSTRUCTIONS: &str = "This controls BrainBend Studio, an app for building interactive lessons, while the author watches. \
-Slides are numbered from 1; positions and sizes are in slide pixels from the top left (a slide is usually 1280 by 720). \
+Slides are numbered from 1; positions and sizes are in slide pixels from the top left (get_design says how big a slide is). \
 Call get_project and list_slides first, and get_slide to see what is on a slide and the ids to change. Every change can be undone with undo. \
-Work in small steps and say what you did, since the author sees the slides change as you work.";
+Work in small steps and say what you did, since the author sees the slides change as you work.\n\n\
+Design before content, so the author can keep editing in the same style. Call get_design first. If the lesson has no layouts of its own (only Blank) or still has the default theme, set up its look before you build slides: \
+use the author's brand colors and fonts if they gave them, otherwise choose one coherent palette and one or two fonts that suit the subject. \
+Call set_design (theme colors, fonts, and the brand palette, which the author sees first in every color menu), then create_layout for each kind of page you need (for example a title slide, title and content, a section header, two columns, a closing slide), with placeholders for titles and text. \
+Add every slide with add_slide and a layout, fill its placeholders with set_object, and delete a placeholder you do not use. \
+Keep titles and body text in placeholders rather than loose text boxes, and use only the theme and palette colors and the theme fonts for everything else (get_design lists them). \
+If the lesson already has a theme, palette, master or layouts that the author made, use them: build slides with add_slide on their layouts and their colors. The design tools refuse to change them until you have asked the author, in chat, what you would add or change and why, and they have said yes; then repeat the call with approved set to true. Never replace a layout of theirs; make a new one with another name. Everything is undoable with undo.\n\n\
+Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give alt text, and never use a picture you do not have the right to use.";
 
 // ---- reading what a tool was given ----
 
 fn bad(key: &str, want: &str) -> String { format!("`{key}` must be {want}.") }
 
-fn text_arg(a: &Value, key: &str) -> Result<Option<String>, String> {
+pub(super) fn text_arg(a: &Value, key: &str) -> Result<Option<String>, String> {
     match a.get(key) { None | Some(Value::Null) => Ok(None), Some(Value::String(s)) => Ok(Some(s.clone())), Some(_) => Err(bad(key, "text")) }
 }
 
-fn num_arg(a: &Value, key: &str, min: f64, max: f64) -> Result<Option<f32>, String> {
+pub(super) fn num_arg(a: &Value, key: &str, min: f64, max: f64) -> Result<Option<f32>, String> {
     match a.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => match v.as_f64() {
@@ -123,11 +174,11 @@ fn num_arg(a: &Value, key: &str, min: f64, max: f64) -> Result<Option<f32>, Stri
     }
 }
 
-fn bool_arg(a: &Value, key: &str) -> Result<Option<bool>, String> {
+pub(super) fn bool_arg(a: &Value, key: &str) -> Result<Option<bool>, String> {
     match a.get(key) { None | Some(Value::Null) => Ok(None), Some(Value::Bool(b)) => Ok(Some(*b)), Some(_) => Err(bad(key, "true or false")) }
 }
 
-fn color_arg(a: &Value, key: &str) -> Result<Option<Rgba>, String> {
+pub(super) fn color_arg(a: &Value, key: &str) -> Result<Option<Rgba>, String> {
     match text_arg(a, key)? {
         None => Ok(None),
         Some(t) => Rgba::parse(&t).map(Some).ok_or_else(|| format!("`{key}` is not a color I can read: {t:?}. Use a hex color such as #1F6FEB.")),
@@ -146,7 +197,7 @@ fn align_arg(a: &Value) -> Result<Option<Align>, String> {
 }
 
 /// A slide number (from 1) as a position in the project's list.
-fn slide_arg(a: &Value, key: &str, count: usize) -> Result<usize, String> {
+pub(super) fn slide_arg(a: &Value, key: &str, count: usize) -> Result<usize, String> {
     let n = a.get(key).and_then(Value::as_u64).ok_or_else(|| format!("`{key}` must be a slide number, counting from 1."))? as usize;
     if n == 0 || n > count { return Err(format!("There is no slide {n}; the project has {count} slide{}.", if count == 1 { "" } else { "s" })); }
     Ok(n - 1)
@@ -172,13 +223,15 @@ fn kind_label(o: &Object) -> &'static str {
     }
 }
 
-fn describe_object(o: &Object) -> Value {
+pub(super) fn describe_object(o: &Object) -> Value {
     let mut v = json!({
         "id": o.id, "name": o.name, "type": kind_label(o),
         "x": o.x, "y": o.y, "width": o.w, "height": o.h,
         "hidden": o.hidden,
     });
     if !o.text.is_empty() { v["text"] = json!(o.text); }
+    if let Some(k) = o.placeholder { v["placeholder"] = json!(k.label()); }
+    if matches!(o.kind, Kind::Text) { v["font"] = json!(o.style.font_family); v["size"] = json!(o.style.size); v["text_color"] = json!(o.style.color.hex()); }
     if let Some(f) = o.fill { v["fill"] = json!(f.hex()); }
     if let Some(t) = o.timing { v["start_ms"] = json!(t.start_ms); v["duration_ms"] = json!(t.dur_ms); }
     v
@@ -188,7 +241,7 @@ fn slide_kind(s: &Slide) -> &'static str { match s.kind { SlideKind::Normal => "
 
 fn timeline_ms(s: &Slide) -> u32 { s.layers.first().and_then(|l| l.duration_ms).unwrap_or(0) }
 
-fn done(v: Value) -> Result<String, String> { serde_json::to_string_pretty(&v).map_err(|e| e.to_string()) }
+pub(super) fn done(v: Value) -> Result<String, String> { serde_json::to_string_pretty(&v).map_err(|e| e.to_string()) }
 
 impl App {
     /// Runs a tool for an AI tool and says what happened, or why it could not. The caller has already checked that the
@@ -229,15 +282,23 @@ impl App {
                     "layers": s.layers.iter().enumerate().map(|(li, l)| json!({ "layer": li, "name": l.name, "duration_ms": l.duration_ms, "objects": l.objects.iter().enumerate().map(|(oi, o)| { let mut d = describe_object(o); d["path"] = json!(format!("/slides/{i}/layers/{li}/objects/{oi}")); d }).collect::<Vec<_>>() })).collect::<Vec<_>>(),
                 }))
             }
+            "get_design" => self.mcp_get_design(),
+            "set_design" => self.mcp_set_design(a),
+            "create_layout" => self.mcp_create_layout(a),
+            "delete_layout" => self.mcp_delete_layout(a),
+            "apply_layout" => self.mcp_apply_layout(a, count),
+            "find_images" => self.mcp_find_images(a),
+            "add_image" => self.mcp_add_image(a, count),
             "add_slide" => {
                 let after = match a.get("after") { None | Some(Value::Null) => count, Some(_) => slide_arg(a, "after", count)? + 1 };
                 let title = text_arg(a, "name")?;
+                let layout = self.layout_arg(a)?;
                 self.slide = after - 1;
-                self.add_slide(SlideKind::Normal);
+                match layout { Some(l) => self.add_slide_with_layout(SlideKind::Normal, Some(l)), None => self.add_slide(SlideKind::Normal) }
                 if let (Some(t), Some(p)) = (title.filter(|t| !t.trim().is_empty()), self.project.as_mut()) { p.slides[self.slide].name = t.trim().to_string(); }
                 self.status = format!("AI tool: added slide {}", self.slide + 1);
                 let s = &self.project.as_ref().unwrap().slides[self.slide];
-                done(json!({ "number": self.slide + 1, "id": s.id, "name": s.name, "width": s.width, "height": s.height }))
+                done(json!({ "number": self.slide + 1, "id": s.id, "name": s.name, "width": s.width, "height": s.height, "layout": s.layout, "objects": s.layers[0].objects.iter().map(describe_object).collect::<Vec<_>>() }))
             }
             "delete_slide" => {
                 let i = slide_arg(a, "slide", count)?;
@@ -300,7 +361,7 @@ impl App {
     }
 
     /// Text styling and the look shared by `add_text`, `add_shape` and `set_object`.
-    fn mcp_apply_look(o: &mut Object, a: &Value) -> Result<(), String> {
+    pub(super) fn mcp_apply_look(o: &mut Object, a: &Value) -> Result<(), String> {
         if let Some(n) = num_arg(a, "size", 1.0, 1000.0)? { o.style.size = n; }
         if let Some(b) = bool_arg(a, "bold")? { o.style.bold = b; }
         if let Some(b) = bool_arg(a, "italic")? { o.style.italic = b; }
@@ -321,6 +382,8 @@ impl App {
             let text = text.ok_or("`text` must be some text.")?;
             let mut o = blank_object(self.new_id("obj"), label.as_deref().unwrap_or("Text"), Kind::Text, 0.0, 0.0, w.unwrap_or(sw * 0.5), h.unwrap_or(110.0));
             o.text = text;
+            // In the lesson's own body font and text color, so loose text matches the rest.
+            if let Some(p) = self.project.as_ref() { o.style.font_family = p.theme.body_font.clone(); o.style.color = p.theme.text(); }
             // Like the editor's own text box, text is anchored at the top.
             o.style.valign = VAlign::Top;
             o
@@ -525,7 +588,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 19);
+        assert_eq!(t.len(), 26);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -856,4 +919,304 @@ mod tests {
         assert!(text_run(&mut a, "describe_model", json!({ "type": "Action" })).unwrap().contains("ShowLayer"));
     }
 
+
+    fn title_and_content() -> Value {
+        json!({ "name": "Title and Content", "placeholders": [
+            { "kind": "Heading 2", "name": "Title", "x": 120, "y": 80, "width": 1680, "height": 160 },
+            { "kind": "Normal Text", "name": "Body", "x": 120, "y": 280, "width": 1680, "height": 640, "size": 44 },
+        ], "shapes": [{ "shape": "rectangle", "x": 0, "y": 0, "width": 40, "height": 1080, "fill": "#E87722", "name": "Accent bar" }] })
+    }
+
+    #[test]
+    fn the_design_can_be_read_and_set_and_new_content_uses_it() {
+        let mut a = app_with(1);
+        let d = run(&mut a, "get_design", json!({})).unwrap();
+        assert_eq!(d["theme"]["colors"].as_array().unwrap().len(), 10);
+        assert_eq!(d["theme"]["colors"][4]["name"], "Accent 1");
+        assert_eq!(d["layouts"].as_array().unwrap().len(), 1, "a new lesson has the one blank layout");
+        assert!(d["slide_size"]["width"].as_f64().unwrap() > 0.0);
+        let r = run(&mut a, "set_design", json!({
+            "theme_name": "Acme", "colors": { "Text": "#1A1A2E", "accent_1": "0F4C81", "Dark accent": "#16213E" },
+            "heading_font": "Montserrat", "body_font": "Open Sans", "palette": ["#0F4C81", "#E87722", "#0F4C81"],
+            "master_background": "#FAFAFA", "master_shapes": [{ "shape": "rectangle", "x": 0, "y": 1040, "width": 1920, "height": 40, "fill": "#0F4C81", "name": "Footer band" }],
+        })).unwrap();
+        assert_eq!(r["changed"].as_array().unwrap().len(), 7);
+        let p = a.project.as_ref().unwrap();
+        assert_eq!((p.theme.name.as_str(), p.theme.text().hex().as_str(), p.theme.color(4).hex().as_str(), p.theme.color(2).hex().as_str()), ("Acme", "#1A1A2E", "#0F4C81", "#16213E"), "colors are found by name however it is written");
+        assert_eq!((p.theme.heading_font.as_str(), p.theme.body_font.as_str()), ("Montserrat", "Open Sans"));
+        assert_eq!(p.palette.len(), 2, "a repeated brand color is kept once, in order");
+        assert_eq!(p.master.objects.len(), 1);
+        assert!(matches!(p.master.background, Some(brainbend_doc::master::Background::Solid(c)) if c.hex() == "#FAFAFA"));
+        // A text box added now is in the lesson's own font and color.
+        let t = run(&mut a, "add_text", json!({ "slide": 1, "text": "Hello" })).unwrap();
+        assert_eq!((t["font"].as_str(), t["text_color"].as_str()), (Some("Open Sans"), Some("#1A1A2E")));
+        // Undo takes the whole design back.
+        let before_text = a.undo.len();
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.undo.len(), before_text - 1);
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().theme.name, "BrainBend Studio", "the theme, palette and master were part of the undo step");
+        assert!(a.project.as_ref().unwrap().palette.is_empty() && a.project.as_ref().unwrap().master.objects.is_empty());
+    }
+
+    #[test]
+    fn a_bad_design_is_refused_with_a_reason_and_changes_nothing() {
+        let mut a = app_with(1);
+        let before = a.project.as_ref().unwrap().theme.clone();
+        for (args, expect) in [
+            (json!({}), "Give at least one"),
+            (json!({ "colors": { "Accent 9": "#112233" } }), "no color called"),
+            (json!({ "colors": { "Accent 1": "blue-ish" } }), "not a color I can read"),
+            (json!({ "heading_font": "Definitely Not A Font" }), "not available"),
+            (json!({ "palette": ["#12"] }), "not a color I can read"),
+            (json!({ "colors": { "Text": "#111111" }, "heading_font": "Nope Sans" }), "not available"),
+            (json!({ "master_shapes": [{ "x": 0, "y": 0, "width": 10 }] }), "`height` is needed"),
+        ] {
+            let e = run(&mut a, "set_design", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        assert_eq!(a.project.as_ref().unwrap().theme, before, "nothing was half done");
+        assert!(a.undo.is_empty(), "and no undo step was made for it");
+    }
+
+    #[test]
+    fn layouts_are_made_with_placeholders_and_slides_follow_them() {
+        let mut a = app_with(1);
+        run(&mut a, "set_design", json!({ "colors": { "Text": "#1A1A2E" }, "heading_font": "Montserrat" })).unwrap();
+        let l = run(&mut a, "create_layout", title_and_content()).unwrap();
+        assert_eq!(l["placeholders"].as_array().unwrap().len(), 2);
+        let id = l["id"].as_str().unwrap().to_string();
+        let p = a.project.as_ref().unwrap();
+        let layout = p.layout(&id).unwrap();
+        assert_eq!(layout.objects.len(), 3, "the shape, then the placeholders");
+        let title = layout.objects.iter().find(|o| o.name == "Title").unwrap();
+        assert_eq!((title.style.font_family.as_str(), title.style.color.hex().as_str()), ("Montserrat", "#1A1A2E"), "a placeholder takes the theme");
+        assert_eq!(layout.objects.iter().find(|o| o.name == "Body").unwrap().style.size, 44.0, "and what was asked for");
+        // A slide on that layout, by name, ready to fill.
+        let s = run(&mut a, "add_slide", json!({ "layout": "title and content", "name": "Welcome" })).unwrap();
+        assert_eq!(s["layout"], json!(id));
+        let objs = s["objects"].as_array().unwrap();
+        assert_eq!(objs.len(), 2, "the placeholders, not the decoration");
+        assert!(objs.iter().all(|o| o["placeholder"].is_string() && o.get("text").is_none()), "{objs:?}");
+        run(&mut a, "set_object", json!({ "slide": 2, "object": "Title", "text": "Welcome aboard" })).unwrap();
+        let got = run(&mut a, "get_slide", json!({ "slide": 2 })).unwrap();
+        let t = got["layers"][0]["objects"].as_array().unwrap().iter().find(|o| o["name"] == "Title").unwrap().clone();
+        assert_eq!((t["text"].as_str(), t["placeholder"].as_str(), t["font"].as_str()), (Some("Welcome aboard"), Some("Heading 2"), Some("Montserrat")));
+        // The next slide follows the same layout without being told.
+        let next = run(&mut a, "add_slide", json!({})).unwrap();
+        assert_eq!(next["layout"], json!(id), "a slide follows the one before it");
+        let d = run(&mut a, "get_design", json!({})).unwrap();
+        assert_eq!(d["slides"][1]["layout"], "Title and Content");
+        assert_eq!(d["slides"][0]["layout"], Value::Null);
+    }
+
+    #[test]
+    fn a_design_the_author_made_is_not_changed_without_their_say_so() {
+        let mut a = app_with(1);
+        // Nothing there yet: the tool sets up a look, and goes on adjusting its own work freely.
+        run(&mut a, "set_design", json!({ "colors": { "Accent 1": "#0F4C81" }, "palette": ["#0F4C81"] })).unwrap();
+        run(&mut a, "create_layout", title_and_content()).unwrap();
+        run(&mut a, "set_design", json!({ "heading_font": "Montserrat" })).unwrap();
+        run(&mut a, "create_layout", json!({ "name": "TITLE AND CONTENT", "placeholders": [{ "kind": "title", "x": 100, "y": 100, "width": 800, "height": 200 }] })).unwrap();
+        // The author adds a brand color of their own.
+        a.project.as_mut().unwrap().palette.push(Rgba(1, 2, 3, 255));
+        let before = (a.project.as_ref().unwrap().theme.clone(), a.project.as_ref().unwrap().palette.clone(), a.project.as_ref().unwrap().layouts.len());
+        let undo = a.undo.len();
+        for (tool, args) in [
+            ("set_design", json!({ "palette": ["#FF0000"] })),
+            ("create_layout", json!({ "name": "Closing", "placeholders": [{ "kind": "title", "x": 100, "y": 100, "width": 800, "height": 200 }] })),
+            ("create_layout", title_and_content()),
+            ("delete_layout", json!({ "layout": "Title and Content" })),
+        ] {
+            let e = run(&mut a, tool, args).unwrap_err();
+            assert!(e.contains("already has a design of its own") || e.contains("not yours to replace"), "{tool}: {e}");
+            assert!(e.contains("approved"), "{tool}: {e}");
+        }
+        let now = (a.project.as_ref().unwrap().theme.clone(), a.project.as_ref().unwrap().palette.clone(), a.project.as_ref().unwrap().layouts.len());
+        assert_eq!(before, now, "nothing was changed");
+        assert_eq!(a.undo.len(), undo, "and no undo step was made");
+        // Using what is there needs no say-so, and neither does reading it.
+        run(&mut a, "get_design", json!({})).unwrap();
+        run(&mut a, "add_slide", json!({ "layout": "Title and Content" })).unwrap();
+        // With the author's yes, the change goes ahead as one undo step.
+        run(&mut a, "create_layout", json!({ "name": "Closing", "approved": true, "placeholders": [{ "kind": "title", "x": 100, "y": 100, "width": 800, "height": 200 }] })).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().layouts.len(), before.2 + 1);
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().layouts.len(), before.2);
+        // A replacement of a layout by name needs the yes too, and says what is being replaced.
+        let r = run(&mut a, "create_layout", json!({ "name": "title and content", "approved": true, "placeholders": [{ "kind": "title", "x": 100, "y": 100, "width": 800, "height": 200 }] })).unwrap();
+        assert_eq!(r["replaced_one_of_the_same_name"], true);
+    }
+
+    #[test]
+    fn a_lesson_that_was_opened_with_a_design_counts_as_the_authors() {
+        let mut a = app_with(1);
+        run(&mut a, "create_layout", title_and_content()).unwrap();
+        // A fresh start of the app forgets what the tool made, so what is in the lesson is treated as the author's.
+        a.mcp.design_seen = None;
+        let e = run(&mut a, "set_design", json!({ "theme_name": "Other" })).unwrap_err();
+        assert!(e.contains("1 layout (Title and Content)"), "{e}");
+        // A lesson with only the blank layout and the stock theme has none.
+        let mut b = app_with(1);
+        run(&mut b, "set_design", json!({ "theme_name": "Fresh" })).unwrap();
+        assert!(INSTRUCTIONS.contains("approved"));
+    }
+
+    /// A stand-in for the picture search and the host of the pictures: answers /v1/images/ with two results and /pic.png with a picture.
+    fn picture_server(side: u32) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let png = {
+            let img = image::RgbaImage::from_pixel(side, side / 2, image::Rgba([10, 120, 200, 255]));
+            let mut out = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+            out.into_inner()
+        };
+        let site = base.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { break };
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let line = String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or("").to_string();
+                let _ = tx.send(line.clone());
+                let (kind, body): (&str, Vec<u8>) = if line.contains("/v1/images/") {
+                    ("application/json", json!({ "results": [
+                        { "url": format!("{site}/pic.png"), "title": "Forklift", "creator": "A. Photographer", "license": "cc0", "license_version": "1.0", "width": 800, "height": 400, "foreign_landing_url": "https://example.org/forklift" },
+                        { "url": format!("{site}/pic.png"), "title": "Warehouse", "creator": "B. Person", "license": "by", "license_version": "4.0", "attribution": "\"Warehouse\" by B. Person is licensed under CC BY 4.0.", "width": 800, "height": 400, "foreign_landing_url": "https://example.org/w" },
+                        { "title": "no address" },
+                    ] }).to_string().into_bytes())
+                } else if line.contains("/pic.png") { ("image/png", png.clone()) } else { ("text/html", b"<html>not a picture</html>".to_vec()) };
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            }
+        });
+        (base, rx)
+    }
+
+    #[test]
+    fn pictures_are_found_and_added_with_alt_text_and_a_credit() {
+        let (base, seen) = picture_server(800);
+        let mut a = app_with(1);
+        a.mcp.image_search_url = Some(format!("{base}/v1/images/"));
+        let r = run(&mut a, "find_images", json!({ "query": "forklift warehouse", "count": 3 })).unwrap();
+        let line = seen.recv().unwrap();
+        assert!(line.contains("q=forklift") && line.contains("license=cc0%2Cpdm") || line.contains("license=cc0,pdm"), "only pictures that need no credit are asked for: {line}");
+        assert_eq!(r["found"], 2, "a result with no address is left out");
+        assert_eq!((r["results"][0]["credit_required"].clone(), r["results"][1]["credit_required"].clone()), (json!(false), json!(true)));
+        assert!(r["results"][1]["credit"].as_str().unwrap().contains("CC BY 4.0"));
+        let allowed = run(&mut a, "find_images", json!({ "query": "x", "allow_credit_required": true })).unwrap();
+        assert_eq!(allowed["found"], 2);
+        assert!(seen.recv().unwrap().contains("by"), "credit-required pictures are asked for only on request");
+        let url = r["results"][1]["url"].as_str().unwrap().to_string();
+        // Added with a box: fitted inside it, proportions kept, centred in it.
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "url": url, "alt": "A warehouse", "credit": "\"Warehouse\" by B. Person (CC BY 4.0)", "x": 100, "y": 200, "width": 400, "height": 400 })).unwrap();
+        let o = &r["added"];
+        assert_eq!((o["type"].as_str(), o["width"].as_f64(), o["height"].as_f64()), (Some("picture"), Some(400.0), Some(200.0)), "{o}");
+        assert_eq!((o["x"].as_f64(), o["y"].as_f64()), (Some(100.0), Some(300.0)), "a wide picture sits in the middle of a taller box");
+        let p = a.project.as_ref().unwrap();
+        let obj = p.slides[0].layers[0].objects.last().unwrap();
+        assert_eq!(obj.alt, "A warehouse");
+        let asset = p.assets.get(obj.asset.as_ref().unwrap()).unwrap();
+        assert_eq!((asset.mime.as_str(), asset.name.as_str()), ("image/png", "pic.png"));
+        assert!(p.slides[0].notes.contains("Image credit: \"Warehouse\" by B. Person"), "{:?}", p.slides[0].notes);
+        // With no place given it is centred on the slide, and a second picture can go behind the rest.
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "url": format!("{base}/pic.png"), "decorative": true, "send_to_back": true })).unwrap();
+        assert_eq!(r["added"]["x"].as_f64().unwrap() * 2.0 + r["added"]["width"].as_f64().unwrap(), 1920.0);
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].name, "Picture");
+        // One undo step takes a picture back.
+        let n = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), n - 1);
+    }
+
+    #[test]
+    fn a_picture_the_tool_saved_is_added_and_a_bad_one_is_refused_with_a_reason() {
+        let (base, _) = picture_server(4000);
+        let mut a = app_with(1);
+        let dir = std::env::temp_dir().join(format!("bb-img-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("chart.png");
+        image::RgbaImage::from_pixel(300, 150, image::Rgba([200, 30, 30, 255])).save(&file).unwrap();
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "path": file.display().to_string(), "alt": "A red chart", "width": 600 })).unwrap();
+        assert_eq!((r["added"]["width"].as_f64(), r["added"]["height"].as_f64()), (Some(600.0), Some(300.0)));
+        // A very large picture is made smaller before it is stored.
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "url": format!("{base}/pic.png"), "alt": "Big" })).unwrap();
+        assert_eq!(r["picture_pixels"], json!([2400, 1200]));
+        // A WebP (which some picture hosts send whatever was asked for) is converted to a picture Studio keeps.
+        let webp = dir.join("photo.webp");
+        image::RgbaImage::from_pixel(64, 32, image::Rgba([20, 90, 160, 255])).save(&webp).unwrap();
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "path": webp.display().to_string(), "alt": "A WebP" })).unwrap();
+        let p = a.project.as_ref().unwrap();
+        let kept = p.assets.get(p.slides[0].layers[0].objects.last().unwrap().asset.as_ref().unwrap()).unwrap();
+        assert_eq!((r["picture_pixels"].clone(), kept.mime.as_str()), (json!([64, 32]), "image/jpeg"), "no see-through parts, so a JPEG");
+        std::fs::write(dir.join("page.txt"), "hello").unwrap();
+        let before = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        for (args, expect) in [
+            (json!({ "slide": 1, "alt": "x" }), "either `url`"),
+            (json!({ "slide": 1, "url": "https://a/b.png", "path": "/x.png", "alt": "x" }), "either `url`"),
+            (json!({ "slide": 1, "path": file.display().to_string() }), "`alt` is needed"),
+            (json!({ "slide": 1, "path": "relative.png", "alt": "x" }), "full path"),
+            (json!({ "slide": 1, "path": dir.join("missing.png").display().to_string(), "alt": "x" }), "could not be found"),
+            (json!({ "slide": 1, "path": dir.join("page.txt").display().to_string(), "alt": "x" }), "not a picture Studio can read"),
+            (json!({ "slide": 1, "url": "file:///etc/passwd", "alt": "x" }), "starting with https://"),
+            (json!({ "slide": 1, "url": format!("{base}/page.html"), "alt": "x" }), "not a picture Studio can read"),
+        ] {
+            let e = run(&mut a, "add_image", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), before, "nothing was added");
+        let e = run(&mut a, "find_images", json!({ "query": "  " })).unwrap_err();
+        assert!(e.contains("`query`"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_layout_of_the_same_name_is_replaced_and_deleting_one_detaches_its_slides() {
+        let mut a = app_with(1);
+        let first = run(&mut a, "create_layout", title_and_content()).unwrap();
+        let again = run(&mut a, "create_layout", json!({ "name": "TITLE AND CONTENT", "placeholders": [{ "kind": "title", "x": 100, "y": 100, "width": 800, "height": 200 }] })).unwrap();
+        assert_eq!((again["id"].clone(), again["replaced_one_of_the_same_name"].as_bool()), (first["id"].clone(), Some(true)));
+        assert_eq!(a.project.as_ref().unwrap().layouts.len(), 2, "blank, and the one that was replaced");
+        run(&mut a, "apply_layout", json!({ "slide": 1, "layout": first["id"] })).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layout.as_deref(), first["id"].as_str());
+        let r = run(&mut a, "delete_layout", json!({ "layout": "Title and Content" })).unwrap();
+        assert_eq!(r["slides_detached"], 1);
+        assert!(a.project.as_ref().unwrap().slides[0].layout.is_none());
+        assert_eq!(a.project.as_ref().unwrap().layouts.len(), 1);
+        let e = run(&mut a, "apply_layout", json!({ "slide": 1, "layout": "Gone" })).unwrap_err();
+        assert!(e.contains("There is no layout") && e.contains("Blank"), "{e}");
+        assert!(run(&mut a, "add_slide", json!({ "layout": "Gone" })).unwrap_err().contains("There is no layout"));
+        assert_eq!(a.project.as_ref().unwrap().slides.len(), 1, "a refused add_slide adds nothing");
+    }
+
+    #[test]
+    fn a_layout_that_does_not_fit_or_is_incomplete_is_refused() {
+        let mut a = app_with(1);
+        for (args, expect) in [
+            (json!({ "name": "", "placeholders": [] }), "`name` must be"),
+            (json!({ "name": "Empty", "placeholders": [] }), "at least one"),
+            (json!({ "name": "Off", "placeholders": [{ "kind": "Heading 2", "x": 1800, "y": 0, "width": 400, "height": 100 }] }), "does not fit"),
+            (json!({ "name": "Kind", "placeholders": [{ "kind": "Banner", "x": 0, "y": 0, "width": 100, "height": 100 }] }), "`kind` must be"),
+            (json!({ "name": "NoSize", "placeholders": [{ "kind": "Heading 2", "x": 0, "y": 0 }] }), "`width` is needed"),
+            (json!({ "name": "Shape", "placeholders": [], "shapes": [{ "x": 0, "y": 0, "width": 5000, "height": 10 }] }), "does not fit"),
+            (json!({ "name": "Color", "placeholders": [{ "kind": "Heading 2", "x": 0, "y": 0, "width": 100, "height": 100, "color": "zzz" }] }), "not a color"),
+        ] {
+            let e = run(&mut a, "create_layout", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        assert_eq!(a.project.as_ref().unwrap().layouts.len(), 1, "nothing was added");
+        assert!(a.undo.is_empty());
+    }
+
+    #[test]
+    fn the_instructions_tell_a_tool_to_set_the_design_up_before_building() {
+        for word in ["get_design", "set_design", "create_layout", "add_slide", "placeholders", "brand", "palette"] { assert!(INSTRUCTIONS.contains(word), "the instructions should mention {word}"); }
+        let t = tools();
+        for name in ["get_design", "set_design", "create_layout", "delete_layout", "apply_layout"] { assert!(t.iter().any(|d| d.name == name), "{name}"); }
+        assert_eq!(access("get_design"), Some(Access::Read));
+        assert_eq!(access("create_layout"), Some(Access::Edit));
+    }
 }

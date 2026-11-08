@@ -12,7 +12,7 @@ earcutr = "0.5.0"
 i_overlay = "9.1"
 latex-rust = "3.0.1"
 pulldown-latex = "0.8"
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 rfd = "0.17.2"
 skrifa = "0.44"
 brainbend-doc = { path = "../../crates/doc", features = ["schema"] }

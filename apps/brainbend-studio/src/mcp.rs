@@ -98,6 +98,11 @@ pub struct Mcp {
     pub error: Option<String>,
     pub log: VecDeque<LogLine>,
     pub last_call: Option<Instant>,
+    /// A fingerprint of the design (theme, palette, master, layouts) as an AI tool last left it. A design that still matches
+    /// is the tool's own work; one that does not was changed by the author since, and is not to be touched without asking.
+    pub design_seen: Option<u64>,
+    /// Where pictures are searched for; tests point it at a server of their own.
+    pub image_search_url: Option<String>,
     /// Start on the next frame (the setting to start when Studio opens, which needs the window system to be up).
     start_wanted: bool,
     show_token: bool,

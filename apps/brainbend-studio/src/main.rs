@@ -28,6 +28,8 @@ mod update;
 mod video_support;
 mod video_export;
 mod mcp_tools;
+mod mcp_design;
+mod mcp_images;
 mod mcp;
 mod assistant;
 mod terminal;
@@ -8404,6 +8406,38 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().assistant.terminal.is_none() && !h.state().assistant.shows_terminal(), "closing it stops it");
         assert!(h.query_by_label("Set up AI").is_none(), "the connection is still on, so the tab is not the empty one");
+    }
+
+    #[test]
+    fn the_terminal_follows_dark_and_light_mode_and_offers_a_restart_for_the_tools_own_colors() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-terminal-mode");
+        std::env::set_var("SHELL", "/bin/sh");
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "k".repeat(64), port: 0, ..Default::default() };
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.ctx.set_theme(egui::ThemePreference::Dark);
+        h.run_steps(3);
+        let ctx = h.ctx.clone();
+        h.state_mut().start_terminal(3, &ctx);
+        assert!(h.state().assistant.terminal.as_ref().unwrap().spawned_dark, "started in dark mode");
+        h.state_mut().assistant.terminal.as_mut().unwrap().send(b"printf '\\033[1;32mReady\\033[0m \\033[31mred\\033[0m \\033[7mselected\\033[0m\\n'\r");
+        for _ in 0..50 { h.step(); std::thread::sleep(std::time::Duration::from_millis(10)); }
+        assert!(h.query_by_label_contains("The theme changed").is_none());
+        let shots = std::env::var_os("BRAINBEND_SHOT_DIR").map(std::path::PathBuf::from);
+        if let Some(dir) = &shots { h.render().expect("renderer").save(dir.join("terminal-dark.png")).unwrap(); }
+        h.ctx.set_theme(egui::ThemePreference::Light);
+        for _ in 0..6 { h.step(); }
+        assert!(h.query_by_label_contains("The theme changed").is_some(), "a tool that was started in the other mode is offered a restart");
+        if let Some(dir) = &shots { h.render().expect("renderer").save(dir.join("terminal-light.png")).unwrap(); }
+        h.get_by_label("Restart").click();
+        h.run_steps(4);
+        let t = h.state().assistant.terminal.as_ref().unwrap();
+        assert!(!t.spawned_dark, "restarted in light mode");
+        assert!(h.query_by_label_contains("The theme changed").is_none(), "and the offer goes away");
     }
 
     #[test]
