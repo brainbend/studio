@@ -1743,29 +1743,6 @@ impl App {
         if !open { self.theme_colors_open = false; }
     }
 
-    /// The theme's heading and body fonts. A window rather than a menu, because a drop-down opened inside a menu closes the menu.
-    pub(super) fn theme_fonts_window(&mut self, ctx: &egui::Context) {
-        if !self.theme_fonts_open { return; }
-        let Some(proj) = self.project.as_mut() else { self.theme_fonts_open = false; return };
-        let mut open = true;
-        let before = Snap::of(proj);
-        let mut next = proj.theme.clone();
-        let mut moved = false;
-        // Not sized to its content: the font list opens inside this window, so the window has to leave room for it.
-        crate::tool_window_at(ctx, "theme-fonts", "Fonts", [400.0, 470.0], false, &mut open, |ui| {
-            ui.set_min_width(340.0);
-            ui.weak("The fonts of the master and layouts, and of slides that still follow them. Other text keeps its font.");
-            ui.add_space(4.0);
-            ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 190.0); });
-            ui.horizontal(|ui| { ui.label("Body text"); moved |= crate::font_store::font_menu(ui, "theme-body-font", &mut next.body_font, 190.0); });
-        });
-        if moved {
-            proj.set_theme(next.named());
-            self.commit_project_edit(ctx, before);
-        }
-        if !open { self.theme_fonts_open = false; }
-    }
-
     /// Custom title bar: window buttons stay native on macOS, then Save / Undo / Redo / Preview,
     /// the centred title, and the theme toggle plus Publish at the right.
     fn title_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
@@ -2811,7 +2788,6 @@ impl App {
         let mut open_master = false;
         let mut layout_pick: Option<Option<String>> = None;
         let mut open_theme_colors = false;
-        let mut open_theme_fonts = false;
         let mut toggle_background = false;
         group(ui, "Master", |ui| {
             ui.horizontal(|ui| {
@@ -2837,16 +2813,28 @@ impl App {
         });
         group(ui, "Brand", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
-                if big_button(ui, TEXT_AA, "Fonts", "The theme's heading and body fonts").clicked() { open_theme_fonts = true; }
                 if big_button(ui, BUCKET, "Background", "Color, gradient or picture behind this slide").clicked() { toggle_background = true; }
+                if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
+                // The theme's fonts, stacked: headings on top, body text below.
+                ui.vertical(|ui| {
+                    let mut next = proj.theme.clone();
+                    let mut moved = false;
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
+                        ui.horizontal(|ui| {
+                            ui.add_sized([54.0, 22.0], egui::Label::new(egui::RichText::new(label).weak().size(12.0))).on_hover_text(tip);
+                            let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
+                            moved |= crate::font_store::font_menu(ui, id, font, 130.0);
+                        });
+                    }
+                    if moved { proj.set_theme(next.named()); changed = true; }
+                });
             });
         });
         if changed { self.commit_project_edit(ctx, before); }
         if open_master { self.enter_master_view(); }
         if toggle_background { self.background_open = !self.background_open; }
         if open_theme_colors { self.theme_colors_open = true; }
-        if open_theme_fonts { self.theme_fonts_open = !self.theme_fonts_open; }
         if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
     }
 

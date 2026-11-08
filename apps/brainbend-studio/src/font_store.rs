@@ -162,6 +162,16 @@ pub(super) fn font_menu(ui: &mut egui::Ui, id: &str, current: &mut String, width
     let label = if known || current.is_empty() { current.clone() } else { format!("{current} (not installed)") };
     egui::ComboBox::from_id_salt(id).width(width).selected_text(label).height(460.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
         ui.set_min_width(280.0);
+        changed = font_list(ui, id, current, 300.0, true);
+    });
+    changed
+}
+
+/// The font choices themselves (search, the families by source, and the link to add more), for a drop-down or to sit
+/// in a window. `in_popup` is whether picking one should close the popup that holds it. Returns whether the choice changed.
+pub(super) fn font_list(ui: &mut egui::Ui, id: &str, current: &mut String, list_height: f32, in_popup: bool) -> bool {
+    let mut changed = false;
+    {
         let q_id = egui::Id::new(("font-menu-query", id));
         let mut query: String = ui.data(|d| d.get_temp(q_id)).unwrap_or_default();
         let edit = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search fonts").desired_width(f32::INFINITY));
@@ -180,7 +190,7 @@ pub(super) fn font_menu(ui: &mut egui::Ui, id: &str, current: &mut String, width
             rows.extend(names.into_iter().map(|n| Row::Font(n.clone())));
         }
         ui.add_space(2.0);
-        egui::ScrollArea::vertical().max_height(300.0).auto_shrink([false, true]).show_rows(ui, 26.0, rows.len(), |ui, range| {
+        egui::ScrollArea::vertical().max_height(list_height).auto_shrink([false, true]).show_rows(ui, 26.0, rows.len(), |ui, range| {
           ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
             for r in &rows[range] {
                 match r {
@@ -199,7 +209,7 @@ pub(super) fn font_menu(ui: &mut egui::Ui, id: &str, current: &mut String, width
                             egui::RichText::new(name).size(14.0)
                         };
                         let resp = ui.add(egui::Button::selectable(name.eq_ignore_ascii_case(current), rich).min_size(egui::vec2(0.0, 24.0)));
-                        if resp.clicked() { *current = name.clone(); changed = true; ui.close(); }
+                        if resp.clicked() { *current = name.clone(); changed = true; if in_popup { ui.close(); } }
                         if let Some(s) = src { let n = source_note(s); if !n.is_empty() { resp.on_hover_text(n); } }
                     }
                 }
@@ -209,9 +219,9 @@ pub(super) fn font_menu(ui: &mut egui::Ui, id: &str, current: &mut String, width
         ui.separator();
         if ui.button("More fonts from Google Fonts…").clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(MORE_FLAG), true));
-            ui.close();
+            if in_popup { ui.close(); }
         }
-    });
+    }
     changed
 }
 

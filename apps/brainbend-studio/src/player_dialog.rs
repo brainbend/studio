@@ -164,9 +164,7 @@ fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo
     ui.add_space(8.0);
     ui.heading("Navigation");
     *changed |= ui.checkbox(&mut proj.show_nav, "Previous / Next buttons").changed();
-    ui.add_enabled_ui(proj.show_nav, |ui| {
-        *changed |= ui.checkbox(&mut proj.show_progress, "Progress bar").changed();
-    });
+    *changed |= ui.checkbox(&mut proj.show_progress, "Progress bar").on_hover_text("The thin bar along the top of the player that fills as learners move through the slides. Turn it off for lessons that are not meant to be followed in order.").changed();
     *changed |= ui.checkbox(&mut proj.menu_free, "Learners can skip questions from the menu").changed();
     ui.add_space(8.0);
     ui.heading("Player controls");
@@ -294,7 +292,7 @@ fn preview(ui: &mut egui::Ui, proj: &Project, project_name: &str) {
     for (on, label) in [(p.controls.play_pause, "\u{23ef}"), (p.controls.replay, "\u{21ba}"), (p.controls.seekbar, "\u{2014}\u{25cf}\u{2014}\u{2014}"), (p.controls.volume, "\u{1f50a}"), (p.controls.captions, "CC"), (p.controls.speed, "1x"), (p.controls.fullscreen, "\u{26f6}")] {
         if on { text(egui::pos2(x, bar.center().y), egui::Align2::LEFT_CENTER, label, 12.0, pal.fg); x += if label.chars().count() > 2 { 56.0 } else { 30.0 }; }
     }
-    if proj.show_progress && proj.show_nav { painter.rect_filled(egui::Rect::from_min_size(bar.left_top(), egui::vec2(bar.width() * 0.4, 3.0)), 0.0, c32(pal.progress)); }
+    if proj.show_progress { painter.rect_filled(egui::Rect::from_min_size(bar.left_top(), egui::vec2(bar.width() * 0.4, 3.0)), 0.0, c32(pal.progress)); }
 }
 
 fn resources_pane(ui: &mut egui::Ui, proj: &mut Project, changed: &mut bool, pick: &mut Option<usize>) {

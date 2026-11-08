@@ -118,7 +118,6 @@ struct App {
     fit_scale: f32,
     theme_colors_open: bool,
     background_open: bool,
-    theme_fonts_open: bool,
     /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
     /// The issue count in the status bar, when it was counted and what it was.
@@ -485,7 +484,7 @@ impl Default for App {
             project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
             guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
@@ -5943,7 +5942,6 @@ impl App {
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
         self.background_window(ctx);
-        self.theme_fonts_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
         // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
@@ -11685,9 +11683,7 @@ mod tests {
         let start = theme(&h);
         let start_fonts = (start.heading_font.clone(), start.body_font.clone());
         // Fonts: another pair makes it a custom theme.
-        h.get_by_label_contains("Fonts").click();
-        h.run_steps(3);
-        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the menu has a font picker for each");
+        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body").is_some(), "the Brand group has a font drop-down for headings and one for body text");
         // (Choosing from the drop-downs sets these same two fields; see the font picker tests.)
         {
             let p = h.state_mut().project.as_mut().unwrap();
@@ -12365,10 +12361,10 @@ mod tests {
         assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Layout Builder").is_none(), "the old names are gone, and Layout Builder is not a tab here");
         h.state_mut().ribbon_tab = ribbon::THEME_TAB;
         h.run_steps(3);
-        for name in ["Fonts", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
+        for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
         assert!(h.query_all_by_label_contains("Colors").next().is_some(), "Brand Colors is on Theme");
-        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
-        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
+        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Background", "Colors", "Headings"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Background, Colors, then the font drop-downs): {gx:?}");
         for gone in ["Themes", "Player", "Spelling", "Focus Order"] { assert!(h.query_all_by_label_contains(gone).next().is_none(), "{gone} is not on Theme"); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-theme.png")).unwrap(); }
         h.state_mut().ribbon_tab = ribbon::REVIEW_TAB;
@@ -12415,31 +12411,43 @@ mod tests {
         assert!(!h.state().in_master_view());
     }
 
-    /// The Fonts button on the Design tab opens a window with two font drop-downs; opening one used to close the menu it was in.
+    /// The Brand group on the Theme tab has the theme's fonts as two stacked drop-downs: headings on top, body text below.
     #[test]
-    fn the_theme_fonts_window_keeps_its_drop_downs_open_and_a_pick_changes_the_theme_font() {
-        use egui_kittest::kittest::Queryable;
+    fn the_brand_group_has_stacked_heading_and_body_font_drop_downs_that_set_the_theme_fonts() {
+        use egui_kittest::kittest::{NodeT, Queryable};
         let mut a = app();
         a.file_view = false;
         a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(4);
-        h.get_by_label("Fonts").click();
+        assert!(h.query_by_label("Fonts").is_none(), "there is no Fonts button any more");
+        let combo = |h: &egui_kittest::Harness<'_, App>, font: &str| h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(font)).map(|c| c.rect());
+        let (heading, body) = { let t = &h.state().project.as_ref().unwrap().theme; (t.heading_font.clone(), t.body_font.clone()) };
+        assert_ne!(heading, body, "the default theme has different heading and body fonts");
+        let (top, bottom) = (combo(&h, &heading).expect("a drop-down shows the heading font"), combo(&h, &body).expect("and one the body font"));
+        assert!(top.top() < bottom.top() && (top.left() - bottom.left()).abs() < 2.0, "stacked, headings on top: {top:?} {bottom:?}");
+        let pick = |h: &egui_kittest::Harness<'_, App>, not: &[&str]| brainbend_fonts::families().into_iter().map(|(n, _)| n).find(|n| !not.iter().any(|x| x.eq_ignore_ascii_case(n)) && brainbend_fonts::source_of(n) == Some(brainbend_fonts::Source::Bundled) && h.query_by_label(n).is_some()).expect("another bundled font in the list");
+        // The top one sets the headings.
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(heading.as_str())).unwrap().click();
         h.run_steps(4);
-        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the window opens");
-        let combos: Vec<_> = h.query_all_by_role(egui::accesskit::Role::ComboBox).collect();
-        assert!(combos.len() >= 2, "a Headings and a Body text drop-down");
-        use egui_kittest::kittest::NodeT;
-        combos.into_iter().find(|c| c.accesskit_node().value().as_deref() == Some("Montserrat")).expect("the headings drop-down shows the theme's font").click();
-        h.run_steps(4);
-        assert!(h.query_by_label("Headings").is_some(), "the window is still open after opening a drop-down");
-        assert!(h.query_by_label("BrainBend fonts").is_some(), "and the list of fonts is showing");
-        let before = h.state().project.as_ref().unwrap().theme.heading_font.clone();
-        let other = brainbend_fonts::families().into_iter().map(|(n, _)| n).find(|n| !n.eq_ignore_ascii_case(&before) && brainbend_fonts::source_of(n) == Some(brainbend_fonts::Source::Bundled)).expect("another bundled font");
+        assert!(h.query_by_label("BrainBend fonts").is_some(), "the list of fonts opens");
+        let other = pick(&h, &[&heading, &body]);
         h.get_by_label(&other).click();
         h.run_steps(4);
-        assert_eq!(h.state().project.as_ref().unwrap().theme.heading_font, other, "picking a font sets the theme's heading font");
-        assert!(h.query_by_label("Headings").is_some(), "the window stays open so the body font can be set too");
+        let t = h.state().project.as_ref().unwrap().theme.clone();
+        assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), (other.as_str(), body.as_str()), "the headings changed and the body did not");
+        // The bottom one sets the body text.
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(body.as_str())).unwrap().click();
+        h.run_steps(4);
+        let other_body = pick(&h, &[&heading, &body, &other]);
+        h.get_by_label(&other_body).click();
+        h.run_steps(4);
+        let t = h.state().project.as_ref().unwrap().theme.clone();
+        assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), (other.as_str(), other_body.as_str()));
+        // One undo step each.
+        h.state_mut().undo();
+        assert_eq!(h.state().project.as_ref().unwrap().theme.body_font, body);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.run_steps(2); h.render().expect("renderer").save(std::path::Path::new(&dir).join("brand-group.png")).unwrap(); }
     }
 
     /// A file as the window system hands it over when something is dropped on the app.
