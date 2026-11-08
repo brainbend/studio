@@ -188,6 +188,20 @@ impl Project {
             };
             let double_click = owners_of(|e| matches!(e, Event::DoubleClick));
             let single_click = owners_of(|e| matches!(e, Event::Click));
+            // Words laid over something clickable: a click on the words does not reach it, and a screen reader reads two things.
+            for (li, layer) in slide.layers.iter().enumerate() {
+                for (ti, t) in layer.objects.iter().enumerate() {
+                    if t.hidden || t.text.trim().is_empty() || clickable.contains(t.id.as_str()) || t.has_button_states() { continue; }
+                    let area = (t.w * t.h).max(1.0);
+                    for c in layer.objects.iter().take(ti).filter(|c| !c.hidden && c.id != t.id && (clickable.contains(c.id.as_str()) || c.has_button_states())) {
+                        let (w, h) = ((t.x + t.w).min(c.x + c.w) - t.x.max(c.x), (t.y + t.h).min(c.y + c.h) - t.y.max(c.y));
+                        if w > 0.0 && h > 0.0 && w * h / area >= 0.5 {
+                            out.push(Issue { severity: Severity::Warning, at: Location { slide: si, object: Some((li, ti)) }, message: format!("\"{}\" sits on top of \"{}\", which is clickable, so clicking the words does not press it and screen readers read two things. Put the words in \"{}\" itself and delete this text box.", t.name, c.name, c.name) });
+                            break;
+                        }
+                    }
+                }
+            }
             // Headings give screen-reader users the outline of the slide. The project's name is the page's Heading 1 and
             // the slide's own (hidden) title a Heading 2, so the first one an author adds may be a 2 or a 3.
             let mut last_level = 2u8;
@@ -505,6 +519,33 @@ mod tests {
     #[test]
     fn clean_project_has_no_issues() {
         assert!(project().check().is_empty());
+    }
+
+    #[test]
+    fn words_laid_over_a_clickable_object_are_flagged() {
+        let mut p = project();
+        let mut card = Object::new("c", "Card", Kind::Rect, 100.0, 100.0, 400.0, 200.0);
+        card.fill = Some(Rgba(11, 37, 69, 255));
+        let mut words = Object::new("w", "Words", Kind::Text, 120.0, 150.0, 360.0, 80.0);
+        words.text = "Forklifts".into();
+        words.style.color = Rgba(255, 255, 255, 255);
+        let mut far = Object::new("f", "Elsewhere", Kind::Text, 900.0, 900.0, 300.0, 80.0);
+        far.text = "Not on the card".into();
+        p.slides[0].layers[0].objects = vec![card.clone(), words.clone(), far];
+        p.slides[0].triggers.push(Trigger { id: "t".into(), owner: Owner::Object("c".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        let m = msgs(&p);
+        assert!(m.iter().any(|x| x.contains("\"Words\" sits on top of \"Card\"") && x.contains("Put the words in")), "{m:?}");
+        assert!(!m.iter().any(|x| x.contains("Elsewhere\" sits on top")), "text away from the card is fine: {m:?}");
+        // Words inside the object itself, text under it, or words that are clickable too are all fine.
+        let mut inside = card.clone();
+        inside.text = "Forklifts".into();
+        p.slides[0].layers[0].objects = vec![inside];
+        assert!(!msgs(&p).iter().any(|x| x.contains("sits on top")));
+        p.slides[0].layers[0].objects = vec![words.clone(), card.clone()];
+        assert!(!msgs(&p).iter().any(|x| x.contains("sits on top")), "text behind it is not covering it");
+        p.slides[0].layers[0].objects = vec![card, words];
+        p.slides[0].triggers.push(Trigger { id: "t2".into(), owner: Owner::Object("w".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        assert!(!msgs(&p).iter().any(|x| x.contains("sits on top")), "words that do the same click are fine");
     }
 
     #[test]

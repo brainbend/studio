@@ -28,6 +28,7 @@ mod update;
 mod video_support;
 mod video_export;
 mod mcp_tools;
+mod mcp_access;
 mod mcp_design;
 mod mcp_images;
 mod mcp_player;

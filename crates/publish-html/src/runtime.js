@@ -356,6 +356,10 @@
         label.style.padding = m[1] + 'px ' + m[2] + 'px ' + m[3] + 'px ' + m[0] + 'px';
         node.appendChild(label);
         if (o.decorative && !o.states.length && !slides[si].triggers.some(function (t) { return t.event === 'Click' && t.owner.Object === o.id; })) node.setAttribute('aria-hidden', 'true');
+        // Plain decoration (words, a picture, a shape or an icon that nothing reacts to) lets a click through to what is
+        // under it, so words or an icon laid on a button do not stop the button working. Links in its text still work.
+        var plainKind = typeof o.kind === 'string' ? ['Rect', 'Ellipse', 'Text', 'Image', 'Line', 'LineUp'].indexOf(o.kind) >= 0 : !!(o.kind && o.kind.Path);
+        if (plainKind && !o.states.length && !o.check && !o.dial && !o.marker && !o.button_set && !o.hit_area && !slides[si].triggers.some(function (t) { return t.owner.Object === o.id; })) node.style.pointerEvents = 'none';
         lEl.appendChild(node);
         var entry = { node: node, label: label, o: o, si: si, layerId: layer.id, state: o.initial_state, hover: false, down: false };
         objects[o.id] = entry;

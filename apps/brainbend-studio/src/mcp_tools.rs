@@ -128,6 +128,21 @@ fn table() -> Vec<(Access, ToolDef)> {
                 "name": { "type": "string", "description": "A name for the object." },
                 "send_to_back": { "type": "boolean" },
             }), &["slide", "icon"]), false),
+        tool(Access::Edit, "add_button", "Adds a button as one object: the words inside a rounded shape, with a click trigger that goes to a slide, the next slide or the previous one. Use this for every button instead of building one from a shape and a text box. It is in the theme's accent color with text that can be read on it, centred near the bottom unless you give a place. Screen readers read the words, so give no alt text. `icon` (a name from find_icons) puts an icon beside the words.",
+            schema(json!({
+                "slide": slide_prop(),
+                "text": { "type": "string", "description": "The words on the button." },
+                "action": { "type": "string", "enum": ["go_to_slide", "next", "previous"], "description": "What pressing it does (default go_to_slide)." },
+                "target": { "type": "integer", "minimum": 1, "description": "For go_to_slide: the number of the slide to go to." },
+                "icon": { "type": "string", "description": "An icon name from find_icons, shown beside the words." },
+                "x": { "type": "number" }, "y": { "type": "number" },
+                "width": { "type": "number", "description": "Default 360." }, "height": { "type": "number", "description": "Default 100." },
+                "size": { "type": "number", "description": "Text size in slide pixels (default 40)." },
+                "fill": color_prop("The button's color (default the theme's Accent 1)"),
+                "name": { "type": "string", "description": "A name for the object." },
+            }), &["slide", "text"]), false),
+        tool(Access::Read, "check_accessibility", "Runs the editor's accessibility checker on the project (or one slide) and returns every error and warning: missing alt text or labels, low contrast, text laid over a clickable object, heading order, captions and more. Call it before you tell the author you are finished, and fix everything it lists.",
+            schema(json!({ "slide": slide_prop() }), &[]), true),
         tool(Access::Edit, "delete_slide", "Deletes a slide. The last slide cannot be deleted.", schema(json!({ "slide": slide_prop() }), &["slide"]), false),
         tool(Access::Edit, "rename_slide", "Gives a slide a new name.", schema(json!({ "slide": slide_prop(), "name": { "type": "string" } }), &["slide", "name"]), false),
         tool(Access::Edit, "set_slide_notes", "Sets the notes of a slide (the speaker notes shown in the player's Notes tab).", schema(json!({ "slide": slide_prop(), "notes": { "type": "string" } }), &["slide", "notes"]), false),
@@ -189,7 +204,8 @@ Then set the player to fit how the lesson is used. A lesson meant to be followed
 A lesson that is not in order (a hub that links to topics, a menu of choices, a presentation the author moves through with their own buttons, a kiosk or quiz bank) should have show_nav false and show_progress false, because those mean nothing there. \
 If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
 Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
-Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give a picture alt text (and an icon that stands alone, or a button made of a shape or icon with no text), and never use a picture you do not have the right to use. Do not give alt text to a button or text that has words on it: screen readers read the words, and alt text would replace them. \
+Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Never use a picture you do not have the right to use.\n\n\
+Make everything you build accessible yourself, so the author does not have to find and fix it. Make every button with add_button, which is one object (the words inside the shape, one click trigger); never lay a text box over a shape or icon that is clickable, because a click on the words would not reach it. Give every picture, and every icon or shape with no words that stands alone, alt text saying what it shows or does, and mark pure decoration decorative; give no alt text to a button or text that has words on it, since screen readers read the words and alt text would replace them. Keep titles in the layout's heading placeholders, use colors that read well against each other, and give video and audio captions or a description. Before you tell the author you are finished, call check_accessibility and fix every error and warning it lists. \
 In text and on buttons use plain words, not symbols or emoji (such as a house or arrow character): the lesson's fonts cannot draw many of them and they show as an empty square. For an icon (home, back, next, check, warning, phone) call find_icons and add_icon, which place a vector icon in the lesson's colors; give an icon that stands alone alt text saying what it does.";
 
 /// Everything worth telling the AI about an object it just made or changed.
@@ -351,6 +367,8 @@ impl App {
             "add_image" => self.mcp_add_image(a, count),
             "find_icons" => self.mcp_find_icons(a),
             "add_icon" => self.mcp_add_icon(a, count),
+            "add_button" => self.mcp_add_button(a, count),
+            "check_accessibility" => self.mcp_check_accessibility(a),
             "add_slide" => {
                 let after = match a.get("after") { None | Some(Value::Null) => count, Some(_) => slide_arg(a, "after", count)? + 1 };
                 let title = text_arg(a, "name")?;
@@ -654,7 +672,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 29);
+        assert_eq!(t.len(), 31);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -1357,7 +1375,63 @@ mod tests {
         assert!(r.get("alt").is_none() && r.get("warning").is_none(), "clearing it leaves the button's own text: {r}");
         let r = run(&mut a, "set_object", json!({ "slide": 1, "object": "Dot", "decorative": true })).unwrap();
         assert_eq!(r["decorative"], true);
-        assert!(INSTRUCTIONS.contains("Do not give alt text to a button or text that has words on it"));
+        assert!(INSTRUCTIONS.contains("give no alt text to a button or text that has words on it"));
+    }
+
+    #[test]
+    fn a_button_is_one_accessible_object_and_the_checker_is_available_to_the_ai() {
+        let mut a = app_with(3);
+        run(&mut a, "set_design", json!({ "colors": { "Accent 1": "#0B2545" } })).unwrap();
+        let r = run(&mut a, "add_button", json!({ "slide": 1, "text": "Forklifts", "action": "go_to_slide", "target": 2, "icon": "truck" })).unwrap();
+        assert_eq!(r["button"]["text"], "Forklifts");
+        assert!(r["button"].get("alt").is_none(), "the words name it: no alt text");
+        let p = a.project.as_ref().unwrap();
+        let objs = &p.slides[0].layers[0].objects;
+        assert_eq!(objs.len(), 2, "the button and its icon, and no separate text box");
+        let (button, icon) = (&objs[0], &objs[1]);
+        assert!(matches!(button.kind, Kind::Rect) && button.text == "Forklifts" && button.fill == Some(Rgba(11, 37, 69, 255)));
+        assert_eq!(button.style.color, Rgba(255, 255, 255, 255), "white words on a dark button");
+        assert!(icon.decorative && icon.alt.is_empty() && matches!(icon.kind, Kind::Path(_)), "the icon is skipped by screen readers");
+        assert!(button.group.is_some() && button.group == icon.group, "they move together");
+        assert!(button.margins[0] > 0.0, "the words sit beside the icon");
+        let t: Vec<_> = p.slides[0].triggers.iter().collect();
+        assert_eq!(t.len(), 1, "one click trigger, on the button");
+        assert!(matches!((&t[0].owner, &t[0].event, &t[0].action), (Owner::Object(id), Event::Click, Action::JumpToSlide(to)) if *id == button.id && *to == p.slides[1].id));
+        // A light button gets dark words.
+        let r = run(&mut a, "add_button", json!({ "slide": 1, "text": "Next", "action": "next", "fill": "#F3F5F8" })).unwrap();
+        assert_ne!(r["button"]["id"], Value::Null);
+        let light = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().find(|o| o.text == "Next").unwrap().clone();
+        assert_ne!(light.style.color, Rgba(255, 255, 255, 255), "dark words on a light button");
+        // What the AI builds this way has nothing for the checker to complain about.
+        let c = run(&mut a, "check_accessibility", json!({ "slide": 1 })).unwrap();
+        assert_eq!(c["errors"], 0, "{c}");
+        assert!(!c["issues"].as_array().unwrap().iter().any(|i| i["message"].as_str().unwrap().contains("sits on top")), "{c}");
+        // The old way, a text box laid over a clickable shape, is reported with the fix.
+        let shape = run(&mut a, "add_shape", json!({ "slide": 2, "shape": "rounded_rectangle", "name": "Card", "x": 100, "y": 100, "width": 400, "height": 200 })).unwrap();
+        run(&mut a, "add_text", json!({ "slide": 2, "text": "Fire exits", "x": 120, "y": 150, "width": 360 })).unwrap();
+        let sid = a.project.as_ref().unwrap().slides[1].id.clone();
+        a.project.as_mut().unwrap().slides[1].triggers.push(Trigger { id: "tt".into(), owner: Owner::Object(shape["id"].as_str().unwrap().into()), event: Event::Click, action: Action::JumpToSlide(sid), conditions: vec![] });
+        let c = run(&mut a, "check_accessibility", json!({})).unwrap();
+        let msg = c["issues"].as_array().unwrap().iter().map(|i| i["message"].as_str().unwrap().to_string()).find(|m| m.contains("sits on top")).expect("reported");
+        assert!(msg.contains("Put the words in"), "{msg}");
+        assert_eq!(c["issues"].as_array().unwrap().iter().find(|i| i["message"].as_str().unwrap().contains("sits on top")).unwrap()["slide"], 2);
+        // Mistakes in the call are explained.
+        for (args, expect) in [
+            (json!({ "slide": 1, "text": "Go", "action": "teleport" }), "go_to_slide"),
+            (json!({ "slide": 1, "text": "Go", "action": "go_to_slide" }), "For go_to_slide"),
+            (json!({ "slide": 1, "text": "  " }), "`text`"),
+            (json!({ "slide": 1, "text": "Go", "action": "next", "icon": "not-an-icon" }), "no icon called"),
+        ] {
+            let e = run(&mut a, "add_button", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        // One undo step takes a button back, icon and trigger too.
+        let mut b = app_with(2);
+        run(&mut b, "add_button", json!({ "slide": 1, "text": "Home", "action": "go_to_slide", "target": 2, "icon": "house" })).unwrap();
+        assert_eq!((b.project.as_ref().unwrap().slides[0].layers[0].objects.len(), b.project.as_ref().unwrap().slides[0].triggers.len()), (2, 1));
+        run(&mut b, "undo", json!({})).unwrap();
+        assert_eq!((b.project.as_ref().unwrap().slides[0].layers[0].objects.len(), b.project.as_ref().unwrap().slides[0].triggers.len()), (0, 0));
+        assert!(INSTRUCTIONS.contains("check_accessibility") && INSTRUCTIONS.contains("add_button"));
     }
 
     #[test]
