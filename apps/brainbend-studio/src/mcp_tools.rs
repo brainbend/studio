@@ -46,6 +46,8 @@ fn table() -> Vec<(Access, ToolDef)> {
         "italic": { "type": "boolean" },
         "color": color_prop("The text color"),
         "align": { "type": "string", "enum": ["left", "center", "right", "justify"] },
+        "alt": { "type": "string", "description": "A description for screen readers. Needed for a picture or a shape or button with no text (say what it is or does). Leave it out for anything with text on it: screen readers read the text, and alt text would replace it." },
+        "decorative": { "type": "boolean", "description": "True for a shape or picture that only decorates, so screen readers skip it." },
     });
     let tool = |access, name, description, schema, read_only| (access, ToolDef { name, description, schema, read_only });
     vec![
@@ -187,8 +189,18 @@ Then set the player to fit how the lesson is used. A lesson meant to be followed
 A lesson that is not in order (a hub that links to topics, a menu of choices, a presentation the author moves through with their own buttons, a kiosk or quiz bank) should have show_nav false and show_progress false, because those mean nothing there. \
 If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
 Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
-Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give alt text, and never use a picture you do not have the right to use. \
+Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give a picture alt text (and an icon that stands alone, or a button made of a shape or icon with no text), and never use a picture you do not have the right to use. Do not give alt text to a button or text that has words on it: screen readers read the words, and alt text would replace them. \
 In text and on buttons use plain words, not symbols or emoji (such as a house or arrow character): the lesson's fonts cannot draw many of them and they show as an empty square. For an icon (home, back, next, check, warning, phone) call find_icons and add_icon, which place a vector icon in the lesson's colors; give an icon that stands alone alt text saying what it does.";
+
+/// Everything worth telling the AI about an object it just made or changed.
+pub(super) fn object_warning(o: &Object) -> Option<String> {
+    let mut w: Vec<String> = vec![];
+    if let Some(s) = symbol_warning(&o.text) { w.push(s); }
+    if !o.alt.trim().is_empty() && !o.text.trim().is_empty() {
+        w.push("This object has text, which screen readers read as it is. The alt text replaces that text for screen readers, so leave it out unless it must say something different.".into());
+    }
+    if w.is_empty() { None } else { Some(w.join(" ")) }
+}
 
 /// A warning when `text` has symbols the fonts Studio ships with usually lack, which would show as an empty square.
 pub(super) fn symbol_warning(text: &str) -> Option<String> {
@@ -413,6 +425,8 @@ impl App {
     /// Text styling and the look shared by `add_text`, `add_shape` and `set_object`.
     pub(super) fn mcp_apply_look(o: &mut Object, a: &Value) -> Result<(), String> {
         if let Some(n) = num_arg(a, "size", 1.0, 1000.0)? { o.style.size = n; }
+        if let Some(t) = text_arg(a, "alt")? { o.alt = t.trim().to_string(); }
+        if let Some(b) = bool_arg(a, "decorative")? { o.decorative = b; }
         if let Some(b) = bool_arg(a, "bold")? { o.style.bold = b; }
         if let Some(b) = bool_arg(a, "italic")? { o.style.italic = b; }
         if let Some(c) = color_arg(a, "color")? { o.style.color = c; }
@@ -457,7 +471,7 @@ impl App {
         o.x = x.unwrap_or(sw * 0.08 + (existing % 8) as f32 * 36.0).round();
         o.y = y.unwrap_or(sh * 0.08 + (existing % 8) as f32 * 36.0).round();
         let mut described = describe_object(&o);
-        if let Some(w) = symbol_warning(&o.text) { described["warning"] = json!(w); }
+        if let Some(w) = object_warning(&o) { described["warning"] = json!(w); }
         self.snapshot();
         let slide = &mut self.project.as_mut().unwrap().slides[i];
         slide.layers[0].objects.push(o);
@@ -497,7 +511,7 @@ impl App {
             }
         }
         let mut described = describe_object(&o);
-        if let Some(w) = symbol_warning(&o.text) { described["warning"] = json!(w); }
+        if let Some(w) = object_warning(&o) { described["warning"] = json!(w); }
         self.snapshot();
         self.project.as_mut().unwrap().slides[i].layers[li].objects[oi] = o;
         self.slide = i;
@@ -1328,6 +1342,22 @@ mod tests {
         let n = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
         run(&mut a, "undo", json!({})).unwrap();
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), n - 1);
+    }
+
+    #[test]
+    fn alt_text_can_be_set_and_is_questioned_on_an_object_that_has_text() {
+        let mut a = app_with(1);
+        let r = run(&mut a, "add_shape", json!({ "slide": 1, "shape": "ellipse", "name": "Dot", "alt": "A decorative dot", "decorative": false })).unwrap();
+        assert_eq!(r["alt"], "A decorative dot");
+        assert!(r.get("warning").is_none(), "a shape with no text can have alt text: {r}");
+        let r = run(&mut a, "add_shape", json!({ "slide": 1, "shape": "rounded_rectangle", "text": "Next", "alt": "Next: Fire exits" })).unwrap();
+        assert!(r["warning"].as_str().unwrap().contains("replaces that text"), "{r}");
+        let id = r["id"].as_str().unwrap().to_string();
+        let r = run(&mut a, "set_object", json!({ "slide": 1, "object": id, "alt": "" })).unwrap();
+        assert!(r.get("alt").is_none() && r.get("warning").is_none(), "clearing it leaves the button's own text: {r}");
+        let r = run(&mut a, "set_object", json!({ "slide": 1, "object": "Dot", "decorative": true })).unwrap();
+        assert_eq!(r["decorative"], true);
+        assert!(INSTRUCTIONS.contains("Do not give alt text to a button or text that has words on it"));
     }
 
     #[test]

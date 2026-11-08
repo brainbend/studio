@@ -535,6 +535,17 @@ pub enum PathCmd {
     Close,
 }
 
+/// What an object's Alt text control is for (see `Object::alt_use`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AltUse {
+    /// Nothing to write: screen readers read the object's own text.
+    Hidden,
+    /// A clickable object with text on it: screen readers read the text unless it is given alt text of its own.
+    ButtonText,
+    /// An alt text box, with the name to show for it and a hint for what to write.
+    Field(&'static str, &'static str),
+}
+
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Kind {
@@ -950,6 +961,25 @@ impl Object {
     /// Car-01 and Car-02) do not.
     pub fn has_button_states(&self) -> bool {
         self.states.iter().any(|s| matches!(s.name.as_str(), "Hover" | "Down" | "Disabled" | "Visited" | "Selected"))
+    }
+
+    /// What the Alt text control means for this object, so Properties shows it only where it does something.
+    /// `clickable` is whether a trigger reacts to a click on it.
+    pub fn alt_use(&self, clickable: bool) -> AltUse {
+        let has_text = !self.text.trim().is_empty();
+        let button = clickable || self.has_button_states() || self.check.is_some() || matches!(self.kind, Kind::Hotspot);
+        if button && has_text { return AltUse::ButtonText; }
+        // Plain text is read as it is: there is nothing to describe.
+        if !button && (matches!(self.kind, Kind::Text) || has_text) { return AltUse::Hidden; }
+        match &self.kind {
+            Kind::Image => AltUse::Field("Alt text", "describe the picture"),
+            Kind::Video | Kind::Audio => AltUse::Field("Description", "what it is"),
+            Kind::Input(_) | Kind::Slider(_) => AltUse::Field("Label", "what it is for, such as Your name"),
+            Kind::Web(_) => AltUse::Field("Title", "what the page is"),
+            Kind::Pano(_) => AltUse::Field("Description", "what the 360 degree image shows"),
+            _ if button => AltUse::Field("Label", "what pressing it does, such as Go to the home slide"),
+            _ => AltUse::Field("Alt text", "describe it for screen readers"),
+        }
     }
 
     pub fn new(id: &str, name: &str, kind: Kind, x: f32, y: f32, w: f32, h: f32) -> Self {
@@ -2705,5 +2735,43 @@ mod streamed_package_tests {
             assert_eq!(back.assets[k].bytes, buffered.assets[k].bytes, "{k}");
             assert_eq!((&back.assets[k].name, &back.assets[k].mime), (&p.assets[k].name, &p.assets[k].mime));
         }
+    }
+}
+
+#[cfg(test)]
+mod alt_use_tests {
+    use super::*;
+
+    fn obj(kind: Kind, text: &str) -> Object {
+        let mut o = Object::new("o", "O", kind, 0.0, 0.0, 100.0, 50.0);
+        o.text = text.into();
+        o
+    }
+
+    #[test]
+    fn alt_text_is_offered_only_where_it_does_something() {
+        use AltUse::*;
+        // Plain text and anything with text on it is read as it is.
+        assert_eq!(obj(Kind::Text, "Hello").alt_use(false), Hidden);
+        assert_eq!(obj(Kind::Text, "").alt_use(false), Hidden);
+        assert_eq!(obj(Kind::Rect, "A label").alt_use(false), Hidden);
+        // A clickable object with text can use that text or its own description.
+        assert_eq!(obj(Kind::Rect, "Next").alt_use(true), ButtonText);
+        assert_eq!(obj(Kind::Text, "Next").alt_use(true), ButtonText);
+        let mut states = obj(Kind::Rect, "Go");
+        states.states = vec![ObjectState { shine: None, gradient: None, name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: states.style.clone(), asset: None, size: None }];
+        assert_eq!(states.alt_use(false), ButtonText, "button states make it a button without a trigger");
+        let mut check = obj(Kind::Text, "I agree");
+        check.check = Some(Check::look(0, None));
+        assert_eq!(check.alt_use(false), ButtonText, "a check box's label is read unless it has its own");
+        // With nothing written on it, it needs a description, named for what it is.
+        assert_eq!(obj(Kind::Image, "").alt_use(false), Field("Alt text", "describe the picture"));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(true), Field("Label", _)), "an icon or shape button needs a name");
+        assert!(matches!(obj(Kind::Hotspot, "").alt_use(false), Field("Label", _)));
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(false), Field("Alt text", _)), "an icon on its own");
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(true), Field("Label", _)));
+        assert!(matches!(obj(Kind::Web(WebObject { url: String::new(), scroll: true }), "").alt_use(false), Field("Title", _)));
+        assert!(matches!(obj(Kind::Video, "").alt_use(false), Field("Description", _)));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(false), Field("Alt text", _)), "a plain shape may be decorative or a picture of something");
     }
 }

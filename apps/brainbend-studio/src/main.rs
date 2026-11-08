@@ -6519,6 +6519,10 @@ impl App {
             let proj = self.project.as_mut().unwrap();
             // Slides are small (assets live on the project), so a per-frame copy is cheap.
             let before = proj.slides.clone();
+            let clickable = {
+                let s = &proj.slides[slide_idx];
+                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.triggers.iter().any(|t| matches!(t.event, Event::Click | Event::DoubleClick) && matches!(&t.owner, Owner::Object(id) if *id == o.id)))
+            };
             let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
             ui.label(egui::RichText::new(kind_name(&obj.kind)).weak());
             let mut changed = false;
@@ -6526,11 +6530,33 @@ impl App {
                 ui.label("Name");
                 changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
             });
-            ui.horizontal(|ui| {
-                ui.label("Alt text");
-                changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("describe for screen readers").desired_width(f32::INFINITY)).changed();
-            });
-            changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
+            match obj.alt_use(clickable) {
+                AltUse::Hidden => {}
+                AltUse::ButtonText => {
+                    // "Use the text" is an empty alt text; unticking it shows the box (remembered while it is still empty).
+                    let id = egui::Id::new(("alt-uses-text", obj.id.clone()));
+                    let mut uses_text = obj.alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+                    let what = if obj.check.is_some() { "label text" } else { "button text" };
+                    if ui.checkbox(&mut uses_text, format!("Use the {what} for screen readers")).on_hover_text("Screen readers read the text on it. Untick to give it a different description, such as \"Next: Fire exits\".").changed() {
+                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
+                        if uses_text { obj.alt.clear(); }
+                        changed = true;
+                    }
+                    if !uses_text {
+                        ui.horizontal(|ui| {
+                            ui.label("Alt text");
+                            changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)).changed();
+                        });
+                    }
+                }
+                AltUse::Field(label, hint) => {
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text(hint).desired_width(f32::INFINITY)).changed();
+                    });
+                    changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
+                }
+            }
             if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
                 ui.horizontal(|ui| {
                     ui.label("Read as");
@@ -6589,7 +6615,7 @@ impl App {
             }
             if let Kind::Input(f) = &mut obj.kind {
                 changed |= controls::input_editor(ui, f, &text_vars, &num_vars);
-                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add alt text above: it is the field's label for screen readers.");
+                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add a label above: it is the field's name for screen readers.");
             }
             if let Kind::Pano(p) = &obj.kind {
                 ui.horizontal(|ui| {
@@ -9535,6 +9561,61 @@ mod tests {
         a.selected = None;
         a.insert_symbol("€");
         assert_eq!(a.selected_object().unwrap().text, "€", "with nothing selected a symbol makes a text box");
+    }
+
+    /// Properties offers Alt text only where it does something: not on text, a "use the button text" choice on a button
+    /// with text, and a named box on a picture or an icon-only button (issue #57).
+    #[test]
+    fn gui_alt_text_is_offered_only_where_it_does_something() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut text = Object::new("t", "Words", Kind::Text, 100.0, 100.0, 400.0, 100.0);
+            text.text = "Some words".into();
+            let mut picture = Object::new("p", "Photo", Kind::Image, 100.0, 300.0, 300.0, 200.0);
+            picture.alt = String::new();
+            let mut button = Object::new("b", "Go", Kind::Rect, 600.0, 100.0, 300.0, 100.0);
+            button.text = "Next".into();
+            let mut icon_button = Object::new("i", "Icon button", Kind::Rect, 600.0, 300.0, 100.0, 100.0);
+            icon_button.fill = Some(Rgba(3, 83, 158, 255));
+            p.slides[0].layers[0].objects = vec![text, picture, button, icon_button];
+            for id in ["b", "i"] {
+                p.slides[0].triggers.push(Trigger { id: format!("trig-{id}"), owner: Owner::Object(id.into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+            }
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        let show = |h: &mut egui_kittest::Harness<'static, App>, i: usize| { h.state_mut().selected = Some((0, i)); h.run_steps(3); };
+        // Text: nothing to describe.
+        show(&mut h, 0);
+        assert!(h.query_by_label("Alt text").is_none() && h.query_by_label_contains("Decorative").is_none() && h.query_by_label_contains("Use the").is_none(), "plain text has no alt text control");
+        // A picture: the alt box, and Decorative.
+        show(&mut h, 1);
+        assert!(h.query_by_label("Alt text").is_some() && h.query_by_label_contains("Decorative").is_some());
+        // A button with text: "Use the button text", ticked, with no box until it is unticked.
+        show(&mut h, 2);
+        assert!(h.query_by_label_contains("Use the button text").is_some(), "a button with text offers its text");
+        assert!(h.query_by_label("Alt text").is_none() && h.query_by_label_contains("Decorative").is_none());
+        h.get_by_label_contains("Use the button text").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Alt text").is_some(), "unticking shows the alt text box");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("alt-button.png")).unwrap(); }
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].alt.is_empty(), "and nothing is stored until something is typed");
+        // An alt text already on a button with text keeps the box showing, and ticking the choice clears it.
+        h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[2].alt = "Next: Fire exits".into();
+        h.state_mut().selected = Some((0, 3));
+        h.run_steps(3);
+        show(&mut h, 2);
+        assert!(h.query_by_label("Alt text").is_some(), "an alt text of its own shows the box");
+        h.get_by_label_contains("Use the button text").click();
+        h.run_steps(3);
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].alt.is_empty(), "using the text clears the alt text, so it cannot override the label");
+        assert!(h.query_by_label("Alt text").is_none());
+        // A clickable shape with no text: it needs a name, so there is no choice to use text, and the box is called Label.
+        show(&mut h, 3);
+        assert!(h.query_by_label_contains("Use the button text").is_none() && h.query_by_label("Label").is_some(), "an icon-only button needs a label");
     }
 
     #[test]
