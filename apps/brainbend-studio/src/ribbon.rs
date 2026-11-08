@@ -1751,8 +1751,9 @@ impl App {
         let before = Snap::of(proj);
         let mut next = proj.theme.clone();
         let mut moved = false;
-        crate::tool_window_at(ctx, "theme-fonts", "Fonts", [360.0, 220.0], true, &mut open, |ui| {
-            ui.set_min_width(300.0);
+        // Not sized to its content: the font list opens inside this window, so the window has to leave room for it.
+        crate::tool_window_at(ctx, "theme-fonts", "Fonts", [400.0, 470.0], false, &mut open, |ui| {
+            ui.set_min_width(340.0);
             ui.weak("The fonts of the master and layouts, and of slides that still follow them. Other text keeps its font.");
             ui.add_space(4.0);
             ui.horizontal(|ui| { ui.label("Headings"); moved |= crate::font_store::font_menu(ui, "theme-heading-font", &mut next.heading_font, 190.0); });
