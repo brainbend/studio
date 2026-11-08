@@ -49,10 +49,25 @@ fn table() -> Vec<(Access, ToolDef)> {
     });
     let tool = |access, name, description, schema, read_only| (access, ToolDef { name, description, schema, read_only });
     vec![
-        tool(Access::Read, "get_project", "Facts about the open project: its name, kind, number of slides, whether it has unsaved changes and where it is saved. Start here.", schema(json!({}), &[]), true),
+        tool(Access::Read, "get_project", "Facts about the open project: its title (`title`, and `title_is_missing` when it still has the default), kind, number of slides, whether it has unsaved changes and where it is saved, and the player settings now (Previous / Next buttons, progress bar, slide menu, sidebar, theme, controls). Start here.", schema(json!({}), &[]), true),
         tool(Access::Read, "list_slides", "Lists the slides in order: number, id, name, kind (normal, question or results), how many objects, and how long its timeline is.", schema(json!({}), &[]), true),
         tool(Access::Read, "get_slide", "Describes one slide: its size, notes, timeline length and every object on every layer with its id, type, position, size, text, fill, whether it starts hidden and when it shows on the timeline.", schema(json!({ "slide": slide_prop() }), &["slide"]), true),
         tool(Access::Edit, "add_slide", "Adds an empty slide and returns its number. It goes after the slide numbered `after` (default: at the end).", schema(json!({ "after": slide_prop(), "name": { "type": "string", "description": "The slide's name." }, "layout": { "type": "string", "description": "A layout's name or id from get_design. The slide gets its placeholders, ready to fill. Without it, the slide follows the layout of the slide before it." } }), &[]), false),
+        tool(Access::Edit, "set_player", "Sets the project's title and how the published player behaves: `title` (the project's name, shown in the player when show_title is true), the Previous / Next buttons (show_nav), the progress bar (show_progress), the slide menu (show_menu, and menu_free to let learners skip from it), the sidebar (off, left or right), player_theme (dark or light), accent (a hex color), the notes and glossary tabs, search, and the playback controls (an object of play_pause, seekbar, replay, volume, captions, speed, fullscreen). Give only what you want to change. A setting the author has already chosen is not changed until you have asked them and they agree (then pass approved: true); settings they have not touched can be set freely.",
+            schema(json!({
+                "title": { "type": "string", "description": "The project's title." },
+                "show_title": { "type": "boolean", "description": "Show the title in a bar along the top of the player." },
+                "show_nav": { "type": "boolean", "description": "The player's Previous / Next buttons." },
+                "show_progress": { "type": "boolean", "description": "The progress bar along the top, filling as slides are visited." },
+                "show_menu": { "type": "boolean", "description": "A slide menu (table of contents) in the player." },
+                "menu_free": { "type": "boolean", "description": "Let learners jump to any slide from the menu, past unanswered questions." },
+                "sidebar": { "type": "string", "enum": ["off", "left", "right"], "description": "A sidebar listing the slides, instead of a Menu button." },
+                "player_theme": { "type": "string", "enum": ["dark", "light"] },
+                "accent": color_prop("The player's accent color, for buttons and the current slide"),
+                "notes_tab": { "type": "boolean" }, "glossary_tab": { "type": "boolean" }, "search": { "type": "boolean" },
+                "controls": { "type": "object", "description": "Which playback controls to show: any of play_pause, seekbar, replay, volume, captions, speed, fullscreen, each true or false." },
+                "approved": { "type": "boolean", "description": "Only after the author has agreed in chat to changing a setting they had already chosen." },
+            }), &[]), false),
         tool(Access::Read, "get_design", "The lesson's look: how big a slide is, the theme (its ten named colors and two fonts), the brand palette, the master, every layout with its placeholders, and which layout each slide uses. Call this before building slides, and use only these colors and fonts.", schema(json!({}), &[]), true),
         tool(Access::Edit, "set_design", "Sets the lesson's look: theme colors (an object of color names to hex colors; the names are Text, Background, Dark accent, Light accent, Accent 1 to Accent 6), heading_font and body_font, the brand palette (a list of hex colors the author sees first in every color menu, up to 24), the master's background color, and the master's decorative shapes (shown behind every layout that shows the master). Give only what you want to change. Slides and layouts that already exist keep their colors, so do this before building them. If the author already has a theme, palette or master, this is refused until you have asked them and they agree.",
             schema(json!({
@@ -153,6 +168,11 @@ Call set_design (theme colors, fonts, and the brand palette, which the author se
 Add every slide with add_slide and a layout, fill its placeholders with set_object, and delete a placeholder you do not use. \
 Keep titles and body text in placeholders rather than loose text boxes, and use only the theme and palette colors and the theme fonts for everything else (get_design lists them). \
 If the lesson already has a theme, palette, master or layouts that the author made, use them: build slides with add_slide on their layouts and their colors. The design tools refuse to change them until you have asked the author, in chat, what you would add or change and why, and they have said yes; then repeat the call with approved set to true. Never replace a layout of theirs; make a new one with another name. Everything is undoable with undo.\n\n\
+Give the lesson a title and set up its player to suit it. If get_project says title_is_missing, choose a clear title from what the author asked for, call set_player with title and show_title true, and say what you chose. \
+Then set the player to fit how the lesson is used. A lesson meant to be followed in order (training, a course, a tour) keeps the Previous / Next buttons and the progress bar. \
+A lesson that is not in order (a hub that links to topics, a menu of choices, a presentation the author moves through with their own buttons, a kiosk or quiz bank) should have show_nav false and show_progress false, because those mean nothing there. \
+If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
+Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
 Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Always give alt text, and never use a picture you do not have the right to use.";
 
 // ---- reading what a tool was given ----
@@ -264,6 +284,7 @@ impl App {
                     "name": p.name, "kind": p.kind.label(), "slides": p.slides.len(), "pass_mark_percent": p.pass_mark,
                     "unsaved_changes": self.dirty, "saved_at": self.path.as_ref().map(|p| p.display().to_string()),
                     "current_slide": self.slide + 1,
+                    "player": self.player_summary(),
                 }))
             }
             "list_slides" => {
@@ -282,6 +303,7 @@ impl App {
                     "layers": s.layers.iter().enumerate().map(|(li, l)| json!({ "layer": li, "name": l.name, "duration_ms": l.duration_ms, "objects": l.objects.iter().enumerate().map(|(oi, o)| { let mut d = describe_object(o); d["path"] = json!(format!("/slides/{i}/layers/{li}/objects/{oi}")); d }).collect::<Vec<_>>() })).collect::<Vec<_>>(),
                 }))
             }
+            "set_player" => self.mcp_set_player(a),
             "get_design" => self.mcp_get_design(),
             "set_design" => self.mcp_set_design(a),
             "create_layout" => self.mcp_create_layout(a),
@@ -588,7 +610,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 26);
+        assert_eq!(t.len(), 27);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -1171,6 +1193,63 @@ mod tests {
         let e = run(&mut a, "find_images", json!({ "query": "  " })).unwrap_err();
         assert!(e.contains("`query`"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_title_and_player_are_set_for_an_untouched_project_and_undone_in_one_step() {
+        let mut a = app_with(3);
+        let p = run(&mut a, "get_project", json!({})).unwrap();
+        assert_eq!((p["player"]["title_is_missing"].clone(), p["player"]["previous_next_buttons"].clone()), (json!(true), json!(true)));
+        let r = run(&mut a, "set_player", json!({ "title": "Warehouse Safety", "show_title": true, "show_nav": false, "show_progress": false, "show_menu": true, "controls": { "fullscreen": true }, "sidebar": "left", "accent": "#E87722" })).unwrap();
+        assert_eq!(r["changed"].as_array().unwrap().len(), 8);
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0, "the slide menu is a way to move");
+        let pr = a.project.as_ref().unwrap();
+        assert_eq!((pr.name.as_str(), pr.show_nav, pr.show_progress, pr.show_menu, pr.player.show_title, pr.player.controls.fullscreen), ("Warehouse Safety", false, false, true, true, true));
+        assert_eq!((pr.player.sidebar, pr.player.accent.hex().as_str()), (SidebarSide::Left, "#E87722"));
+        assert_eq!(run(&mut a, "get_project", json!({})).unwrap()["player"]["title_is_missing"], false);
+        // Its own settings can be adjusted again without asking.
+        run(&mut a, "set_player", json!({ "show_progress": true })).unwrap();
+        // One undo step takes the whole change back, the title too.
+        let steps = a.undo.len();
+        run(&mut a, "undo", json!({})).unwrap();
+        assert_eq!(a.undo.len(), steps - 1);
+        run(&mut a, "undo", json!({})).unwrap();
+        let pr = a.project.as_ref().unwrap();
+        assert_eq!((pr.name.as_str(), pr.show_nav, pr.show_menu, pr.player.show_title), ("Untitled", true, false, false));
+    }
+
+    #[test]
+    fn what_the_author_chose_is_not_changed_without_their_say_so_and_losing_navigation_is_warned_about() {
+        let mut a = app_with(3);
+        {
+            let p = a.project.as_mut().unwrap();
+            p.name = "Safety Basics".into();
+            p.show_progress = false;
+        }
+        let undo = a.undo.len();
+        let e = run(&mut a, "set_player", json!({ "title": "Something Else", "show_progress": true, "show_title": true })).unwrap_err();
+        assert!(e.contains("\"Safety Basics\"") && e.contains("the progress bar is off") && e.contains("approved"), "{e}");
+        assert!(!e.contains("showing the title"), "only what the author chose is listed: {e}");
+        let pr = a.project.as_ref().unwrap();
+        assert_eq!((pr.name.as_str(), pr.show_progress, pr.player.show_title, a.undo.len()), ("Safety Basics", false, false, undo), "nothing changed, and no undo step");
+        // Settings they did not touch are free, and what is already set is not a change.
+        let r = run(&mut a, "set_player", json!({ "show_title": true, "show_progress": false })).unwrap();
+        assert_eq!(r["changed"], json!(["show_title"]));
+        // With their yes it goes ahead.
+        run(&mut a, "set_player", json!({ "title": "Something Else", "approved": true })).unwrap();
+        assert_eq!(a.project.as_ref().unwrap().name, "Something Else");
+        // Without Previous / Next, with several slides and no way to move, the tool says so.
+        let r = run(&mut a, "set_player", json!({ "show_nav": false })).unwrap();
+        assert!(r["warnings"][0].as_str().unwrap().contains("cannot move"), "{r}");
+        run(&mut a, "set_player", json!({ "show_menu": true })).unwrap();
+        // A single slide needs no navigation.
+        let mut b = app_with(1);
+        assert_eq!(run(&mut b, "set_player", json!({ "show_nav": false })).unwrap()["warnings"].as_array().unwrap().len(), 0);
+        for (args, expect) in [(json!({}), "Give at least one"), (json!({ "approved": true }), "Give at least one"), (json!({ "sidebar": "top" }), "off, left or right"), (json!({ "controls": { "teleport": true } }), "no control called"), (json!({ "title": "  " }), "`title`")] {
+            let e = run(&mut b, "set_player", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        assert!(INSTRUCTIONS.contains("title_is_missing") && INSTRUCTIONS.contains("not in order"));
     }
 
     #[test]

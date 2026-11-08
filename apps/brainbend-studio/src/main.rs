@@ -30,6 +30,7 @@ mod video_export;
 mod mcp_tools;
 mod mcp_design;
 mod mcp_images;
+mod mcp_player;
 mod mcp;
 mod assistant;
 mod terminal;
@@ -354,6 +355,7 @@ fn recovery_path() -> Option<PathBuf> {
 /// Project-level settings that undo also covers (everything that is not slide content).
 #[derive(Clone)]
 struct Meta {
+    name: String,
     variables: Vec<Variable>,
     scenes: Vec<Scene>,
     pass_mark: u32,
@@ -374,6 +376,7 @@ struct Meta {
 impl Meta {
     fn of(p: &Project) -> Self {
         Self {
+            name: p.name.clone(),
             variables: p.variables.clone(),
             scenes: p.scenes.clone(),
             pass_mark: p.pass_mark,
@@ -393,6 +396,7 @@ impl Meta {
     }
 
     fn apply(self, p: &mut Project) {
+        p.name = self.name;
         p.variables = self.variables;
         p.scenes = self.scenes;
         p.pass_mark = self.pass_mark;

@@ -103,6 +103,8 @@ pub struct Mcp {
     pub design_seen: Option<u64>,
     /// Where pictures are searched for; tests point it at a server of their own.
     pub image_search_url: Option<String>,
+    /// A fingerprint of the title and player settings as an AI tool last left them (see `design_seen`).
+    pub settings_seen: Option<u64>,
     /// Start on the next frame (the setting to start when Studio opens, which needs the window system to be up).
     start_wanted: bool,
     show_token: bool,

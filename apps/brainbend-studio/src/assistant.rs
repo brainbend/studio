@@ -138,6 +138,7 @@ fn what(name: &str, input: &serde_json::Value) -> String {
         "apply_layout" => format!("Changing the layout of a slide{slide}"),
         "find_images" => format!("Looking for pictures of {}", input.get("query").and_then(|q| q.as_str()).unwrap_or("something")),
         "add_image" => format!("Adding a picture{slide}"),
+        "set_player" => "Setting the title and player".into(),
         "add_slide" => "Adding a slide".into(),
         "delete_slide" => format!("Deleting a slide{slide}"),
         "rename_slide" | "set_slide_notes" | "update_slide" => format!("Changing a slide{slide}"),
