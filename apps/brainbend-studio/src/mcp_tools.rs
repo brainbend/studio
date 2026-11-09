@@ -100,11 +100,11 @@ fn table() -> Vec<(Access, ToolDef)> {
                 "shape": { "type": "string", "enum": ["wide", "tall", "square"], "description": "Only pictures of this shape." },
                 "allow_credit_required": { "type": "boolean", "description": "Also include pictures that need a credit line (CC BY). Default false." },
             }), &["query"]), true),
-        tool(Access::Edit, "add_image", "Adds a picture to a slide, from a web address (`url`, such as one from find_images) or from a PNG or JPEG file on this computer (`path`, an absolute path: a picture you saved, drew or generated). Studio does not generate pictures itself; if you can make one, save it as PNG or JPEG and pass its path. It is fitted inside the box you give (width and height, from x and y), keeping its proportions, and centred on the slide if you give no place. Always give `alt`, a short description of what it shows. Pass `credit` for a picture that needs one, and it is added to the slide's notes. Prefer a picture over an empty box or a placeholder; do not use pictures you have no right to use.",
+        tool(Access::Edit, "add_image", "Adds a picture to a slide, from a web address (`url`, such as one from find_images) or from a picture file on this computer (`path`, an absolute path: a picture you saved, drew or generated). It takes PNG, JPEG, WebP, GIF and SVG. Studio does not generate pictures itself; if you can make one, save it and pass its path, and a diagram or chart is easiest to write as an SVG file, which is drawn to a sharp picture (it is then a picture, not editable shapes, so redraw it to change it). It is fitted inside the box you give (width and height, from x and y), keeping its proportions, and centred on the slide if you give no place. Always give `alt`, a short description of what it shows. Pass `credit` for a picture that needs one, and it is added to the slide's notes. Prefer a picture over an empty box or a placeholder; do not use pictures you have no right to use.",
             schema(json!({
                 "slide": slide_prop(),
-                "url": { "type": "string", "description": "A web address (https) of a PNG or JPEG picture." },
-                "path": { "type": "string", "description": "The full path of a PNG or JPEG file on this computer." },
+                "url": { "type": "string", "description": "A web address (https) of a picture: PNG, JPEG, WebP, GIF or SVG." },
+                "path": { "type": "string", "description": "The full path of a picture file on this computer: PNG, JPEG, WebP, GIF or SVG." },
                 "alt": { "type": "string", "description": "What the picture shows, for people who cannot see it." },
                 "decorative": { "type": "boolean", "description": "True for a picture that only decorates, so no alt is needed." },
                 "credit": { "type": "string", "description": "The credit line the picture's license asks for." },
@@ -214,7 +214,7 @@ Then set the player to fit how the lesson is used. A lesson meant to be followed
 A lesson that is not in order (a hub that links to topics, a menu of choices, a presentation the author moves through with their own buttons, a kiosk or quiz bank) should have show_nav false and show_progress false, because those mean nothing there. \
 If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
 Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
-Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Never use a picture you do not have the right to use.\n\n\
+Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself, ideally as an SVG file, and add_image with the file's path (PNG, JPEG or SVG); if you can generate an image, save it and add it the same way. Never use a picture you do not have the right to use.\n\n\
 Make everything you build accessible yourself, so the author does not have to find and fix it. Make every button with add_button, which is one object (the words inside the shape, one click trigger). For a card or any control made of several parts (a shape with an icon, a picture and words), build the parts and tie them together with group_objects and one click action, rather than laying separate pieces over each other; never lay a text box over a clickable shape without grouping them. Give every picture, and every icon or shape with no words that stands alone, alt text saying what it shows or does, and mark pure decoration decorative; give no alt text to a button or text that has words on it, since screen readers read the words and alt text would replace them. Keep titles in the layout's heading placeholders, use colors that read well against each other, and give video and audio captions or a description. Before you tell the author you are finished, call check_accessibility and fix every error and warning it lists. \
 In text and on buttons use plain words, not symbols or emoji (such as a house or arrow character): the lesson's fonts cannot draw many of them and they show as an empty square. For an icon (home, back, next, check, warning, phone) call find_icons and add_icon, which place a vector icon in the lesson's colors; give an icon that stands alone alt text saying what it does.";
 
@@ -1183,7 +1183,7 @@ mod tests {
                         { "url": format!("{site}/pic.png"), "title": "Warehouse", "creator": "B. Person", "license": "by", "license_version": "4.0", "attribution": "\"Warehouse\" by B. Person is licensed under CC BY 4.0.", "width": 800, "height": 400, "foreign_landing_url": "https://example.org/w" },
                         { "title": "no address" },
                     ] }).to_string().into_bytes())
-                } else if line.contains("/pic.png") { ("image/png", png.clone()) } else { ("text/html", b"<html>not a picture</html>".to_vec()) };
+                } else if line.contains("/pic.png") { ("image/png", png.clone()) } else if line.contains("/logo.svg") { ("image/svg+xml", br##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#0B2545"/><circle cx="50" cy="50" r="30" fill="#FF6B1A"/></svg>"##.to_vec()) } else { ("text/html", b"<html>not a picture</html>".to_vec()) };
                 let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                 let _ = s.write_all(&body);
             }
@@ -1225,6 +1225,33 @@ mod tests {
         let n = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
         run(&mut a, "undo", json!({})).unwrap();
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), n - 1);
+    }
+
+    #[test]
+    fn an_svg_from_a_file_or_an_address_is_drawn_to_a_sharp_picture() {
+        let (base, _) = picture_server(64);
+        let mut a = app_with(1);
+        let dir = std::env::temp_dir().join(format!("bb-svg-tool-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("diagram.svg");
+        std::fs::write(&file, r##"<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#E87722"/></svg>"##).unwrap();
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "path": file.display().to_string(), "alt": "An orange panel", "width": 600 })).unwrap();
+        assert_eq!((r["drawn_from_svg"].clone(), r["picture_pixels"].clone()), (json!(true), json!([2048, 1024])), "{r}");
+        assert_eq!((r["added"]["width"].as_f64(), r["added"]["height"].as_f64()), (Some(600.0), Some(300.0)), "placed in the SVG's own proportions");
+        let p = a.project.as_ref().unwrap();
+        let asset = p.assets.get(p.slides[0].layers[0].objects.last().unwrap().asset.as_ref().unwrap()).unwrap();
+        assert_eq!(asset.mime, "image/png", "stored as a picture");
+        // From an address, with a content type of image/svg+xml.
+        let r = run(&mut a, "add_image", json!({ "slide": 1, "url": format!("{base}/logo.svg"), "alt": "Acme logo" })).unwrap();
+        assert_eq!((r["drawn_from_svg"].clone(), r["picture_pixels"].clone()), (json!(true), json!([2048, 1024])), "{r}");
+        // A bad SVG says what is wrong, and nothing is added.
+        std::fs::write(dir.join("bad.svg"), "<svg><oops").unwrap();
+        let before = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        let e = run(&mut a, "add_image", json!({ "slide": 1, "path": dir.join("bad.svg").display().to_string(), "alt": "x" })).unwrap_err();
+        assert!(e.contains("could not be read"), "{e}");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), before);
+        assert!(INSTRUCTIONS.contains("SVG"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

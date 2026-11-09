@@ -23,16 +23,21 @@ fn agent(secs: u64) -> ureq::Agent {
 const USER_AGENT: &str = concat!("BrainBend-Studio/", env!("CARGO_PKG_VERSION"));
 
 /// A picture ready to store: PNG or JPEG bytes, and its size.
-struct Picture { bytes: Vec<u8>, mime: &'static str, w: u32, h: u32 }
+struct Picture { bytes: Vec<u8>, mime: &'static str, w: u32, h: u32, from_svg: bool }
 
-/// Reads `bytes` as a picture. PNG and JPEG are kept as they are (made smaller if very large); WebP and GIF, which
+/// Reads `bytes` as a picture. An SVG is drawn to a PNG. PNG and JPEG are kept as they are (made smaller if very large); WebP and GIF, which
 /// some picture hosts send whatever was asked for, are converted: to PNG when they have see-through parts, else JPEG.
 fn prepare(bytes: Vec<u8>) -> Result<Picture, String> {
+    // An SVG is drawn to a sharp PNG (see svg.rs).
+    if crate::svg::looks_like_svg(&bytes) {
+        let r = crate::svg::render(&bytes)?;
+        return Ok(Picture { bytes: r.png, mime: "image/png", w: r.w, h: r.h, from_svg: true });
+    }
     let png = bytes.starts_with(&[0x89, b'P', b'N', b'G']);
     let jpeg = bytes.starts_with(&[0xFF, 0xD8]);
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("That is not a picture Studio can read (PNG, JPEG, WebP or GIF): {e}"))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("That is not a picture Studio can read (PNG, JPEG, WebP, GIF or SVG): {e}"))?;
     let (w, h) = (img.width(), img.height());
-    if (png || jpeg) && w.max(h) <= MAX_SIDE { return Ok(Picture { bytes, mime: if png { "image/png" } else { "image/jpeg" }, w, h }); }
+    if (png || jpeg) && w.max(h) <= MAX_SIDE { return Ok(Picture { bytes, mime: if png { "image/png" } else { "image/jpeg" }, w, h, from_svg: false }); }
     let img = if w.max(h) > MAX_SIDE { img.resize(MAX_SIDE, MAX_SIDE, image::imageops::FilterType::Lanczos3) } else { img };
     let as_png = if png { true } else if jpeg { false } else { img.color().has_alpha() && img.to_rgba8().pixels().any(|p| p[3] < 255) };
     let mut out = std::io::Cursor::new(Vec::new());
@@ -42,18 +47,18 @@ fn prepare(bytes: Vec<u8>) -> Result<Picture, String> {
         let rgb = img.to_rgb8();
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 88).encode_image(&rgb).map_err(|e| format!("That picture could not be converted ({e})."))?;
     }
-    Ok(Picture { bytes: out.into_inner(), mime: if as_png { "image/png" } else { "image/jpeg" }, w: img.width(), h: img.height() })
+    Ok(Picture { bytes: out.into_inner(), mime: if as_png { "image/png" } else { "image/jpeg" }, w: img.width(), h: img.height(), from_svg: false })
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) { return Err("`url` must be a web address starting with https://.".into()); }
-    let mut reply = agent(25).get(url).header("User-Agent", USER_AGENT).header("Accept", "image/jpeg,image/png,image/*;q=0.8").call().map_err(|e| format!("The picture could not be downloaded from {url}: {e}"))?;
+    let mut reply = agent(25).get(url).header("User-Agent", USER_AGENT).header("Accept", "image/jpeg,image/png,image/svg+xml,image/*;q=0.8").call().map_err(|e| format!("The picture could not be downloaded from {url}: {e}"))?;
     reply.body_mut().with_config().limit(MAX_BYTES).read_to_vec().map_err(|e| format!("The picture at {url} could not be read (is it over {} MB?): {e}", MAX_BYTES / 1024 / 1024))
 }
 
 fn read_file(path: &str) -> Result<(Vec<u8>, String), String> {
     let p = std::path::Path::new(path);
-    if !p.is_absolute() { return Err("`path` must be the full path of a PNG or JPEG file, starting from the root of the disk.".into()); }
+    if !p.is_absolute() { return Err("`path` must be the full path of a picture file, starting from the root of the disk.".into()); }
     let len = std::fs::metadata(p).map_err(|e| format!("`path`: {path} could not be found ({e})."))?.len();
     if len > MAX_BYTES { return Err(format!("`path`: that file is over {} MB.", MAX_BYTES / 1024 / 1024)); }
     let bytes = std::fs::read(p).map_err(|e| format!("`path`: {path} could not be read ({e})."))?;
@@ -148,7 +153,7 @@ impl App {
         self.layer = 0;
         self.dirty = true;
         self.status = format!("AI tool: added a picture to slide {slide_no}");
-        done(json!({ "added": described, "picture_pixels": [pic.w, pic.h], "credit_in_notes": credit.is_some() }))
+        done(json!({ "added": described, "picture_pixels": [pic.w, pic.h], "credit_in_notes": credit.is_some(), "drawn_from_svg": pic.from_svg }))
     }
 }
 

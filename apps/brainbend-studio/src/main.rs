@@ -32,6 +32,7 @@ mod mcp_access;
 mod mcp_design;
 mod mcp_images;
 mod mcp_player;
+mod svg;
 mod mcp;
 mod assistant;
 mod terminal;
@@ -1609,7 +1610,7 @@ impl App {
     }
 
     fn load_image_asset_titled(&mut self, title: &str) -> Option<(String, String, f32, f32)> {
-        let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg"]).pick_file()?;
+        let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg", "svg"]).pick_file()?;
         self.load_image_file(&path)
     }
 
@@ -1619,9 +1620,13 @@ impl App {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
         };
+        // An SVG is drawn to a sharp PNG, so it works anywhere a picture does (see svg.rs).
+        let bytes = if svg::looks_like_svg(&bytes) {
+            match svg::render(&bytes) { Ok(r) => r.png, Err(e) => { self.status = e; return None; } }
+        } else { bytes };
         let (w, h) = match image::load_from_memory(&bytes) {
             Ok(img) => (img.width() as f32, img.height() as f32),
-            Err(e) => { self.status = format!("Not a usable PNG/JPEG ({e})"); return None; }
+            Err(e) => { self.status = format!("Not a usable picture ({e})"); return None; }
         };
         let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else { "image/jpeg" };
         let key = self.new_id("asset");
@@ -1644,7 +1649,7 @@ impl App {
     }
 
     fn insert_image(&mut self) {
-        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg", "svg"]).pick_file() else { return };
         self.insert_image_file(&path);
     }
 
@@ -1655,7 +1660,7 @@ impl App {
         enum Kind { Project, Image, Video, Audio, Other }
         let kind = |p: &PathBuf| match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
             Some("story" | "brainbend" | "storyapp" | "pptx") => Kind::Project,
-            Some("png" | "jpg" | "jpeg") => Kind::Image,
+            Some("png" | "jpg" | "jpeg" | "svg") => Kind::Image,
             Some("mp4" | "m4v" | "webm") => Kind::Video,
             Some("mp3" | "m4a" | "ogg" | "wav") => Kind::Audio,
             _ => Kind::Other,
@@ -1683,7 +1688,7 @@ impl App {
         self.status = if added == 1 { "Added the dropped file to the slide".into() }
             else if added > 1 { format!("Added {added} dropped files to the slide") }
             else if no_project { "Open or start a project first, then drop the file onto a slide".into() }
-            else if unsupported > 0 { "Drop a picture (PNG or JPEG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
+            else if unsupported > 0 { "Drop a picture (PNG, JPEG or SVG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
             else { return };
     }
 
@@ -9768,6 +9773,36 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("icons-colors.png")).unwrap(); }
     }
 
+    /// An SVG is accepted wherever a picture is: inserted, dropped, or chosen as the player's logo (issue #54).
+    #[test]
+    fn gui_an_svg_is_inserted_dropped_and_used_as_a_logo_as_a_sharp_picture() {
+        let dir = std::env::temp_dir().join(format!("bb-svg-gui-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("logo.svg");
+        std::fs::write(&file, r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#0B2545"/></svg>"##).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        assert!(a.insert_image_file(&file), "an SVG can be inserted: {}", a.status);
+        let o = a.selected_object().unwrap().clone();
+        assert!(matches!(o.kind, Kind::Image) && (o.w / o.h - 2.0).abs() < 0.01, "a picture in the SVG's proportions: {} x {}", o.w, o.h);
+        let asset = a.project.as_ref().unwrap().assets.get(o.asset.as_ref().unwrap()).unwrap();
+        assert_eq!((asset.mime.as_str(), asset.name.as_str()), ("image/png", "logo.svg"));
+        assert!(image::load_from_memory(&asset.bytes).is_ok(), "stored as a real picture");
+        // Dropping it on the window adds it too.
+        let before = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        a.handle_dropped(vec![file.clone()]);
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 1, "{}", a.status);
+        // As a logo (or banner, or any place that asks for a picture) it is the same stored picture.
+        let (key, name, w, h) = a.load_image_file(&file).unwrap();
+        assert_eq!((name.as_str(), w / h), ("logo.svg", 2.0));
+        assert!(a.project.as_ref().unwrap().assets.contains_key(&key));
+        // A broken one is refused with a reason.
+        std::fs::write(dir.join("bad.svg"), "<svg><oops").unwrap();
+        assert!(!a.insert_image_file(&dir.join("bad.svg")));
+        assert!(a.status.contains("could not be read"), "{}", a.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn gui_markers_are_round_buttons_with_an_icon_or_a_number() {
         use crate::markers::{Face, CATEGORIES};
@@ -12775,7 +12810,7 @@ mod tests {
         let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
         drop_files(&mut h, &[bad.clone()]);
         assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before);
-        assert!(h.state().status.contains("Not a usable PNG/JPEG"), "{}", h.state().status);
+        assert!(h.state().status.contains("Not a usable picture"), "{}", h.state().status);
         let _ = std::fs::remove_file(bad);
     }
 

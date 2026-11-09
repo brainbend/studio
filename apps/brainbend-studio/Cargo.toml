@@ -33,6 +33,7 @@ semver = "1.0.28"
 minisign-verify = "0.3.0"
 alacritty_terminal = "0.26.0"
 portable-pty = "0.9.0"
+resvg = "0.49.0"
 
 [dev-dependencies]
 tiny_http = "0.12"
