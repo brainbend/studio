@@ -28,12 +28,10 @@
           </Extension>
         </ProgId>
       </Component>
-      <Component Id="Licenses">
-        <File Source="LICENSE-MIT" />
-        <File Source="LICENSE-APACHE" />
-        <File Source="THIRD-PARTY-LICENSES.md" />
-        <File Source="FONT-LICENSES.md" />
-      </Component>
+      <Component Id="License0"><File Source="LICENSE-MIT" /></Component>
+      <Component Id="License1"><File Source="LICENSE-APACHE" /></Component>
+      <Component Id="License2"><File Source="THIRD-PARTY-LICENSES.md" /></Component>
+      <Component Id="License3"><File Source="FONT-LICENSES.md" /></Component>
     </ComponentGroup>
 
     <Component Id="Shortcut" Directory="MenuFolder">
