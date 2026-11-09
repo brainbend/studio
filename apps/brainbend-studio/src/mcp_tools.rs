@@ -141,6 +141,15 @@ fn table() -> Vec<(Access, ToolDef)> {
                 "fill": color_prop("The button's color (default the theme's Accent 1)"),
                 "name": { "type": "string", "description": "A name for the object." },
             }), &["slide", "text"]), false),
+        tool(Access::Edit, "group_objects", "Ties two or more objects on one layer of a slide into a group that works as one control, such as a card made of a shape, an icon, a picture and some words. The group moves and resizes together. With an `action` (go_to_slide with `target`, next or previous) a click on any part runs it, and the first object listed holds the trigger. Screen readers read the group once, by the words on its parts, or by `alt` if you give it, and its parts are not read separately. Use this instead of laying separate clickable pieces over each other; put no click trigger on the other parts.",
+            schema(json!({
+                "slide": slide_prop(),
+                "objects": { "type": "array", "items": { "type": "string" }, "description": "Names or ids of the objects, two or more. The first one holds the click trigger." },
+                "action": { "type": "string", "enum": ["go_to_slide", "next", "previous"], "description": "What a click on the group does. Leave out for a group that only moves together." },
+                "target": { "type": "integer", "minimum": 1, "description": "For go_to_slide: the number of the slide to go to." },
+                "alt": { "type": "string", "description": "What the group does, for screen readers, when the words on its parts do not say it. Leave out if they do." },
+                "name": { "type": "string", "description": "A name for the group." },
+            }), &["slide", "objects"]), false),
         tool(Access::Read, "check_accessibility", "Runs the editor's accessibility checker on the project (or one slide) and returns every error and warning: missing alt text or labels, low contrast, text laid over a clickable object, heading order, captions and more. Call it before you tell the author you are finished, and fix everything it lists.",
             schema(json!({ "slide": slide_prop() }), &[]), true),
         tool(Access::Edit, "delete_slide", "Deletes a slide. The last slide cannot be deleted.", schema(json!({ "slide": slide_prop() }), &["slide"]), false),
@@ -205,7 +214,7 @@ A lesson that is not in order (a hub that links to topics, a menu of choices, a 
 If you turn the buttons off you must give learners another way to move: build your own navigation on the slides (buttons with a go-to-slide trigger, such as Home, Back and topic buttons) or turn on the slide menu; set_player warns when there is none. \
 Turn on fullscreen for a presentation and play_pause and seekbar when slides have timelines, video or audio. Settings the author already chose are not changed until you ask them in chat and they agree; then repeat the call with approved set to true. Undo reverses it.\n\n\
 Use real pictures, not empty boxes or placeholder text, where a slide would be better with one. For a photograph, call find_images (royalty-free, no credit needed by default) and add_image with a result's url; if a result needs a credit, pass it as credit. For a diagram, chart or illustration, draw it yourself and add_image with the file's path (PNG or JPEG); if you can generate an image, save it and add it the same way. Never use a picture you do not have the right to use.\n\n\
-Make everything you build accessible yourself, so the author does not have to find and fix it. Make every button with add_button, which is one object (the words inside the shape, one click trigger); never lay a text box over a shape or icon that is clickable, because a click on the words would not reach it. Give every picture, and every icon or shape with no words that stands alone, alt text saying what it shows or does, and mark pure decoration decorative; give no alt text to a button or text that has words on it, since screen readers read the words and alt text would replace them. Keep titles in the layout's heading placeholders, use colors that read well against each other, and give video and audio captions or a description. Before you tell the author you are finished, call check_accessibility and fix every error and warning it lists. \
+Make everything you build accessible yourself, so the author does not have to find and fix it. Make every button with add_button, which is one object (the words inside the shape, one click trigger). For a card or any control made of several parts (a shape with an icon, a picture and words), build the parts and tie them together with group_objects and one click action, rather than laying separate pieces over each other; never lay a text box over a clickable shape without grouping them. Give every picture, and every icon or shape with no words that stands alone, alt text saying what it shows or does, and mark pure decoration decorative; give no alt text to a button or text that has words on it, since screen readers read the words and alt text would replace them. Keep titles in the layout's heading placeholders, use colors that read well against each other, and give video and audio captions or a description. Before you tell the author you are finished, call check_accessibility and fix every error and warning it lists. \
 In text and on buttons use plain words, not symbols or emoji (such as a house or arrow character): the lesson's fonts cannot draw many of them and they show as an empty square. For an icon (home, back, next, check, warning, phone) call find_icons and add_icon, which place a vector icon in the lesson's colors; give an icon that stands alone alt text saying what it does.";
 
 /// Everything worth telling the AI about an object it just made or changed.
@@ -276,7 +285,7 @@ pub(super) fn slide_arg(a: &Value, key: &str, count: usize) -> Result<usize, Str
 }
 
 /// The place of an object on a slide, by id or by a name that only one object has.
-fn find_object(slide: &Slide, which: &str) -> Result<(usize, usize), String> {
+pub(super) fn find_object(slide: &Slide, which: &str) -> Result<(usize, usize), String> {
     let all: Vec<(usize, usize, &Object)> = slide.layers.iter().enumerate().flat_map(|(li, l)| l.objects.iter().enumerate().map(move |(oi, o)| (li, oi, o))).collect();
     if let Some((li, oi, _)) = all.iter().find(|(_, _, o)| o.id == which) { return Ok((*li, *oi)); }
     let named: Vec<_> = all.iter().filter(|(_, _, o)| o.name == which).collect();
@@ -369,6 +378,7 @@ impl App {
             "add_icon" => self.mcp_add_icon(a, count),
             "add_button" => self.mcp_add_button(a, count),
             "check_accessibility" => self.mcp_check_accessibility(a),
+            "group_objects" => self.mcp_group_objects(a, count),
             "add_slide" => {
                 let after = match a.get("after") { None | Some(Value::Null) => count, Some(_) => slide_arg(a, "after", count)? + 1 };
                 let title = text_arg(a, "name")?;
@@ -672,7 +682,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_a_description_and_an_access_level() {
         let t = tools();
-        assert_eq!(t.len(), 31);
+        assert_eq!(t.len(), 32);
         let mut names: Vec<_> = t.iter().map(|d| d.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -1432,6 +1442,64 @@ mod tests {
         run(&mut b, "undo", json!({})).unwrap();
         assert_eq!((b.project.as_ref().unwrap().slides[0].layers[0].objects.len(), b.project.as_ref().unwrap().slides[0].triggers.len()), (0, 0));
         assert!(INSTRUCTIONS.contains("check_accessibility") && INSTRUCTIONS.contains("add_button"));
+    }
+
+    #[test]
+    fn objects_are_grouped_into_one_control_with_one_trigger_and_checked_as_one() {
+        let mut a = app_with(3);
+        run(&mut a, "add_shape", json!({ "slide": 1, "shape": "rounded_rectangle", "name": "Card", "x": 100, "y": 100, "width": 500, "height": 260 })).unwrap();
+        run(&mut a, "add_text", json!({ "slide": 1, "text": "Fire exits", "name": "Words", "x": 120, "y": 250, "width": 460, "color": "#FFFFFF" })).unwrap();
+        run(&mut a, "add_icon", json!({ "slide": 1, "icon": "door", "name": "Door icon", "x": 280, "y": 120, "color": "#FFFFFF" })).unwrap();
+        let r = run(&mut a, "group_objects", json!({ "slide": 1, "objects": ["Card", "Words", "Door icon"], "action": "go_to_slide", "target": 3, "name": "Fire exits card" })).unwrap();
+        assert_eq!((r["clickable"].clone(), r["owner"].clone(), r["screen_readers_read"].clone()), (json!(true), json!("Card"), json!("Fire exits")), "{r}");
+        assert_eq!(r["warnings"].as_array().unwrap().len(), 0);
+        let p = a.project.as_ref().unwrap();
+        let objs = &p.slides[0].layers[0].objects;
+        let gid = objs[0].group.clone().unwrap();
+        assert!(objs.iter().all(|o| o.group.as_ref() == Some(&gid)), "all three share the group");
+        assert_eq!(p.slides[0].layers[0].group_names.get(&gid).map(String::as_str), Some("Fire exits card"));
+        assert_eq!(p.slides[0].triggers.len(), 1, "one trigger, on the first object");
+        assert!(matches!(&p.slides[0].triggers[0].owner, Owner::Object(id) if *id == objs[0].id));
+        // The checker sees one control: no words-over-a-button warning, no unnamed picture or icon.
+        let c = run(&mut a, "check_accessibility", json!({ "slide": 1 })).unwrap();
+        assert!(!c["issues"].as_array().unwrap().iter().any(|i| i["message"].as_str().unwrap().contains("sits on top") || i["message"].as_str().unwrap().contains("no alt text")), "{c}");
+        // Alt text of its own replaces the words.
+        let mut b = app_with(2);
+        run(&mut b, "add_shape", json!({ "slide": 1, "shape": "ellipse", "name": "Dot" })).unwrap();
+        run(&mut b, "add_icon", json!({ "slide": 1, "icon": "star", "name": "Star" })).unwrap();
+        let r = run(&mut b, "group_objects", json!({ "slide": 1, "objects": ["Dot", "Star"], "action": "next", "alt": "Go to the next slide" })).unwrap();
+        assert_eq!(r["screen_readers_read"], "Go to the next slide");
+        // No words and no alt: it is flagged as the AI builds it.
+        let mut c2 = app_with(2);
+        run(&mut c2, "add_shape", json!({ "slide": 1, "shape": "ellipse", "name": "Dot" })).unwrap();
+        run(&mut c2, "add_icon", json!({ "slide": 1, "icon": "star", "name": "Star", "decorative": true })).unwrap();
+        let r = run(&mut c2, "group_objects", json!({ "slide": 1, "objects": ["Dot", "Star"], "action": "next" })).unwrap();
+        assert!(r["warnings"][0].as_str().unwrap().contains("cannot name it"), "{r}");
+        // A group of its own accord, no click: just moves together.
+        let r = run(&mut c2, "group_objects", json!({ "slide": 2, "objects": ["Dot", "Star"] }));
+        assert!(r.is_err(), "those objects are on slide 1");
+        // Mistakes are explained, and nothing changes.
+        let before = c2.undo.len();
+        for (args, expect) in [
+            (json!({ "slide": 1, "objects": ["Dot"] }), "at least two"),
+            (json!({ "slide": 1, "objects": ["Dot", "Missing"] }), "no object"),
+            (json!({ "slide": 1, "objects": ["Dot", "Dot"] }), "listed twice"),
+            (json!({ "slide": 1, "objects": ["Dot", "Star"], "action": "go_to_slide" }), "For go_to_slide"),
+            (json!({ "slide": 1, "objects": ["Dot", "Star"], "action": "fly" }), "go_to_slide"),
+        ] {
+            let e = run(&mut c2, "group_objects", args).unwrap_err();
+            assert!(e.contains(expect), "{e}");
+        }
+        assert_eq!(c2.undo.len(), before);
+        // A group that is already together cannot be split by grouping one of its parts with something else.
+        run(&mut c2, "add_text", json!({ "slide": 1, "text": "Extra", "name": "Extra" })).unwrap();
+        let e = run(&mut c2, "group_objects", json!({ "slide": 1, "objects": ["Dot", "Extra"] })).unwrap_err();
+        assert!(e.contains("already in a group"), "{e}");
+        // One undo step takes the grouping and its trigger back.
+        run(&mut a, "undo", json!({})).unwrap();
+        let p = a.project.as_ref().unwrap();
+        assert!(p.slides[0].layers[0].objects.iter().all(|o| o.group.is_none()) && p.slides[0].triggers.is_empty());
+        assert!(INSTRUCTIONS.contains("group_objects"));
     }
 
     #[test]

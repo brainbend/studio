@@ -239,11 +239,11 @@ mod tests {
         ]
     }
 
-    /// A server, with a stand-in for the app that answers tool calls.
-    fn running(port: u16) -> (Handle, std::thread::JoinHandle<()>, String) {
+    /// A server, with a stand-in for the app that answers tool calls (None when it cannot start, such as a port in use).
+    fn try_running(port: u16) -> Option<(Handle, std::thread::JoinHandle<()>, String)> {
         let (tx, rx) = channel::<ToolCall>();
         let cfg = Config { token: TOKEN.into(), port, version: "0.3.0".into(), instructions: "Use with care.".into(), pickup_ms: 5000 };
-        let handle = start(cfg, tools(), tx, Arc::new(|| {})).expect("the server starts");
+        let handle = start(cfg, tools(), tx, Arc::new(|| {})).ok()?;
         let app = std::thread::spawn(move || {
             while let Ok(call) = rx.recv() {
                 let answer = match call.name.as_str() {
@@ -254,7 +254,11 @@ mod tests {
             }
         });
         let url = handle.url();
-        (handle, app, url)
+        Some((handle, app, url))
+    }
+
+    fn running(port: u16) -> (Handle, std::thread::JoinHandle<()>, String) {
+        try_running(port).expect("the server starts")
     }
 
     fn post(url: &str, auth: Option<&str>, body: &str) -> (u16, String) {
@@ -346,14 +350,22 @@ mod tests {
 
     #[test]
     fn stopping_the_server_frees_its_port() {
-        let (handle, app, _) = running(0);
-        let port = handle.port();
-        assert!(port > 0);
-        drop(handle);
-        let _ = app.join();
-        let (again, app2, _) = running(port);
-        assert_eq!(again.port(), port, "the port can be used again");
-        drop(again);
-        let _ = app2.join();
+        // Tests run side by side and may pick up a port just freed here, so try again on another one if that happens.
+        let mut freed = false;
+        for _ in 0..20 {
+            let (handle, app, _) = running(0);
+            let port = handle.port();
+            assert!(port > 0);
+            drop(handle);
+            let _ = app.join();
+            if let Some((again, app2, _)) = try_running(port) {
+                assert_eq!(again.port(), port, "the port can be used again");
+                drop(again);
+                let _ = app2.join();
+                freed = true;
+                break;
+            }
+        }
+        assert!(freed, "a stopped server's port can be used again");
     }
 }

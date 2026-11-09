@@ -535,6 +535,15 @@ pub enum PathCmd {
     Close,
 }
 
+/// An object's part in a group that acts as one button (see `Slide::group_role`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupRole {
+    /// It holds the group's click triggers (and the group's alt text), so it is the one named and focused.
+    pub is_owner: bool,
+    /// Some part of the group has words on it, which name the group unless the owner has alt text.
+    pub has_text: bool,
+}
+
 /// What an object's Alt text control is for (see `Object::alt_use`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AltUse {
@@ -964,8 +973,12 @@ impl Object {
     }
 
     /// What the Alt text control means for this object, so Properties shows it only where it does something.
-    /// `clickable` is whether a trigger reacts to a click on it.
-    pub fn alt_use(&self, clickable: bool) -> AltUse {
+    /// `clickable` is whether a trigger reacts to a click on it, and `group` its part in a clickable group.
+    pub fn alt_use(&self, clickable: bool, group: Option<GroupRole>) -> AltUse {
+        // A clickable group is one control: only its owner is named (with the words of its parts, or alt text of its own).
+        if let Some(g) = group {
+            return if !g.is_owner { AltUse::Hidden } else if g.has_text { AltUse::ButtonText } else { AltUse::Field("Label", "what pressing the group does, such as Go to the home slide") };
+        }
         let has_text = !self.text.trim().is_empty();
         let button = clickable || self.has_button_states() || self.check.is_some() || matches!(self.kind, Kind::Hotspot);
         if button && has_text { return AltUse::ButtonText; }
@@ -1676,6 +1689,40 @@ impl Default for SlideNav {
 }
 
 impl Slide {
+    /// The objects on layer `li` that are parts of group `gid` (table cells share a group id too, and are not a control).
+    pub fn group_members(&self, li: usize, gid: &str) -> Vec<usize> {
+        self.layers.get(li).map(|l| l.objects.iter().enumerate().filter(|(_, o)| o.table.is_none() && o.group.as_deref() == Some(gid)).map(|(k, _)| k).collect()).unwrap_or_default()
+    }
+
+    /// Whether a click (or double click) trigger is owned by object `id`.
+    pub fn has_click_trigger(&self, id: &str) -> bool {
+        self.triggers.iter().any(|t| matches!(t.event, Event::Click | Event::DoubleClick) && matches!(&t.owner, Owner::Object(o) if o == id))
+    }
+
+    /// The member of a group that holds its click triggers: a click trigger on one part of a group speaks for the
+    /// whole group, so the group is one control. The first part with a click trigger is the one that is named, focused
+    /// and shown in the Triggers tab. None when the group is not clickable.
+    pub fn group_owner(&self, li: usize, gid: &str) -> Option<usize> {
+        self.group_members(li, gid).into_iter().find(|&k| self.has_click_trigger(&self.layers[li].objects[k].id))
+    }
+
+    /// For object `oi` on layer `li`: its part in a clickable group, if it is in one.
+    pub fn group_role(&self, li: usize, oi: usize) -> Option<GroupRole> {
+        let o = self.layers.get(li)?.objects.get(oi)?;
+        let gid = o.group.as_deref().filter(|_| o.table.is_none())?;
+        let owner = self.group_owner(li, gid)?;
+        let members = self.group_members(li, gid);
+        Some(GroupRole { is_owner: owner == oi, has_text: members.iter().any(|&k| !self.layers[li].objects[k].text.trim().is_empty()) })
+    }
+
+    /// What screen readers call a clickable group: its owner's alt text, else the words of its parts, back to front.
+    pub fn group_name(&self, li: usize, gid: &str) -> String {
+        let Some(owner) = self.group_owner(li, gid) else { return String::new() };
+        let alt = self.layers[li].objects[owner].alt.trim();
+        if !alt.is_empty() { return alt.to_string(); }
+        self.group_members(li, gid).iter().map(|&k| self.layers[li].objects[k].text.trim()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
     /// Layers shown when the slide starts: the base layer plus any a slide-start trigger shows, in layer order.
     pub fn start_layers(&self) -> Vec<usize> {
         let mut out = vec![0];
@@ -2752,26 +2799,31 @@ mod alt_use_tests {
     fn alt_text_is_offered_only_where_it_does_something() {
         use AltUse::*;
         // Plain text and anything with text on it is read as it is.
-        assert_eq!(obj(Kind::Text, "Hello").alt_use(false), Hidden);
-        assert_eq!(obj(Kind::Text, "").alt_use(false), Hidden);
-        assert_eq!(obj(Kind::Rect, "A label").alt_use(false), Hidden);
+        assert_eq!(obj(Kind::Text, "Hello").alt_use(false, None), Hidden);
+        assert_eq!(obj(Kind::Text, "").alt_use(false, None), Hidden);
+        assert_eq!(obj(Kind::Rect, "A label").alt_use(false, None), Hidden);
         // A clickable object with text can use that text or its own description.
-        assert_eq!(obj(Kind::Rect, "Next").alt_use(true), ButtonText);
-        assert_eq!(obj(Kind::Text, "Next").alt_use(true), ButtonText);
+        assert_eq!(obj(Kind::Rect, "Next").alt_use(true, None), ButtonText);
+        assert_eq!(obj(Kind::Text, "Next").alt_use(true, None), ButtonText);
         let mut states = obj(Kind::Rect, "Go");
         states.states = vec![ObjectState { shine: None, gradient: None, name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: states.style.clone(), asset: None, size: None }];
-        assert_eq!(states.alt_use(false), ButtonText, "button states make it a button without a trigger");
+        assert_eq!(states.alt_use(false, None), ButtonText, "button states make it a button without a trigger");
         let mut check = obj(Kind::Text, "I agree");
         check.check = Some(Check::look(0, None));
-        assert_eq!(check.alt_use(false), ButtonText, "a check box's label is read unless it has its own");
+        assert_eq!(check.alt_use(false, None), ButtonText, "a check box's label is read unless it has its own");
         // With nothing written on it, it needs a description, named for what it is.
-        assert_eq!(obj(Kind::Image, "").alt_use(false), Field("Alt text", "describe the picture"));
-        assert!(matches!(obj(Kind::Rect, "").alt_use(true), Field("Label", _)), "an icon or shape button needs a name");
-        assert!(matches!(obj(Kind::Hotspot, "").alt_use(false), Field("Label", _)));
-        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(false), Field("Alt text", _)), "an icon on its own");
-        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(true), Field("Label", _)));
-        assert!(matches!(obj(Kind::Web(WebObject { url: String::new(), scroll: true }), "").alt_use(false), Field("Title", _)));
-        assert!(matches!(obj(Kind::Video, "").alt_use(false), Field("Description", _)));
-        assert!(matches!(obj(Kind::Rect, "").alt_use(false), Field("Alt text", _)), "a plain shape may be decorative or a picture of something");
+        assert_eq!(obj(Kind::Image, "").alt_use(false, None), Field("Alt text", "describe the picture"));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(true, None), Field("Label", _)), "an icon or shape button needs a name");
+        assert!(matches!(obj(Kind::Hotspot, "").alt_use(false, None), Field("Label", _)));
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(false, None), Field("Alt text", _)), "an icon on its own");
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(true, None), Field("Label", _)));
+        assert!(matches!(obj(Kind::Web(WebObject { url: String::new(), scroll: true }), "").alt_use(false, None), Field("Title", _)));
+        assert!(matches!(obj(Kind::Video, "").alt_use(false, None), Field("Description", _)));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(false, None), Field("Alt text", _)), "a plain shape may be decorative or a picture of something");
+        // In a clickable group only the owner is named: by the words of the parts, or by a label if there are none.
+        let part = GroupRole { is_owner: false, has_text: true };
+        assert_eq!(obj(Kind::Path(vec![]), "").alt_use(false, Some(part)), Hidden);
+        assert_eq!(obj(Kind::Rect, "").alt_use(true, Some(GroupRole { is_owner: true, has_text: true })), ButtonText);
+        assert!(matches!(obj(Kind::Rect, "").alt_use(true, Some(GroupRole { is_owner: true, has_text: false })), Field("Label", _)));
     }
 }

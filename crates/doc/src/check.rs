@@ -193,12 +193,24 @@ impl Project {
                 for (ti, t) in layer.objects.iter().enumerate() {
                     if t.hidden || t.text.trim().is_empty() || clickable.contains(t.id.as_str()) || t.has_button_states() { continue; }
                     let area = (t.w * t.h).max(1.0);
-                    for c in layer.objects.iter().take(ti).filter(|c| !c.hidden && c.id != t.id && (clickable.contains(c.id.as_str()) || c.has_button_states())) {
+                    for c in layer.objects.iter().take(ti).filter(|c| !c.hidden && c.id != t.id && (clickable.contains(c.id.as_str()) || c.has_button_states()) && !(c.group.is_some() && c.group == t.group && c.table.is_none())) {
                         let (w, h) = ((t.x + t.w).min(c.x + c.w) - t.x.max(c.x), (t.y + t.h).min(c.y + c.h) - t.y.max(c.y));
                         if w > 0.0 && h > 0.0 && w * h / area >= 0.5 {
                             out.push(Issue { severity: Severity::Warning, at: Location { slide: si, object: Some((li, ti)) }, message: format!("\"{}\" sits on top of \"{}\", which is clickable, so clicking the words does not press it and screen readers read two things. Put the words in \"{}\" itself and delete this text box.", t.name, c.name, c.name) });
                             break;
                         }
+                    }
+                }
+            }
+            // A group is one control: a click trigger on one part speaks for all, so a second owner is a mistake.
+            for (li, layer) in slide.layers.iter().enumerate() {
+                let mut seen: HashSet<&str> = HashSet::new();
+                for o in layer.objects.iter().filter(|o| o.table.is_none()) {
+                    let Some(g) = o.group.as_deref() else { continue };
+                    if !seen.insert(g) { continue; }
+                    let owners: Vec<&str> = slide.group_members(li, g).into_iter().map(|k| &layer.objects[k]).filter(|m| slide.has_click_trigger(&m.id)).map(|m| m.name.as_str()).collect();
+                    if owners.len() > 1 {
+                        out.push(Issue { severity: Severity::Warning, at: Location { slide: si, object: None }, message: format!("The group with {} has click triggers on more than one of its parts ({}). A click anywhere in the group runs them all, and screen readers find several buttons. Keep the triggers on one part.", owners[0], owners.join(", ")) });
                     }
                 }
             }
@@ -262,8 +274,10 @@ impl Project {
                         }
                     }
                     let is_button = o.has_button_states() || clickable.contains(o.id.as_str()) || matches!(o.kind, Kind::Hotspot);
+                    // Part of a clickable group: the group is the control and is named as a whole, so this part is not on its own.
+                    let in_group = slide.group_role(li, oi);
                     match o.kind {
-                        Kind::Image if o.alt.trim().is_empty() && !is_button && !o.decorative => out.push(Issue {
+                        Kind::Image if o.alt.trim().is_empty() && !is_button && in_group.is_none() && !o.decorative => out.push(Issue {
                             severity: Severity::Warning,
                             at: at.clone(),
                             message: format!("Image \"{}\" has no alt text (describe it, or leave it only if purely decorative).", o.name),
@@ -295,7 +309,7 @@ impl Project {
                             out.push(Issue { severity: Severity::Warning, at: at.clone(), message: format!("{what} \"{}\" ends its range at or before where it starts.", o.name) });
                         }
                     }
-                    if is_button && o.text.trim().is_empty() && o.alt.trim().is_empty() {
+                    if is_button && o.text.trim().is_empty() && o.alt.trim().is_empty() && !in_group.is_some_and(|g| g.has_text) {
                         out.push(Issue {
                             severity: Severity::Error,
                             at: at.clone(),
@@ -546,6 +560,46 @@ mod tests {
         p.slides[0].layers[0].objects = vec![card, words];
         p.slides[0].triggers.push(Trigger { id: "t2".into(), owner: Owner::Object("w".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
         assert!(!msgs(&p).iter().any(|x| x.contains("sits on top")), "words that do the same click are fine");
+    }
+
+    #[test]
+    fn a_clickable_group_is_one_control_named_as_a_whole() {
+        let mut p = project();
+        let mut card = Object::new("c", "Card", Kind::Rect, 100.0, 100.0, 400.0, 200.0);
+        card.fill = Some(Rgba(11, 37, 69, 255));
+        let mut words = Object::new("w", "Words", Kind::Text, 120.0, 150.0, 360.0, 80.0);
+        words.text = "Forklifts".into();
+        words.style.color = Rgba(255, 255, 255, 255);
+        let mut icon = Object::new("i", "Icon", Kind::Image, 400.0, 110.0, 60.0, 60.0);
+        icon.asset = Some("a".into());
+        for o in [&mut card, &mut words, &mut icon] { o.group = Some("g".into()); }
+        p.slides[0].layers[0].objects = vec![card, words, icon];
+        p.slides[0].triggers.push(Trigger { id: "t".into(), owner: Owner::Object("c".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        let m = msgs(&p);
+        assert!(m.is_empty(), "a card of shape, words and picture with one trigger is fine: {m:?}");
+        let s = &p.slides[0];
+        assert_eq!(s.group_owner(0, "g"), Some(0));
+        assert_eq!(s.group_name(0, "g"), "Forklifts", "named by the words of its parts");
+        assert_eq!(s.group_role(0, 0), Some(GroupRole { is_owner: true, has_text: true }));
+        assert_eq!(s.group_role(0, 2), Some(GroupRole { is_owner: false, has_text: true }));
+        // Alt text of the owner names it instead.
+        p.slides[0].layers[0].objects[0].alt = "Go to forklift safety".into();
+        assert_eq!(p.slides[0].group_name(0, "g"), "Go to forklift safety");
+        // With no words anywhere it cannot be named.
+        p.slides[0].layers[0].objects[0].alt.clear();
+        p.slides[0].layers[0].objects[1].text.clear();
+        assert!(msgs(&p).iter().any(|x| x.contains("\"Card\" is clickable but has no text or alt text")), "{:?}", msgs(&p));
+        p.slides[0].layers[0].objects[0].alt = "Forklifts".into();
+        assert!(msgs(&p).is_empty(), "{:?}", msgs(&p));
+        // A second part with its own click trigger is a mistake.
+        p.slides[0].triggers.push(Trigger { id: "t2".into(), owner: Owner::Object("w".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        assert!(msgs(&p).iter().any(|x| x.contains("click triggers on more than one of its parts")), "{:?}", msgs(&p));
+        // A table's cells share a group id and are not a control.
+        let mut cell = Object::new("x", "Cell", Kind::Rect, 0.0, 0.0, 50.0, 50.0);
+        cell.group = Some("tbl".into());
+        cell.table = Some((0, 0));
+        p.slides[0].layers[0].objects = vec![cell];
+        assert_eq!(p.slides[0].group_owner(0, "tbl"), None);
     }
 
     #[test]

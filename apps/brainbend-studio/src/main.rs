@@ -3726,9 +3726,64 @@ impl App {
     }
 
     /// Triggers for the selected object (or the layer / slide when nothing is selected), shown in the right panel.
+    /// Properties for a selection that is exactly one group: its name, and how screen readers read it. Returns whether it
+    /// showed (otherwise the selection is several unrelated objects).
+    fn group_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) -> bool {
+        let sel = self.selection();
+        let Some(&(li, first)) = sel.first() else { return false };
+        let Some(slide) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)) else { return false };
+        let Some(gid) = slide.layers.get(li).and_then(|l| l.objects.get(first)).and_then(|o| o.group.clone().filter(|_| o.table.is_none())) else { return false };
+        let members = slide.group_members(li, &gid);
+        if members.len() != sel.len() || sel.iter().any(|&(l, k)| l != li || !members.contains(&k)) { return false; }
+        let name = slide.layers[li].group_names.get(&gid).cloned().unwrap_or_default();
+        let owner = slide.group_owner(li, &gid);
+        let (owner_alt, has_text) = owner.map(|k| (slide.layers[li].objects[k].alt.clone(), slide.group_role(li, k).is_some_and(|r| r.has_text))).unwrap_or_default();
+        let owner_name = owner.map(|k| slide.layers[li].objects[k].name.clone()).unwrap_or_default();
+        let (mut new_name, mut new_alt) = (name.clone(), owner_alt.clone());
+        ui.label(egui::RichText::new(format!("Group of {} objects", members.len())).weak());
+        ui.horizontal(|ui| { ui.label("Name"); ui.add(egui::TextEdit::singleline(&mut new_name).hint_text("Group").desired_width(f32::INFINITY)); });
+        match owner {
+            None => { ui.weak("Not clickable. Add a click trigger on the Triggers tab and the group works as one button."); }
+            Some(_) => {
+                let id = egui::Id::new(("group-alt-uses-text", gid.clone()));
+                if has_text {
+                    let mut uses_text = owner_alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+                    if ui.checkbox(&mut uses_text, "Use the group's text for screen readers").on_hover_text("Screen readers read the words on its parts. Untick to give the group a different description, such as \"Go to Fire exits\".").changed() {
+                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
+                        if uses_text { new_alt.clear(); }
+                    }
+                    if !uses_text { ui.horizontal(|ui| { ui.label("Alt text"); ui.add(egui::TextEdit::singleline(&mut new_alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)); }); }
+                } else {
+                    ui.horizontal(|ui| { ui.label("Label"); ui.add(egui::TextEdit::singleline(&mut new_alt).hint_text("what pressing the group does").desired_width(f32::INFINITY)); });
+                }
+                ui.weak(format!("A click on any part runs the triggers (kept on {owner_name}). Screen readers read the group once, not its parts."));
+            }
+        }
+        if new_name != name || new_alt != owner_alt {
+            self.snapshot();
+            let layer = &mut self.project.as_mut().unwrap().slides[slide_idx].layers[li];
+            if new_name != name { if new_name.trim().is_empty() { layer.group_names.remove(&gid); } else { layer.group_names.insert(gid.clone(), new_name); } }
+            if let (true, Some(k)) = (new_alt != owner_alt, owner) { layer.objects[k].alt = new_alt; }
+            self.dirty = true;
+        }
+        true
+    }
+
+    /// The object whose triggers the Triggers tab shows for the selection: the selected object, or for a part of a
+    /// clickable group the group's owner (a click trigger on one part speaks for the whole group).
+    fn trigger_owner(&self, slide_idx: usize) -> Option<(String, String, bool)> {
+        let (li, oi) = self.selected?;
+        let slide = self.project.as_ref()?.slides.get(slide_idx)?;
+        let o = slide.layers.get(li)?.objects.get(oi)?;
+        if let Some(gid) = o.group.as_deref().filter(|_| o.table.is_none()) {
+            if let Some(k) = slide.group_owner(li, gid) { let owner = &slide.layers[li].objects[k]; return Some((owner.id.clone(), owner.name.clone(), true)); }
+        }
+        Some((o.id.clone(), o.name.clone(), false))
+    }
+
     fn triggers_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) {
-        let (owner, title) = if let Some(o) = self.selected_object() {
-            (Owner::Object(o.id.clone()), format!("Triggers: {}", o.name))
+        let (owner, title) = if let Some((id, name, grouped)) = self.trigger_owner(slide_idx).filter(|_| self.selected_object().is_some()) {
+            (Owner::Object(id), if grouped { format!("Triggers: group (kept on {name}); a click on any part runs them") } else { format!("Triggers: {name}") })
         } else {
             let slide = &self.project.as_ref().unwrap().slides[slide_idx];
             let l = &slide.layers[self.layer.min(slide.layers.len() - 1)];
@@ -6342,7 +6397,7 @@ impl App {
                 });
             }
             {
-                let owner_id = self.selected_object().map(|o| o.id.clone());
+                let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
                 let count = {
                     let sl = &self.project.as_ref().unwrap().slides[slide_idx];
                     let lid = sl.layers[self.layer.min(sl.layers.len() - 1)].id.clone();
@@ -6370,6 +6425,7 @@ impl App {
                 self.table_panel(ui);
                 return;
             }
+            if n_sel > 1 && self.group_panel(ui, ctx, slide_idx) { return; }
             if n_sel > 1 {
                 ui.label(format!("{n_sel} objects selected"));
                 ui.label("Drag to move them together. Shift-click adds or removes one. Formatting and alignment are on the Home tab.");
@@ -6522,8 +6578,9 @@ impl App {
             let before = proj.slides.clone();
             let clickable = {
                 let s = &proj.slides[slide_idx];
-                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.triggers.iter().any(|t| matches!(t.event, Event::Click | Event::DoubleClick) && matches!(&t.owner, Owner::Object(id) if *id == o.id)))
+                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.has_click_trigger(&o.id))
             };
+            let group_role = proj.slides[slide_idx].group_role(li, oi);
             let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
             ui.label(egui::RichText::new(kind_name(&obj.kind)).weak());
             let mut changed = false;
@@ -6531,13 +6588,13 @@ impl App {
                 ui.label("Name");
                 changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
             });
-            match obj.alt_use(clickable) {
+            match obj.alt_use(clickable, group_role) {
                 AltUse::Hidden => {}
                 AltUse::ButtonText => {
                     // "Use the text" is an empty alt text; unticking it shows the box (remembered while it is still empty).
                     let id = egui::Id::new(("alt-uses-text", obj.id.clone()));
                     let mut uses_text = obj.alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
-                    let what = if obj.check.is_some() { "label text" } else { "button text" };
+                    let what = if group_role.is_some() { "group's text" } else if obj.check.is_some() { "label text" } else { "button text" };
                     if ui.checkbox(&mut uses_text, format!("Use the {what} for screen readers")).on_hover_text("Screen readers read the text on it. Untick to give it a different description, such as \"Next: Fire exits\".").changed() {
                         ctx.data_mut(|d| d.insert_temp(id, uses_text));
                         if uses_text { obj.alt.clear(); }
@@ -9617,6 +9674,51 @@ mod tests {
         // A clickable shape with no text: it needs a name, so there is no choice to use text, and the box is called Label.
         show(&mut h, 3);
         assert!(h.query_by_label_contains("Use the button text").is_none() && h.query_by_label("Label").is_some(), "an icon-only button needs a label");
+    }
+
+    /// A click trigger on one part of a group speaks for the group: the Triggers tab shows it for every part, and
+    /// Properties names only the owner (issue #58).
+    #[test]
+    fn gui_a_clickable_group_has_one_set_of_triggers_and_one_name() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut card = Object::new("card", "Card", Kind::Rect, 100.0, 100.0, 500.0, 260.0);
+            card.fill = Some(Rgba(11, 37, 69, 255));
+            let mut words = Object::new("words", "Words", Kind::Text, 120.0, 250.0, 460.0, 80.0);
+            words.text = "Fire exits".into();
+            let mut icon = Object::new("icon", "Door icon", Kind::Path(vec![]), 280.0, 120.0, 100.0, 100.0);
+            icon.fill = Some(Rgba(255, 255, 255, 255));
+            for o in [&mut card, &mut words, &mut icon] { o.group = Some("g".into()); }
+            p.slides[0].layers[0].objects = vec![card, words, icon];
+            p.slides[0].triggers.push(Trigger { id: "t".into(), owner: Owner::Object("card".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        // Selecting the group shows its panel: one name for screen readers, from the words of its parts.
+        h.state_mut().selected = Some((0, 2));
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Group of 3 objects").is_some(), "choosing a part chooses the group");
+        assert!(h.query_by_label_contains("Use the group's text").is_some(), "its words name it unless it has alt text of its own");
+        assert!(h.query_by_label("Alt text").is_none());
+        h.get_by_label_contains("Use the group's text").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Alt text").is_some(), "unticking shows the alt text box");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("group-panel.png")).unwrap(); }
+        // Its Triggers tab shows the group's trigger, kept on the card.
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Triggers: group (kept on Card)").is_some(), "the group's triggers are shown for any part");
+        assert_eq!(h.state().trigger_owner(0).map(|(id, _, g)| (id, g)), Some(("card".to_string(), true)));
+        // Typing alt text puts it on the owner, as one undo step, and it names the group.
+        h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[0].alt = "Go to Fire exits".into();
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].group_name(0, "g"), "Go to Fire exits");
+        // A part of a group with no click trigger is just itself.
+        h.state_mut().project.as_mut().unwrap().slides[0].triggers.clear();
+        h.run_steps(2);
+        assert_eq!(h.state().trigger_owner(0).map(|(id, _, g)| (id, g)), Some(("icon".to_string(), false)));
     }
 
     #[test]

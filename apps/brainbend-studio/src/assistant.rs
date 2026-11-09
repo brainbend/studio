@@ -141,6 +141,7 @@ fn what(name: &str, input: &serde_json::Value) -> String {
         "find_icons" => format!("Looking for an icon: {}", input.get("query").and_then(|q| q.as_str()).unwrap_or("")),
         "add_icon" => format!("Adding an icon{slide}"),
         "add_button" => format!("Adding a button{slide}"),
+        "group_objects" => format!("Grouping objects{slide}"),
         "check_accessibility" => "Checking accessibility".into(),
         "set_player" => "Setting the title and player".into(),
         "add_slide" => "Adding a slide".into(),
