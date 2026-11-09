@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=BrainBend Studio
+Comment=Author interactive lessons
+Exec=brainbend-studio %f
+Icon=brainbend-studio
+Terminal=false
+Categories=Education;Office;
+MimeType=application/x-brainbend;application/x-brainbend-story;
+StartupWMClass=brainbend-studio

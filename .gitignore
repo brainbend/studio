@@ -36,3 +36,4 @@ __pycache__/
 /tests/player/node_modules/
 /tests/player/package-lock.json
 /dist/
+/release-files/
