@@ -7,6 +7,7 @@ use crate::check::{Issue, Location, Severity};
 use crate::*;
 
 /// When the lesson counts as complete.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Completion {
     /// Every block has been scrolled into view.
@@ -31,6 +32,7 @@ impl Completion {
 }
 
 /// How an `Items` block lays out its entries.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ItemsStyle {
     #[default]
@@ -57,6 +59,7 @@ impl ItemsStyle {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub title: String,
@@ -64,6 +67,7 @@ pub struct Item {
 }
 
 /// How wide an image block is drawn.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageWidth {
     #[default]
@@ -72,6 +76,7 @@ pub enum ImageWidth {
     Small,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BlockKind {
     Heading { text: String, level: u8 },
@@ -183,12 +188,14 @@ impl BlockKind {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Block {
     pub id: String,
     pub kind: BlockKind,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Section {
     pub id: String,
@@ -200,6 +207,7 @@ pub struct Section {
 }
 
 /// The title banner at the top of the lesson.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Cover {
     pub subtitle: String,
@@ -209,6 +217,7 @@ pub struct Cover {
     pub image: Option<String>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebLesson {
     pub sections: Vec<Section>,

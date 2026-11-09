@@ -27,6 +27,15 @@ mod states_panel;
 mod update;
 mod video_support;
 mod video_export;
+mod mcp_tools;
+mod mcp_access;
+mod mcp_design;
+mod mcp_images;
+mod mcp_player;
+mod svg;
+mod mcp;
+mod assistant;
+mod terminal;
 mod lesson_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
@@ -67,6 +76,8 @@ fn main() -> eframe::Result {
             if let Some(f) = &app.recent_file { app.recent = recent::load_from(f); }
             app.updater = update::Updater::load();
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
+            app.mcp = mcp::Mcp::load();
+            app.assistant = assistant::Assistant::load();
             app.open_to_story_view = true;
             if let Some(p) = arg {
                 app.open(&p);
@@ -110,7 +121,6 @@ struct App {
     fit_scale: f32,
     theme_colors_open: bool,
     background_open: bool,
-    theme_fonts_open: bool,
     /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
     /// The issue count in the status bar, when it was counted and what it was.
@@ -195,6 +205,10 @@ struct App {
     handout_range: publish_dialog::HandoutRange,
     /// A Word handout being made: its slides are shown one at a time while their pictures are taken.
     word_capture: Option<word_export::Capture>,
+    /// AI tools connecting to the app through MCP: the controller's state and its window.
+    mcp: mcp::Mcp,
+    /// The chat with Claude in the AI tab.
+    assistant: assistant::Assistant,
     /// What the Video page of the Publish dialog is set to.
     video_options: video_export::Options,
     /// A video being made.
@@ -343,6 +357,7 @@ fn recovery_path() -> Option<PathBuf> {
 /// Project-level settings that undo also covers (everything that is not slide content).
 #[derive(Clone)]
 struct Meta {
+    name: String,
     variables: Vec<Variable>,
     scenes: Vec<Scene>,
     pass_mark: u32,
@@ -363,6 +378,7 @@ struct Meta {
 impl Meta {
     fn of(p: &Project) -> Self {
         Self {
+            name: p.name.clone(),
             variables: p.variables.clone(),
             scenes: p.scenes.clone(),
             pass_mark: p.pass_mark,
@@ -382,6 +398,7 @@ impl Meta {
     }
 
     fn apply(self, p: &mut Project) {
+        p.name = self.name;
         p.variables = self.variables;
         p.scenes = self.scenes;
         p.pass_mark = self.pass_mark;
@@ -473,8 +490,8 @@ impl Default for App {
             project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, theme_fonts_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, video_options: Default::default(), video_run: None, paint_clean: false,
+            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -1372,6 +1389,13 @@ impl App {
         if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
     }
 
+    /// The window's title: the project's name, a dot while it has unsaved changes, and a note while AI tools can connect.
+    fn window_title(&self) -> String {
+        let name = self.project.as_ref().map(|p| p.name.clone()).unwrap_or_default();
+        if name.is_empty() { return "BrainBend Studio".to_string(); }
+        format!("BrainBend Studio — {name}{}{}", if self.dirty { " •" } else { "" }, if self.mcp.running() { "  ·  AI tools on" } else { "" })
+    }
+
     fn new_id(&mut self, prefix: &str) -> String {
         self.id_counter += 1;
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -1586,7 +1610,7 @@ impl App {
     }
 
     fn load_image_asset_titled(&mut self, title: &str) -> Option<(String, String, f32, f32)> {
-        let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg"]).pick_file()?;
+        let path = rfd::FileDialog::new().set_title(title).add_filter("Image", &["png", "jpg", "jpeg", "svg"]).pick_file()?;
         self.load_image_file(&path)
     }
 
@@ -1596,9 +1620,13 @@ impl App {
             Ok(b) => b,
             Err(e) => { self.status = format!("Could not read {}: {e}", path.display()); return None; }
         };
+        // An SVG is drawn to a sharp PNG, so it works anywhere a picture does (see svg.rs).
+        let bytes = if svg::looks_like_svg(&bytes) {
+            match svg::render(&bytes) { Ok(r) => r.png, Err(e) => { self.status = e; return None; } }
+        } else { bytes };
         let (w, h) = match image::load_from_memory(&bytes) {
             Ok(img) => (img.width() as f32, img.height() as f32),
-            Err(e) => { self.status = format!("Not a usable PNG/JPEG ({e})"); return None; }
+            Err(e) => { self.status = format!("Not a usable picture ({e})"); return None; }
         };
         let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) { "image/png" } else { "image/jpeg" };
         let key = self.new_id("asset");
@@ -1621,7 +1649,7 @@ impl App {
     }
 
     fn insert_image(&mut self) {
-        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("Insert Picture").add_filter("Image", &["png", "jpg", "jpeg", "svg"]).pick_file() else { return };
         self.insert_image_file(&path);
     }
 
@@ -1632,7 +1660,7 @@ impl App {
         enum Kind { Project, Image, Video, Audio, Other }
         let kind = |p: &PathBuf| match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
             Some("story" | "brainbend" | "storyapp" | "pptx") => Kind::Project,
-            Some("png" | "jpg" | "jpeg") => Kind::Image,
+            Some("png" | "jpg" | "jpeg" | "svg") => Kind::Image,
             Some("mp4" | "m4v" | "webm") => Kind::Video,
             Some("mp3" | "m4a" | "ogg" | "wav") => Kind::Audio,
             _ => Kind::Other,
@@ -1660,7 +1688,7 @@ impl App {
         self.status = if added == 1 { "Added the dropped file to the slide".into() }
             else if added > 1 { format!("Added {added} dropped files to the slide") }
             else if no_project { "Open or start a project first, then drop the file onto a slide".into() }
-            else if unsupported > 0 { "Drop a picture (PNG or JPEG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
+            else if unsupported > 0 { "Drop a picture (PNG, JPEG or SVG), a video (MP4 or WebM), an audio file (MP3, M4A, OGG or WAV), or a .brainbend, .story or .pptx project".into() }
             else { return };
     }
 
@@ -2526,8 +2554,11 @@ impl App {
     fn insert_icon(&mut self, icon: &icons::Icon) {
         let Some((cmds, aspect)) = icons::outline(icon) else { return };
         let (w, h) = if aspect >= 1.0 { (200.0, 200.0 / aspect) } else { (200.0 * aspect, 200.0) };
+        let silhouette = brainbend_doc::shapes::silhouette(&cmds);
         let mut o = blank_object(self.new_id("obj"), &icon.title(), Kind::Path(cmds), 0.0, 0.0, w, h);
-        o.fill = Some(self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255)));
+        // Lines in the outline color, and no fill until the author gives the inside one.
+        o.stroke = Some(Stroke { color: self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255)), width: 0.0 });
+        o.icon = Some(silhouette);
         o.alt = icon.title();
         self.insert(o);
     }
@@ -3703,9 +3734,64 @@ impl App {
     }
 
     /// Triggers for the selected object (or the layer / slide when nothing is selected), shown in the right panel.
+    /// Properties for a selection that is exactly one group: its name, and how screen readers read it. Returns whether it
+    /// showed (otherwise the selection is several unrelated objects).
+    fn group_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) -> bool {
+        let sel = self.selection();
+        let Some(&(li, first)) = sel.first() else { return false };
+        let Some(slide) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)) else { return false };
+        let Some(gid) = slide.layers.get(li).and_then(|l| l.objects.get(first)).and_then(|o| o.group.clone().filter(|_| o.table.is_none())) else { return false };
+        let members = slide.group_members(li, &gid);
+        if members.len() != sel.len() || sel.iter().any(|&(l, k)| l != li || !members.contains(&k)) { return false; }
+        let name = slide.layers[li].group_names.get(&gid).cloned().unwrap_or_default();
+        let owner = slide.group_owner(li, &gid);
+        let (owner_alt, has_text) = owner.map(|k| (slide.layers[li].objects[k].alt.clone(), slide.group_role(li, k).is_some_and(|r| r.has_text))).unwrap_or_default();
+        let owner_name = owner.map(|k| slide.layers[li].objects[k].name.clone()).unwrap_or_default();
+        let (mut new_name, mut new_alt) = (name.clone(), owner_alt.clone());
+        ui.label(egui::RichText::new(format!("Group of {} objects", members.len())).weak());
+        ui.horizontal(|ui| { ui.label("Name"); ui.add(egui::TextEdit::singleline(&mut new_name).hint_text("Group").desired_width(f32::INFINITY)); });
+        match owner {
+            None => { ui.weak("Not clickable. Add a click trigger on the Triggers tab and the group works as one button."); }
+            Some(_) => {
+                let id = egui::Id::new(("group-alt-uses-text", gid.clone()));
+                if has_text {
+                    let mut uses_text = owner_alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+                    if ui.checkbox(&mut uses_text, "Use the group's text for screen readers").on_hover_text("Screen readers read the words on its parts. Untick to give the group a different description, such as \"Go to Fire exits\".").changed() {
+                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
+                        if uses_text { new_alt.clear(); }
+                    }
+                    if !uses_text { ui.horizontal(|ui| { ui.label("Alt text"); ui.add(egui::TextEdit::singleline(&mut new_alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)); }); }
+                } else {
+                    ui.horizontal(|ui| { ui.label("Label"); ui.add(egui::TextEdit::singleline(&mut new_alt).hint_text("what pressing the group does").desired_width(f32::INFINITY)); });
+                }
+                ui.weak(format!("A click on any part runs the triggers (kept on {owner_name}). Screen readers read the group once, not its parts."));
+            }
+        }
+        if new_name != name || new_alt != owner_alt {
+            self.snapshot();
+            let layer = &mut self.project.as_mut().unwrap().slides[slide_idx].layers[li];
+            if new_name != name { if new_name.trim().is_empty() { layer.group_names.remove(&gid); } else { layer.group_names.insert(gid.clone(), new_name); } }
+            if let (true, Some(k)) = (new_alt != owner_alt, owner) { layer.objects[k].alt = new_alt; }
+            self.dirty = true;
+        }
+        true
+    }
+
+    /// The object whose triggers the Triggers tab shows for the selection: the selected object, or for a part of a
+    /// clickable group the group's owner (a click trigger on one part speaks for the whole group).
+    fn trigger_owner(&self, slide_idx: usize) -> Option<(String, String, bool)> {
+        let (li, oi) = self.selected?;
+        let slide = self.project.as_ref()?.slides.get(slide_idx)?;
+        let o = slide.layers.get(li)?.objects.get(oi)?;
+        if let Some(gid) = o.group.as_deref().filter(|_| o.table.is_none()) {
+            if let Some(k) = slide.group_owner(li, gid) { let owner = &slide.layers[li].objects[k]; return Some((owner.id.clone(), owner.name.clone(), true)); }
+        }
+        Some((o.id.clone(), o.name.clone(), false))
+    }
+
     fn triggers_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) {
-        let (owner, title) = if let Some(o) = self.selected_object() {
-            (Owner::Object(o.id.clone()), format!("Triggers: {}", o.name))
+        let (owner, title) = if let Some((id, name, grouped)) = self.trigger_owner(slide_idx).filter(|_| self.selected_object().is_some()) {
+            (Owner::Object(id), if grouped { format!("Triggers: group (kept on {name}); a click on any part runs them") } else { format!("Triggers: {name}") })
         } else {
             let slide = &self.project.as_ref().unwrap().slides[slide_idx];
             let l = &slide.layers[self.layer.min(slide.layers.len() - 1)];
@@ -4554,7 +4640,13 @@ impl App {
                 else if ellipse { painter.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, color(f))); }
                 else { painter.rect_filled(r, o.radius * scale, color(f)); }
             }
-            if let Kind::Path(cmds) = &o.kind {
+            if let (Kind::Path(cmds), Some(look)) = (&o.kind, o.icon_look()) {
+                // A vector icon: what its lines enclose in the fill color, then the lines in the outline color.
+                let figs = path_polygons(cmds, r);
+                if let (Some(inside), Some(sil)) = (look.inside, o.icon.as_ref()) { fill_figures(painter, &path_polygons(sil, r), &|p| p, &|_| color(inside)); }
+                fill_figures(painter, &figs, &|p| p, &|_| color(look.lines));
+                if look.bold > 0.0 { for k in 0..12 { let a = std::f32::consts::TAU * k as f32 / 12.0; let off = egui::vec2(a.cos(), a.sin()) * (look.bold * scale / 2.0); fill_figures(painter, &figs, &move |p| p + off, &|_| color(look.lines)); } }
+            } else if let Kind::Path(cmds) = &o.kind {
                 let figs = path_polygons(cmds, r);
                 if let (Some(g), true) = (&o.gradient, !g_is_empty(&o.gradient)) {
                     fill_figures(painter, &figs, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
@@ -4740,6 +4832,13 @@ impl App {
             effects_paint::behind(painter, o, r, scale, o.fill.map(color), &rot);
         }
         match &o.kind {
+            Kind::Path(cmds) if o.icon_look().is_some() => {
+                let look = o.icon_look().unwrap();
+                let figs = path_polygons(cmds, r);
+                if let (Some(inside), Some(sil)) = (look.inside, o.icon.as_ref()) { fill_figures(painter, &path_polygons(sil, r), &rot, &|_| color(inside)); }
+                fill_figures(painter, &figs, &rot, &|_| color(look.lines));
+                if look.bold > 0.0 { for k in 0..12 { let a = std::f32::consts::TAU * k as f32 / 12.0; let off = egui::vec2(a.cos(), a.sin()) * (look.bold * scale / 2.0); fill_figures(painter, &figs, &|p| rot(p) + off, &|_| color(look.lines)); } }
+            }
             Kind::Path(cmds) => {
                 let figs = path_polygons(cmds, r);
                 if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &figs, r, color(f), edge, &rot); }
@@ -5213,6 +5312,9 @@ fn question_editor(ui: &mut egui::Ui, q: &mut Question, new_id: &mut dyn FnMut()
     changed |= ui.text_edit_singleline(&mut q.feedback_incorrect).changed();
     changed
 }
+
+/// The AI tab of the side panel, after Properties (0) and Triggers (1).
+const AI_TAB: usize = 2;
 
 /// Layers shown when a slide starts: the base layer plus any a slide-start trigger shows.
 fn start_layers(slide: &Slide) -> Vec<usize> { slide.start_layers() }
@@ -5921,7 +6023,6 @@ impl App {
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
         self.background_window(ctx);
-        self.theme_fonts_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
         // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
@@ -5930,9 +6031,7 @@ impl App {
 
         // Window title, close guard, autosave.
         {
-            let name = self.project.as_ref().map(|p| p.name.clone()).unwrap_or_default();
-            let title = if name.is_empty() { "BrainBend Studio".to_string() } else { format!("BrainBend Studio — {name}{}", if self.dirty { " •" } else { "" }) };
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.window_title()));
             if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
                 if self.dirty && self.project.is_some() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -6143,6 +6242,9 @@ impl App {
         }
         self.update_window(ctx);
         self.video_support_window(ctx);
+        self.mcp_frame(ctx);
+        self.assistant_frame();
+        self.ai_setup_window(ctx);
         self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.video_export_frame(ctx);
@@ -6295,23 +6397,28 @@ impl App {
         let mut restore_ratio = false;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
         let mut open_states = false;
-        egui::Panel::right("inspector").default_size(326.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
+        // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
+        let wide_panel = self.right_tab == AI_TAB && self.assistant.shows_terminal();
+        egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
             // stays put.
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
-            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers { self.right_tab = 0; }
+            // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
             ui.add_enabled_ui(editable, |ui| {
-            if !self.in_master_view() {
+            // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
+            // tab away.
+            if !self.in_master_view() && self.right_tab != AI_TAB {
                 egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
             }
             {
-                let owner_id = self.selected_object().map(|o| o.id.clone());
+                let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
                 let count = {
                     let sl = &self.project.as_ref().unwrap().slides[slide_idx];
                     let lid = sl.layers[self.layer.min(sl.layers.len() - 1)].id.clone();
@@ -6322,8 +6429,12 @@ impl App {
                         _ => false,
                     }).count()
                 };
-                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }];
+                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
                 doc_tabs::panel_tabs(ui, &labels, &mut self.right_tab);
+            }
+            if self.right_tab == AI_TAB {
+                self.ai_panel(ui);
+                return;
             }
             if self.right_tab == 1 {
                 self.triggers_panel(ui, ctx, slide_idx);
@@ -6335,6 +6446,7 @@ impl App {
                 self.table_panel(ui);
                 return;
             }
+            if n_sel > 1 && self.group_panel(ui, ctx, slide_idx) { return; }
             if n_sel > 1 {
                 ui.label(format!("{n_sel} objects selected"));
                 ui.label("Drag to move them together. Shift-click adds or removes one. Formatting and alignment are on the Home tab.");
@@ -6485,6 +6597,11 @@ impl App {
             let proj = self.project.as_mut().unwrap();
             // Slides are small (assets live on the project), so a per-frame copy is cheap.
             let before = proj.slides.clone();
+            let clickable = {
+                let s = &proj.slides[slide_idx];
+                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.has_click_trigger(&o.id))
+            };
+            let group_role = proj.slides[slide_idx].group_role(li, oi);
             let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
             ui.label(egui::RichText::new(kind_name(&obj.kind)).weak());
             let mut changed = false;
@@ -6492,11 +6609,33 @@ impl App {
                 ui.label("Name");
                 changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
             });
-            ui.horizontal(|ui| {
-                ui.label("Alt text");
-                changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("describe for screen readers").desired_width(f32::INFINITY)).changed();
-            });
-            changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
+            match obj.alt_use(clickable, group_role) {
+                AltUse::Hidden => {}
+                AltUse::ButtonText => {
+                    // "Use the text" is an empty alt text; unticking it shows the box (remembered while it is still empty).
+                    let id = egui::Id::new(("alt-uses-text", obj.id.clone()));
+                    let mut uses_text = obj.alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+                    let what = if group_role.is_some() { "group's text" } else if obj.check.is_some() { "label text" } else { "button text" };
+                    if ui.checkbox(&mut uses_text, format!("Use the {what} for screen readers")).on_hover_text("Screen readers read the text on it. Untick to give it a different description, such as \"Next: Fire exits\".").changed() {
+                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
+                        if uses_text { obj.alt.clear(); }
+                        changed = true;
+                    }
+                    if !uses_text {
+                        ui.horizontal(|ui| {
+                            ui.label("Alt text");
+                            changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)).changed();
+                        });
+                    }
+                }
+                AltUse::Field(label, hint) => {
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text(hint).desired_width(f32::INFINITY)).changed();
+                    });
+                    changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
+                }
+            }
             if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
                 ui.horizontal(|ui| {
                     ui.label("Read as");
@@ -6555,7 +6694,7 @@ impl App {
             }
             if let Kind::Input(f) = &mut obj.kind {
                 changed |= controls::input_editor(ui, f, &text_vars, &num_vars);
-                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add alt text above: it is the field's label for screen readers.");
+                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add a label above: it is the field's name for screen readers.");
             }
             if let Kind::Pano(p) = &obj.kind {
                 ui.horizontal(|ui| {
@@ -7999,6 +8138,477 @@ mod tests {
         assert!(h.state().updater.dialog_open && !h.state().updater.notice_open, "the update window opens, not the notice");
     }
 
+    /// A home folder of the test's own, so that saved AI Tools settings (which include a secret) never touch the real one.
+    fn own_home(name: &str) -> std::path::PathBuf {
+        let home = std::env::temp_dir().join(format!("bb-home-{name}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&home);
+        std::env::set_var("HOME", &home);
+        std::env::set_var("USERPROFILE", &home);
+        home
+    }
+
+    #[test]
+    fn the_ai_tab_turns_the_controller_on_and_off_and_keeps_the_token_hidden() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("mcp-window");
+        let mut a = app();
+        let token = "k".repeat(64);
+        a.mcp.settings = mcp::Settings { token: token.clone(), port: 0, ..Default::default() };
+        a.ribbon_tab = ribbon::HELP_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The group heading and its button share the name; the heading ignores a click.
+        for n in h.get_all_by_label("Set up AI") { n.click(); }
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, AI_TAB, "the Help tab's button opens the AI tab in the side panel");
+        assert!(h.state().assistant.setup_open, "and the setup window");
+        assert!(!h.state().mcp.running(), "nothing listens until the author turns it on");
+        assert!(h.get_all_by_label("AI").next().is_some(), "the tab is in the strip");
+        h.get_by_label("Use a subscription").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Open in the AI tab").is_some(), "the first choice is a terminal in the tab");
+        h.get_by_label("From your own terminal").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Let AI tools connect").is_some(), "and the commands for the author's own terminal are under it");
+        h.get_by_label("What AI may do").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Change the open project").is_some() && h.query_by_label("Let AI tools connect when BrainBend Studio opens").is_some());
+        assert!(h.state().mcp.settings.allow_edit && !h.state().mcp.settings.allow_files, "changes are allowed, files are not");
+        h.get_by_label("Let AI tools connect").click();
+        h.run_steps(3);
+        assert!(h.state().mcp.running(), "it is on");
+        let url = h.state().mcp.url().unwrap();
+        assert!(url.starts_with("http://127.0.0.1:") && url.ends_with("/mcp"), "{url}");
+        h.get_by_label("Address and token").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains(&url).next().is_some(), "the address is shown");
+        assert!(h.query_all_by_label_contains(&token).next().is_none(), "the token is hidden until Show is pressed, here and in the command");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-tab.png")).unwrap(); }
+        h.get_by_label("Show").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains(&token).next().is_some(), "now it shows");
+        assert!(h.query_all_by_label_contains("claude mcp add").next().is_some(), "Claude Code is shown first");
+        h.get_by_label("Codex").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("codex mcp add").next().is_some() && h.query_all_by_label_contains("claude mcp add").next().is_none(), "Codex has its own command");
+        h.get_by_label("Gemini CLI").click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("gemini mcp add").next().is_some());
+        assert!(h.state().window_title().ends_with("AI tools on"), "the window title says so while it is on: {}", h.state().window_title());
+        assert!(h.get_all_by_label("AI •").next().is_some(), "and the tab shows a dot while it is on");
+        h.get_by_label("Hide").click();
+        h.run_steps(2);
+        h.get_by_label("Let AI tools connect").hover();
+        h.run_steps(2);
+        h.get_by_label("Let AI tools connect").click();
+        h.run_steps(3);
+        assert!(!h.state().mcp.running(), "and off again");
+    }
+
+    #[test]
+    fn an_ai_tool_can_read_and_change_the_project_over_the_network_and_only_as_allowed() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("mcp-network");
+        let mut a = app();
+        a.project.as_mut().unwrap().slides.push(Slide::new("s2", "Second", 1920.0, 1080.0));
+        let token = "t".repeat(64);
+        a.mcp.settings = mcp::Settings { token: token.clone(), port: 0, ..Default::default() };
+        a.dirty = false;
+        a.undo.clear();
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        let ctx = h.ctx.clone();
+        h.state_mut().mcp.start(&ctx);
+        let url = h.state().mcp.url().expect("it started");
+        // A real HTTP client, on its own thread as an AI tool would be, while the app keeps drawing frames.
+        let call = |auth: Option<String>, body: serde_json::Value| {
+            let url = url.clone();
+            std::thread::spawn(move || {
+                let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+                let mut req = agent.post(&url);
+                if let Some(a) = auth { req = req.header("Authorization", a); }
+                let mut reply = req.send(body.to_string().as_bytes()).expect("the controller answers");
+                (reply.status().as_u16(), reply.body_mut().read_to_string().unwrap_or_default())
+            })
+        };
+        let bearer = Some(format!("Bearer {token}"));
+        let mut ask = |h: &mut egui_kittest::Harness<'static, App>, auth: Option<String>, body: serde_json::Value| -> (u16, serde_json::Value) {
+            let t = call(auth, body);
+            let mut waited = 0;
+            while !t.is_finished() && waited < 2000 { h.step(); std::thread::sleep(std::time::Duration::from_millis(5)); waited += 1; }
+            let (status, text) = t.join().expect("the client finished");
+            (status, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+        };
+        let tool = |id: u32, name: &str, args: serde_json::Value| serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": name, "arguments": args } });
+        let text_of = |v: &serde_json::Value| v["result"]["content"][0]["text"].as_str().unwrap_or("").to_string();
+
+        // Connecting, and being refused without the token.
+        let (status, v) = ask(&mut h, bearer.clone(), serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "protocolVersion": "2025-06-18" } }));
+        assert_eq!((status, v["result"]["serverInfo"]["name"].as_str()), (200, Some("brainbend-studio")));
+        let (status, _) = ask(&mut h, None, tool(2, "list_slides", serde_json::json!({})));
+        assert_eq!(status, 401, "no token");
+        let (status, _) = ask(&mut h, Some("Bearer wrong".into()), tool(2, "list_slides", serde_json::json!({})));
+        assert_eq!(status, 401, "wrong token");
+
+        // Reading.
+        let (_, v) = ask(&mut h, bearer.clone(), tool(3, "list_slides", serde_json::json!({})));
+        assert_eq!(v["result"]["isError"], false);
+        let slides: serde_json::Value = serde_json::from_str(&text_of(&v)).unwrap();
+        assert_eq!(slides.as_array().unwrap().len(), 2);
+        assert!(!h.state().dirty, "looking changes nothing");
+
+        // Changing, as the author allows by default; the author sees it on screen and can undo it.
+        let (_, v) = ask(&mut h, bearer.clone(), tool(4, "add_text", serde_json::json!({ "slide": 2, "text": "From an AI tool", "size": 60 })));
+        assert_eq!(v["result"]["isError"], false, "{v}");
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects[0].text, "From an AI tool");
+        assert!(h.state().dirty && h.state().status.starts_with("AI tool:"), "{}", h.state().status);
+        assert_eq!(h.state().slide, 1, "the slide it worked on is on screen");
+        let (_, v) = ask(&mut h, bearer.clone(), tool(5, "undo", serde_json::json!({})));
+        assert_eq!(v["result"]["isError"], false);
+        assert!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.is_empty(), "undone");
+
+        // With changes switched off, it can still look but not touch.
+        h.state_mut().mcp.settings.allow_edit = false;
+        let (_, v) = ask(&mut h, bearer.clone(), tool(6, "add_text", serde_json::json!({ "slide": 1, "text": "No" })));
+        assert_eq!(v["result"]["isError"], true);
+        assert!(text_of(&v).contains("not allowed AI tools to change the project"), "{}", text_of(&v));
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "nothing changed");
+        let (_, v) = ask(&mut h, bearer.clone(), tool(7, "get_slide", serde_json::json!({ "slide": 1 })));
+        assert_eq!(v["result"]["isError"], false, "reading still works");
+
+        // The activity list says what happened, and failures stand out.
+        let log: Vec<(bool, String)> = h.state().mcp.log.iter().map(|l| (l.ok, l.text.clone())).collect();
+        assert!(log.iter().any(|(ok, t)| *ok && t == "add_text") && log.iter().any(|(ok, t)| !ok && t.starts_with("add_text: The author has not allowed")), "{log:?}");
+
+        // Files are off, and stay off, whatever tool is asked for.
+        assert_eq!(mcp_tools::access("save_project"), None, "no file tools exist yet");
+        h.state_mut().mcp.stop();
+        assert!(!h.state().mcp.running());
+    }
+
+    /// A stand-in for the Claude API: it answers each request with the next scripted reply and keeps what it was sent.
+    fn fake_claude(replies: Vec<serde_json::Value>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for reply in replies {
+                let Ok(mut req) = server.recv() else { return };
+                let mut raw = String::new();
+                std::io::Read::read_to_string(req.as_reader(), &mut raw).unwrap();
+                log.lock().unwrap().push(serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null));
+                let mut r = tiny_http::Response::from_string(reply.to_string());
+                r.add_header(tiny_http::Header::from_bytes(&b"content-type"[..], &b"application/json"[..]).unwrap());
+                let _ = req.respond(r);
+            }
+        });
+        (url, seen)
+    }
+
+    fn claude_uses(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "role": "assistant", "stop_reason": "tool_use", "usage": { "input_tokens": 500, "output_tokens": 60 },
+            "content": [{ "type": "text", "text": "On it." }, { "type": "tool_use", "id": id, "name": name, "input": input }] })
+    }
+
+    fn claude_says(text: &str) -> serde_json::Value {
+        serde_json::json!({ "role": "assistant", "stop_reason": "end_turn", "usage": { "input_tokens": 700, "output_tokens": 30 }, "content": [{ "type": "text", "text": text }] })
+    }
+
+    fn chat_until_done(h: &mut egui_kittest::Harness<'static, App>, text: &str) {
+        let ctx = h.ctx.clone();
+        h.state_mut().assistant.send(text, &ctx);
+        for _ in 0..3000 {
+            h.step();
+            if !h.state().assistant.busy() { return; }
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        panic!("the chat did not finish");
+    }
+
+    #[test]
+    fn the_chat_builds_with_the_apps_own_tools_and_all_of_it_can_be_undone() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-chat");
+        let (url, seen) = fake_claude(vec![
+            claude_uses("toolu_1", "create_object", serde_json::json!({ "slide": 1, "object": { "kind": "Text", "name": "Title", "text": "Safety first", "style": { "size": 80, "bold": true }, "entrance": { "kind": "Fade", "delay_ms": 0, "duration_ms": 600 } } })),
+            claude_says("I added a title that fades in."),
+            claude_uses("toolu_2", "create_object", serde_json::json!({ "slide": 1, "object": { "kind": "Text", "text": "Not allowed" } })),
+            claude_says("I could not change it."),
+        ]);
+        let mut a = app();
+        a.dirty = false;
+        a.undo.clear();
+        a.assistant.settings = assistant::Settings { base_url: Some(url), ..assistant::Settings::claude("sk-test") };
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        chat_until_done(&mut h, "Add a title that says Safety first");
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert_eq!((o.text.as_str(), o.style.size, o.style.bold, o.entrance.is_some()), ("Safety first", 80.0, true, true), "Claude's tool call changed the lesson");
+        assert!(h.state().dirty && h.state().status.starts_with("AI tool:"), "{}", h.state().status);
+        let chat = h.state().assistant.chat.clone();
+        assert!(matches!(&chat[0], assistant::Line::You(t) if t == "Add a title that says Safety first"));
+        assert!(chat.iter().any(|l| matches!(l, assistant::Line::Tool { name, state: assistant::ToolState::Done, .. } if name == "create_object")), "{chat:?}");
+        assert!(matches!(chat.last(), Some(assistant::Line::Reply(t)) if t == "I added a title that fades in."));
+        assert!(h.state().assistant.usage.tokens() > 1000, "the use is counted");
+        assert!(h.state().mcp.log.iter().any(|l| l.ok && l.text == "assistant: create_object"), "and it shows in the activity list");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
+            h.state_mut().right_tab = AI_TAB;
+            h.run_steps(3);
+            h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("ai-chat.png")).unwrap();
+        }
+        {
+            let sent = seen.lock().unwrap();
+            assert_eq!(sent[0]["model"], "claude-opus-5-5");
+            assert!(sent[0]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "patch" && t["input_schema"]["type"] == "object"), "Claude is given the app's tools");
+            assert!(sent[0]["system"].as_str().unwrap().contains("BrainBend Studio"));
+            let back = &sent[1]["messages"][2]["content"][0];
+            assert_eq!((back["type"].as_str(), back["tool_use_id"].as_str()), (Some("tool_result"), Some("toolu_1")));
+            assert!(back["content"].as_str().unwrap().contains("/slides/0/layers/0/objects/0"), "Claude is told what it made: {back}");
+        }
+        // One Undo takes back the whole thing.
+        h.state_mut().undo();
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "undone");
+        // With changes switched off, Claude can look but the lesson stays as it is.
+        h.state_mut().mcp.settings.allow_edit = false;
+        chat_until_done(&mut h, "Add more");
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "nothing was added");
+        let sent = seen.lock().unwrap();
+        let refused = &sent[3]["messages"].as_array().unwrap().last().unwrap()["content"][0];
+        assert_eq!(refused["is_error"], true);
+        assert!(refused["content"].as_str().unwrap().contains("not allowed AI tools to change the project"), "{refused}");
+        assert!(h.state().assistant.chat.iter().any(|l| matches!(l, assistant::Line::Tool { state: assistant::ToolState::Failed(_), .. })), "the chat shows the step that was refused");
+    }
+
+    #[test]
+    fn a_failed_chat_says_why_and_that_changes_made_so_far_can_be_undone() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-fail");
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+        std::thread::spawn(move || {
+            for n in 0..2 {
+                let Ok(mut req) = server.recv() else { return };
+                let mut raw = String::new();
+                std::io::Read::read_to_string(req.as_reader(), &mut raw).unwrap();
+                let (status, body) = if n == 0 { (200, claude_uses("toolu_1", "add_slide", serde_json::json!({})).to_string()) } else { (401, r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#.to_string()) };
+                let _ = req.respond(tiny_http::Response::from_string(body).with_status_code(status));
+            }
+        });
+        let mut a = app();
+        a.assistant.settings = assistant::Settings { base_url: Some(url), ..assistant::Settings::claude("sk-bad") };
+        let mut h = harness(a);
+        h.state_mut().file_view = false;
+        let before = h.state().project.as_ref().unwrap().slides.len();
+        chat_until_done(&mut h, "Add a slide");
+        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), before + 1, "the first step did run");
+        let last = h.state().assistant.chat.last().cloned();
+        assert!(matches!(&last, Some(assistant::Line::Error(e)) if e.contains("API key was not accepted") && e.contains("Undo takes it back")), "{last:?}");
+        assert!(!h.state().assistant.busy(), "and it can be used again");
+    }
+
+    #[test]
+    fn gpt_and_gemini_build_with_the_same_tools_as_claude() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-providers");
+        let object = serde_json::json!({ "slide": 1, "object": { "kind": "Text", "name": "Title", "text": "Safety first", "style": { "size": 80, "bold": true } } });
+        let gpt = vec![
+            serde_json::json!({ "choices": [{ "finish_reason": "tool_calls", "message": { "role": "assistant", "content": "On it.", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "create_object", "arguments": object.to_string() } }] } }], "usage": { "prompt_tokens": 900, "completion_tokens": 60 } }),
+            serde_json::json!({ "choices": [{ "finish_reason": "stop", "message": { "role": "assistant", "content": "Added the title." } }], "usage": { "prompt_tokens": 1000, "completion_tokens": 20 } }),
+        ];
+        let gemini = vec![
+            serde_json::json!({ "candidates": [{ "finishReason": "STOP", "content": { "role": "model", "parts": [{ "text": "On it." }, { "functionCall": { "name": "create_object", "args": object } }] } }], "usageMetadata": { "promptTokenCount": 900, "candidatesTokenCount": 60 } }),
+            serde_json::json!({ "candidates": [{ "finishReason": "STOP", "content": { "role": "model", "parts": [{ "text": "Added the title." }] } }], "usageMetadata": { "promptTokenCount": 1000, "candidatesTokenCount": 20 } }),
+        ];
+        for (provider, replies, slot) in [(brainbend_assistant::Provider::OpenAi, gpt, 1), (brainbend_assistant::Provider::Gemini, gemini, 2)] {
+            let (url, seen) = fake_claude(replies);
+            let mut a = app();
+            a.assistant.settings = assistant::Settings { provider, base_url: Some(url), ..Default::default() };
+            a.assistant.settings.keys[slot] = "key-abc".into();
+            let mut h = harness(a);
+            h.state_mut().file_view = false;
+            chat_until_done(&mut h, "Add a title that says Safety first");
+            let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+            assert_eq!((o.text.as_str(), o.style.size, o.style.bold), ("Safety first", 80.0, true), "{provider:?}: the tool call changed the lesson");
+            let chat = h.state().assistant.chat.clone();
+            assert!(matches!(chat.last(), Some(assistant::Line::Reply(t)) if t == "Added the title."), "{provider:?}: {chat:?}");
+            assert_eq!(seen.lock().unwrap().len(), 2);
+            assert!(h.state().assistant.usage.tokens() > 1000, "the use is counted");
+        }
+    }
+
+    #[test]
+    fn changing_the_provider_starts_a_new_chat_and_each_provider_has_its_own_key_prompt() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-switch");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
+        let mut a = app();
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        a.assistant.settings = assistant::Settings::claude("sk-ant-test");
+        a.assistant.settings.keys[1] = "sk-openai-test".into();
+        a.assistant.chat.push(assistant::Line::You("hello".into()));
+        let mut h = harness(a);
+        h.run_steps(3);
+        // The provider list is the first list in the side panel, which is on the right.
+        let mut combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).filter(|c| c.rect().left() > 1100.0).collect();
+        combos.sort_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
+        assert_eq!(combos.len(), 2, "a provider list and a model list");
+        combos[0].click();
+        h.run_steps(2);
+        h.get_by_label("GPT (OpenAI)").click();
+        h.run_steps(3);
+        assert_eq!(h.state().assistant.settings.provider, brainbend_assistant::Provider::OpenAi);
+        assert!(!h.state().assistant.chat.iter().any(|l| matches!(l, assistant::Line::You(_))), "the old chat is gone: a conversation belongs to one provider");
+        assert!(h.query_by_label_contains("Now asking GPT").is_some() && h.query_by_label("Send").is_some(), "it says so, and GPT has its own key");
+        let mut combos: Vec<_> = h.get_all_by_role(egui::accesskit::Role::ComboBox).filter(|c| c.rect().left() > 1100.0).collect();
+        combos.sort_by(|a, b| a.rect().left().total_cmp(&b.rect().left()));
+        combos[1].click();
+        h.run_steps(2);
+        assert!(h.query_by_label_contains("GPT-5 mini").is_some() && h.query_by_label_contains("Claude Opus").is_none(), "its models are listed, and not Claude's");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        // Without a key of its own, GPT is not set up, whatever other keys there are.
+        h.state_mut().assistant.settings.keys[1].clear();
+        h.run_steps(3);
+        assert!(h.query_by_label("Set up AI").is_some() && h.query_by_label("Send").is_none());
+        assert_eq!(h.state().assistant.settings.keys[0], "sk-ant-test", "and the Claude key is kept for when it is chosen again");
+    }
+
+    #[test]
+    fn a_tool_can_be_opened_in_the_ai_tab_already_connected_and_it_gets_the_wide_panel() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-terminal");
+        std::env::set_var("SHELL", "/bin/sh");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "k".repeat(64), port: 0, ..Default::default() };
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label("Set up AI").click();
+        h.run_steps(3);
+        h.get_by_label("Use a subscription").click();
+        h.run_steps(3);
+        // The plain shell stands in for a tool, which would be found on the author's PATH.
+        h.state_mut().assistant.term_tool = 3;
+        h.run_steps(2);
+        h.get_by_label("Open in the AI tab").click();
+        h.run_steps(5);
+        assert!(h.state().assistant.terminal.is_some(), "{:?}", h.state().assistant.terminal_error);
+        assert!(h.state().mcp.running(), "the connection was turned on for it");
+        assert!(!h.state().assistant.setup_open, "and the window got out of the way");
+        assert!(h.state().assistant.shows_terminal() && h.state().assistant.view_terminal);
+        assert!(h.query_by_label("Restart").is_some() && h.query_by_label("Close").is_some());
+        // Something coloured, to look at.
+        h.state_mut().assistant.terminal.as_mut().unwrap().send(b"printf '\\033[1;32mReady\\033[0m to build your lesson\\n'\r");
+        for _ in 0..60 { h.step(); std::thread::sleep(std::time::Duration::from_millis(10)); }
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("terminal.png")).unwrap(); }
+        h.get_by_label("Close").click();
+        h.run_steps(3);
+        assert!(h.state().assistant.terminal.is_none() && !h.state().assistant.shows_terminal(), "closing it stops it");
+        assert!(h.query_by_label("Set up AI").is_none(), "the connection is still on, so the tab is not the empty one");
+    }
+
+    #[test]
+    fn the_terminal_follows_dark_and_light_mode_and_offers_a_restart_for_the_tools_own_colors() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-terminal-mode");
+        std::env::set_var("SHELL", "/bin/sh");
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "k".repeat(64), port: 0, ..Default::default() };
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.ctx.set_theme(egui::ThemePreference::Dark);
+        h.run_steps(3);
+        let ctx = h.ctx.clone();
+        h.state_mut().start_terminal(3, &ctx);
+        assert!(h.state().assistant.terminal.as_ref().unwrap().spawned_dark, "started in dark mode");
+        h.state_mut().assistant.terminal.as_mut().unwrap().send(b"printf '\\033[1;32mReady\\033[0m \\033[31mred\\033[0m \\033[7mselected\\033[0m\\n'\r");
+        for _ in 0..50 { h.step(); std::thread::sleep(std::time::Duration::from_millis(10)); }
+        assert!(h.query_by_label_contains("The theme changed").is_none());
+        let shots = std::env::var_os("BRAINBEND_SHOT_DIR").map(std::path::PathBuf::from);
+        if let Some(dir) = &shots { h.render().expect("renderer").save(dir.join("terminal-dark.png")).unwrap(); }
+        h.ctx.set_theme(egui::ThemePreference::Light);
+        for _ in 0..6 { h.step(); }
+        assert!(h.query_by_label_contains("The theme changed").is_some(), "a tool that was started in the other mode is offered a restart");
+        if let Some(dir) = &shots { h.render().expect("renderer").save(dir.join("terminal-light.png")).unwrap(); }
+        h.get_by_label("Restart").click();
+        h.run_steps(4);
+        let t = h.state().assistant.terminal.as_ref().unwrap();
+        assert!(!t.spawned_dark, "restarted in light mode");
+        assert!(h.query_by_label_contains("The theme changed").is_none(), "and the offer goes away");
+    }
+
+    #[test]
+    fn each_tool_is_connected_in_its_own_way_and_told_what_the_tab_is_for() {
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = own_home("assistant-tools");
+        std::env::set_var("SHELL", "/bin/sh");
+        let mut a = app();
+        a.mcp.settings = mcp::Settings { token: "t".repeat(64), port: 0, ..Default::default() };
+        let mut h = harness(a);
+        h.run_steps(2);
+        let ctx = h.ctx.clone();
+        let url = { h.state_mut().mcp.start(&ctx); h.state().mcp.url().unwrap() };
+        let work = home.join(".brainbend-studio").join("ai-workspace");
+        for tool in [0, 1, 2] { h.state_mut().start_terminal(tool, &ctx); assert!(h.state().assistant.terminal.is_some(), "tool {tool}"); }
+        let read = |p: std::path::PathBuf| serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))).unwrap();
+        let claude = read(home.join(".brainbend-studio").join("claude-mcp.json"));
+        assert_eq!((claude["mcpServers"]["brainbend"]["url"].as_str(), claude["mcpServers"]["brainbend"]["headers"]["Authorization"].as_str()), (Some(url.as_str()), Some(format!("Bearer {}", "t".repeat(64)).as_str())), "Claude Code reads its connection from a file");
+        let gemini = read(work.join(".gemini").join("settings.json"));
+        assert_eq!((gemini["mcpServers"]["brainbend"]["httpUrl"].as_str(), gemini["mcpServers"]["brainbend"]["headers"]["Authorization"].as_str()), (Some(url.as_str()), Some(format!("Bearer {}", "t".repeat(64)).as_str())), "Gemini CLI reads it from the folder it starts in");
+        for file in ["CLAUDE.md", "AGENTS.md", "GEMINI.md"] {
+            let text = std::fs::read_to_string(work.join(file)).unwrap_or_default();
+            assert!(text.contains("slide deck") && text.contains("brainbend tools"), "{file} tells its tool what the tab is for");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for p in [home.join(".brainbend-studio").join("claude-mcp.json"), work.join(".gemini").join("settings.json")] {
+                assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o077, 0, "{} holds the token, so only the author can read it", p.display());
+            }
+        }
+    }
+
+    #[test]
+    fn the_ai_tab_is_one_button_until_ai_is_set_up_and_then_only_the_chat() {
+        use egui_kittest::kittest::Queryable;
+        let _home_lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = own_home("assistant-key");
+        for v in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"] { std::env::remove_var(v); }
+        let mut a = app();
+        a.right_tab = AI_TAB;
+        a.file_view = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Set up AI").is_some(), "one button to set it up");
+        assert!(h.query_by_label("Send").is_none() && h.query_by_label("Save key").is_none() && h.query_by_label("What AI may do").is_none(), "and nothing else");
+        h.get_by_label("Set up AI").click();
+        h.run_steps(3);
+        assert!(h.state().assistant.setup_open);
+        assert!(h.query_by_label("Use an API key").is_some() && h.query_by_label("Use a subscription").is_some(), "two ways to set up");
+        assert!(h.query_by_label("Save key").is_some(), "the key comes first");
+        assert!(h.query_by_label_contains("goes to Anthropic and is billed to your key").is_some(), "it says where the lesson's content goes");
+        h.state_mut().assistant.settings.keys[0] = "sk-ant-test".into();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("✓ Key saved").is_some() && h.query_by_label("Save key").is_none());
+        h.get_by_label("Done").click();
+        h.run_steps(3);
+        assert!(!h.state().assistant.setup_open);
+        assert!(h.query_by_label("Set up AI").is_none(), "once it is set up the button is gone from the tab");
+        assert!(h.query_by_label("Send").is_some() && h.query_by_label("New chat").is_some());
+        assert!(h.query_by_label_contains("Make a title slide").is_some(), "it offers a few ways to start");
+        assert!(h.query_by_label("Settings").is_some(), "and the settings are one click away");
+    }
+
     #[test]
     fn video_support_asks_before_downloading_and_not_now_is_remembered() {
         use egui_kittest::kittest::Queryable;
@@ -8722,7 +9332,7 @@ mod tests {
             let icon = icons::all().iter().find(|i| i.names[0] == name).unwrap();
             a.insert_icon(icon);
             let o = a.selected_object().unwrap();
-            assert!(matches!(o.kind, Kind::Path(_)) && o.fill.is_some() && o.stroke.is_none());
+            assert!(matches!(o.kind, Kind::Path(_)) && o.icon.is_some() && o.stroke.is_some() && o.fill.is_none(), "lines in the outline color, nothing inside until it is given one");
             assert_eq!(o.alt, name.replace('-', " "), "described for screen readers");
         }
         {
@@ -9030,6 +9640,167 @@ mod tests {
         a.selected = None;
         a.insert_symbol("€");
         assert_eq!(a.selected_object().unwrap().text, "€", "with nothing selected a symbol makes a text box");
+    }
+
+    /// Properties offers Alt text only where it does something: not on text, a "use the button text" choice on a button
+    /// with text, and a named box on a picture or an icon-only button (issue #57).
+    #[test]
+    fn gui_alt_text_is_offered_only_where_it_does_something() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut text = Object::new("t", "Words", Kind::Text, 100.0, 100.0, 400.0, 100.0);
+            text.text = "Some words".into();
+            let mut picture = Object::new("p", "Photo", Kind::Image, 100.0, 300.0, 300.0, 200.0);
+            picture.alt = String::new();
+            let mut button = Object::new("b", "Go", Kind::Rect, 600.0, 100.0, 300.0, 100.0);
+            button.text = "Next".into();
+            let mut icon_button = Object::new("i", "Icon button", Kind::Rect, 600.0, 300.0, 100.0, 100.0);
+            icon_button.fill = Some(Rgba(3, 83, 158, 255));
+            p.slides[0].layers[0].objects = vec![text, picture, button, icon_button];
+            for id in ["b", "i"] {
+                p.slides[0].triggers.push(Trigger { id: format!("trig-{id}"), owner: Owner::Object(id.into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+            }
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        let show = |h: &mut egui_kittest::Harness<'static, App>, i: usize| { h.state_mut().selected = Some((0, i)); h.run_steps(3); };
+        // Text: nothing to describe.
+        show(&mut h, 0);
+        assert!(h.query_by_label("Alt text").is_none() && h.query_by_label_contains("Decorative").is_none() && h.query_by_label_contains("Use the").is_none(), "plain text has no alt text control");
+        // A picture: the alt box, and Decorative.
+        show(&mut h, 1);
+        assert!(h.query_by_label("Alt text").is_some() && h.query_by_label_contains("Decorative").is_some());
+        // A button with text: "Use the button text", ticked, with no box until it is unticked.
+        show(&mut h, 2);
+        assert!(h.query_by_label_contains("Use the button text").is_some(), "a button with text offers its text");
+        assert!(h.query_by_label("Alt text").is_none() && h.query_by_label_contains("Decorative").is_none());
+        h.get_by_label_contains("Use the button text").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Alt text").is_some(), "unticking shows the alt text box");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("alt-button.png")).unwrap(); }
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].alt.is_empty(), "and nothing is stored until something is typed");
+        // An alt text already on a button with text keeps the box showing, and ticking the choice clears it.
+        h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[2].alt = "Next: Fire exits".into();
+        h.state_mut().selected = Some((0, 3));
+        h.run_steps(3);
+        show(&mut h, 2);
+        assert!(h.query_by_label("Alt text").is_some(), "an alt text of its own shows the box");
+        h.get_by_label_contains("Use the button text").click();
+        h.run_steps(3);
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].alt.is_empty(), "using the text clears the alt text, so it cannot override the label");
+        assert!(h.query_by_label("Alt text").is_none());
+        // A clickable shape with no text: it needs a name, so there is no choice to use text, and the box is called Label.
+        show(&mut h, 3);
+        assert!(h.query_by_label_contains("Use the button text").is_none() && h.query_by_label("Label").is_some(), "an icon-only button needs a label");
+    }
+
+    /// A click trigger on one part of a group speaks for the group: the Triggers tab shows it for every part, and
+    /// Properties names only the owner (issue #58).
+    #[test]
+    fn gui_a_clickable_group_has_one_set_of_triggers_and_one_name() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut card = Object::new("card", "Card", Kind::Rect, 100.0, 100.0, 500.0, 260.0);
+            card.fill = Some(Rgba(11, 37, 69, 255));
+            let mut words = Object::new("words", "Words", Kind::Text, 120.0, 250.0, 460.0, 80.0);
+            words.text = "Fire exits".into();
+            let mut icon = Object::new("icon", "Door icon", Kind::Path(vec![]), 280.0, 120.0, 100.0, 100.0);
+            icon.fill = Some(Rgba(255, 255, 255, 255));
+            for o in [&mut card, &mut words, &mut icon] { o.group = Some("g".into()); }
+            p.slides[0].layers[0].objects = vec![card, words, icon];
+            p.slides[0].triggers.push(Trigger { id: "t".into(), owner: Owner::Object("card".into()), event: Event::Click, action: Action::NextSlide, conditions: vec![] });
+        }
+        let mut h = harness(a);
+        h.run_steps(3);
+        // Selecting the group shows its panel: one name for screen readers, from the words of its parts.
+        h.state_mut().selected = Some((0, 2));
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Group of 3 objects").is_some(), "choosing a part chooses the group");
+        assert!(h.query_by_label_contains("Use the group's text").is_some(), "its words name it unless it has alt text of its own");
+        assert!(h.query_by_label("Alt text").is_none());
+        h.get_by_label_contains("Use the group's text").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Alt text").is_some(), "unticking shows the alt text box");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("group-panel.png")).unwrap(); }
+        // Its Triggers tab shows the group's trigger, kept on the card.
+        h.state_mut().right_tab = 1;
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Triggers: group (kept on Card)").is_some(), "the group's triggers are shown for any part");
+        assert_eq!(h.state().trigger_owner(0).map(|(id, _, g)| (id, g)), Some(("card".to_string(), true)));
+        // Typing alt text puts it on the owner, as one undo step, and it names the group.
+        h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[0].alt = "Go to Fire exits".into();
+        assert_eq!(h.state().project.as_ref().unwrap().slides[0].group_name(0, "g"), "Go to Fire exits");
+        // A part of a group with no click trigger is just itself.
+        h.state_mut().project.as_mut().unwrap().slides[0].triggers.clear();
+        h.run_steps(2);
+        assert_eq!(h.state().trigger_owner(0).map(|(id, _, g)| (id, g)), Some(("icon".to_string(), false)));
+    }
+
+    /// An icon's outline color colors its lines and its fill color the inside (issue: icons).
+    #[test]
+    fn gui_icon_lines_take_the_outline_color_and_the_inside_the_fill_color() {
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut objs = vec![];
+            for (i, (name, bold)) in [("house", 0.0), ("magnifying-glass", 0.0), ("house", 6.0), ("envelope", 0.0)].into_iter().enumerate() {
+                let icon = icons::all().iter().find(|ic| ic.names[0] == name).unwrap();
+                let (cmds, aspect) = icons::outline(icon).unwrap();
+                let (w, h) = if aspect >= 1.0 { (300.0, 300.0 / aspect) } else { (300.0 * aspect, 300.0) };
+                let mut o = Object::new(&format!("i{i}"), name, Kind::Path(cmds.clone()), 120.0 + 420.0 * (i % 4) as f32, 200.0, w, h);
+                o.icon = Some(brainbend_doc::shapes::silhouette(&cmds));
+                o.stroke = Some(Stroke { color: Rgba(192, 57, 43, 255), width: bold });
+                o.fill = Some(Rgba(249, 231, 159, 255));
+                objs.push(o);
+            }
+            p.slides[0].layers[0].objects = objs;
+        }
+        let mut h = harness(a);
+        h.run_steps(4);
+        let look = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].icon_look().unwrap();
+        assert_eq!((look.lines, look.inside.map(|c| c.hex()), look.bold), (Rgba(192, 57, 43, 255), Some("#F9E79F".to_string()), 6.0), "outline color is the lines, fill the inside, width the weight");
+        // An icon with only a fill (made before icons had their own colors) keeps drawing its lines in that color.
+        let mut old = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        old.stroke = None;
+        assert_eq!(old.icon_look().map(|l| (l.lines, l.inside)), Some((Rgba(249, 231, 159, 255), None)));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("icons-colors.png")).unwrap(); }
+    }
+
+    /// An SVG is accepted wherever a picture is: inserted, dropped, or chosen as the player's logo (issue #54).
+    #[test]
+    fn gui_an_svg_is_inserted_dropped_and_used_as_a_logo_as_a_sharp_picture() {
+        let dir = std::env::temp_dir().join(format!("bb-svg-gui-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("logo.svg");
+        std::fs::write(&file, r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#0B2545"/></svg>"##).unwrap();
+        let mut a = App::default();
+        a.new_project();
+        assert!(a.insert_image_file(&file), "an SVG can be inserted: {}", a.status);
+        let o = a.selected_object().unwrap().clone();
+        assert!(matches!(o.kind, Kind::Image) && (o.w / o.h - 2.0).abs() < 0.01, "a picture in the SVG's proportions: {} x {}", o.w, o.h);
+        let asset = a.project.as_ref().unwrap().assets.get(o.asset.as_ref().unwrap()).unwrap();
+        assert_eq!((asset.mime.as_str(), asset.name.as_str()), ("image/png", "logo.svg"));
+        assert!(image::load_from_memory(&asset.bytes).is_ok(), "stored as a real picture");
+        // Dropping it on the window adds it too.
+        let before = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        a.handle_dropped(vec![file.clone()]);
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), before + 1, "{}", a.status);
+        // As a logo (or banner, or any place that asks for a picture) it is the same stored picture.
+        let (key, name, w, h) = a.load_image_file(&file).unwrap();
+        assert_eq!((name.as_str(), w / h), ("logo.svg", 2.0));
+        assert!(a.project.as_ref().unwrap().assets.contains_key(&key));
+        // A broken one is refused with a reason.
+        std::fs::write(dir.join("bad.svg"), "<svg><oops").unwrap();
+        assert!(!a.insert_image_file(&dir.join("bad.svg")));
+        assert!(a.status.contains("could not be read"), "{}", a.status);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -11182,9 +11953,7 @@ mod tests {
         let start = theme(&h);
         let start_fonts = (start.heading_font.clone(), start.body_font.clone());
         // Fonts: another pair makes it a custom theme.
-        h.get_by_label_contains("Fonts").click();
-        h.run_steps(3);
-        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the menu has a font picker for each");
+        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body").is_some(), "the Brand group has a font drop-down for headings and one for body text");
         // (Choosing from the drop-downs sets these same two fields; see the font picker tests.)
         {
             let p = h.state_mut().project.as_mut().unwrap();
@@ -11862,10 +12631,10 @@ mod tests {
         assert!(h.query_by_label("Design").is_none() && h.query_by_label("Insert").is_none() && h.query_by_label("Layout Builder").is_none(), "the old names are gone, and Layout Builder is not a tab here");
         h.state_mut().ribbon_tab = ribbon::THEME_TAB;
         h.run_steps(3);
-        for name in ["Fonts", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
+        for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Background"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Theme"); }
         assert!(h.query_all_by_label_contains("Colors").next().is_some(), "Brand Colors is on Theme");
-        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Colors", "Fonts", "Background"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
-        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Colors, Fonts, Background): {gx:?}");
+        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Background", "Colors", "Headings"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Background, Colors, then the font drop-downs): {gx:?}");
         for gone in ["Themes", "Player", "Spelling", "Focus Order"] { assert!(h.query_all_by_label_contains(gone).next().is_none(), "{gone} is not on Theme"); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-theme.png")).unwrap(); }
         h.state_mut().ribbon_tab = ribbon::REVIEW_TAB;
@@ -11912,31 +12681,43 @@ mod tests {
         assert!(!h.state().in_master_view());
     }
 
-    /// The Fonts button on the Design tab opens a window with two font drop-downs; opening one used to close the menu it was in.
+    /// The Brand group on the Theme tab has the theme's fonts as two stacked drop-downs: headings on top, body text below.
     #[test]
-    fn the_theme_fonts_window_keeps_its_drop_downs_open_and_a_pick_changes_the_theme_font() {
-        use egui_kittest::kittest::Queryable;
+    fn the_brand_group_has_stacked_heading_and_body_font_drop_downs_that_set_the_theme_fonts() {
+        use egui_kittest::kittest::{NodeT, Queryable};
         let mut a = app();
         a.file_view = false;
         a.ribbon_tab = ribbon::THEME_TAB;
         let mut h = harness(a);
         h.run_steps(4);
-        h.get_by_label("Fonts").click();
+        assert!(h.query_by_label("Fonts").is_none(), "there is no Fonts button any more");
+        let combo = |h: &egui_kittest::Harness<'_, App>, font: &str| h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(font)).map(|c| c.rect());
+        let (heading, body) = { let t = &h.state().project.as_ref().unwrap().theme; (t.heading_font.clone(), t.body_font.clone()) };
+        assert_ne!(heading, body, "the default theme has different heading and body fonts");
+        let (top, bottom) = (combo(&h, &heading).expect("a drop-down shows the heading font"), combo(&h, &body).expect("and one the body font"));
+        assert!(top.top() < bottom.top() && (top.left() - bottom.left()).abs() < 2.0, "stacked, headings on top: {top:?} {bottom:?}");
+        let pick = |h: &egui_kittest::Harness<'_, App>, not: &[&str]| brainbend_fonts::families().into_iter().map(|(n, _)| n).find(|n| !not.iter().any(|x| x.eq_ignore_ascii_case(n)) && brainbend_fonts::source_of(n) == Some(brainbend_fonts::Source::Bundled) && h.query_by_label(n).is_some()).expect("another bundled font in the list");
+        // The top one sets the headings.
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(heading.as_str())).unwrap().click();
         h.run_steps(4);
-        assert!(h.query_by_label("Headings").is_some() && h.query_by_label("Body text").is_some(), "the window opens");
-        let combos: Vec<_> = h.query_all_by_role(egui::accesskit::Role::ComboBox).collect();
-        assert!(combos.len() >= 2, "a Headings and a Body text drop-down");
-        use egui_kittest::kittest::NodeT;
-        combos.into_iter().find(|c| c.accesskit_node().value().as_deref() == Some("Montserrat")).expect("the headings drop-down shows the theme's font").click();
-        h.run_steps(4);
-        assert!(h.query_by_label("Headings").is_some(), "the window is still open after opening a drop-down");
-        assert!(h.query_by_label("BrainBend fonts").is_some(), "and the list of fonts is showing");
-        let before = h.state().project.as_ref().unwrap().theme.heading_font.clone();
-        let other = brainbend_fonts::families().into_iter().map(|(n, _)| n).find(|n| !n.eq_ignore_ascii_case(&before) && brainbend_fonts::source_of(n) == Some(brainbend_fonts::Source::Bundled)).expect("another bundled font");
+        assert!(h.query_by_label("BrainBend fonts").is_some(), "the list of fonts opens");
+        let other = pick(&h, &[&heading, &body]);
         h.get_by_label(&other).click();
         h.run_steps(4);
-        assert_eq!(h.state().project.as_ref().unwrap().theme.heading_font, other, "picking a font sets the theme's heading font");
-        assert!(h.query_by_label("Headings").is_some(), "the window stays open so the body font can be set too");
+        let t = h.state().project.as_ref().unwrap().theme.clone();
+        assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), (other.as_str(), body.as_str()), "the headings changed and the body did not");
+        // The bottom one sets the body text.
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref() == Some(body.as_str())).unwrap().click();
+        h.run_steps(4);
+        let other_body = pick(&h, &[&heading, &body, &other]);
+        h.get_by_label(&other_body).click();
+        h.run_steps(4);
+        let t = h.state().project.as_ref().unwrap().theme.clone();
+        assert_eq!((t.heading_font.as_str(), t.body_font.as_str()), (other.as_str(), other_body.as_str()));
+        // One undo step each.
+        h.state_mut().undo();
+        assert_eq!(h.state().project.as_ref().unwrap().theme.body_font, body);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.run_steps(2); h.render().expect("renderer").save(std::path::Path::new(&dir).join("brand-group.png")).unwrap(); }
     }
 
     /// A file as the window system hands it over when something is dropped on the app.
@@ -12029,7 +12810,7 @@ mod tests {
         let before = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
         drop_files(&mut h, &[bad.clone()]);
         assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len(), before);
-        assert!(h.state().status.contains("Not a usable PNG/JPEG"), "{}", h.state().status);
+        assert!(h.state().status.contains("Not a usable picture"), "{}", h.state().status);
         let _ = std::fs::remove_file(bad);
     }
 

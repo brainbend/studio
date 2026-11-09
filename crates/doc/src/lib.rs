@@ -1,4 +1,7 @@
 //! Framework-neutral document model for BrainBend Studio projects.
+/// The model as JSON, for AI tools: its schema, strict checking and atomic patches.
+#[cfg(feature = "schema")]
+pub mod model_json;
 pub mod check;
 pub mod find;
 pub mod lesson;
@@ -18,6 +21,7 @@ pub use richtext::{Attr, Fmt, ListStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rgba(pub u8, pub u8, pub u8, pub u8);
 
@@ -48,6 +52,7 @@ impl Rgba {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Align {
     Left,
@@ -59,6 +64,7 @@ pub enum Align {
 
 /// What a text object is published as, for screen readers and navigation: ordinary text (a `p`) or a heading
 /// (`h1` to `h4`).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextRole {
     #[default]
@@ -93,6 +99,7 @@ impl TextRole {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VAlign {
     Top,
@@ -101,6 +108,7 @@ pub enum VAlign {
     Bottom,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextStyle {
     pub font_family: String,
@@ -117,6 +125,7 @@ pub struct TextStyle {
 }
 
 /// The way one slide gives way to the next.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransitionKind {
     #[default]
@@ -148,6 +157,7 @@ impl TransitionKind {
 
 /// The edge a transition comes from, as PowerPoint's "From Right" says it. For a split, left or right means vertical
 /// lines and top or bottom horizontal ones.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Edge { Left, Right, Top, Bottom }
 
@@ -160,6 +170,7 @@ impl Edge {
 }
 
 /// A slide transition: its kind, the edge it comes from, and (for a split or zoom) whether it goes in or out.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
     pub kind: TransitionKind,
@@ -202,6 +213,7 @@ impl Transition {
 }
 
 /// A linear gradient: `angle` in degrees clockwise from "towards the top" (CSS style), stops `(0..1, color)`.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Gradient {
     pub angle: f32,
@@ -210,6 +222,7 @@ pub struct Gradient {
 
 /// How a video or audio object plays. The default is what an object added in BrainBend Studio does: wait for the
 /// viewer, with the player's controls showing.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaPlay {
     /// Starts by itself when the object's turn on the timeline comes.
@@ -228,6 +241,7 @@ impl Default for MediaPlay {
 }
 
 /// How an outline is drawn: unbroken, in dots or in dashes.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LineDash {
     #[default]
@@ -248,12 +262,14 @@ impl LineDash {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
     pub color: Rgba,
     pub width: f32,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shadow {
     pub dx: f32,
@@ -266,6 +282,7 @@ pub struct Shadow {
 }
 
 /// A soft halo of color around an object.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Glow {
     /// How far the halo reaches, in pixels.
@@ -274,6 +291,7 @@ pub struct Glow {
 }
 
 /// A faded, upside-down copy of an object just below it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reflection {
     /// How much of the object's height the reflection shows, from 0 to 1.
@@ -284,6 +302,7 @@ pub struct Reflection {
     pub gap: f32,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind {
     Fade,
@@ -307,6 +326,7 @@ pub enum EffectKind {
 }
 
 /// Entrance animation played each time the object's layer or slide is shown.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entrance {
     pub kind: EffectKind,
@@ -315,6 +335,7 @@ pub struct Entrance {
 }
 
 /// Emphasis effects: the object stays where it is and draws attention to itself.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EmphasisKind {
     /// Swells and settles back.
@@ -350,6 +371,7 @@ impl EmphasisKind {
 }
 
 /// An emphasis animation, played after the object appears (and again on a "play animation" action).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Emphasis {
     pub kind: EmphasisKind,
@@ -361,6 +383,7 @@ pub struct Emphasis {
 
 /// A motion path: the object travels through `points`, given as offsets in slide units from where it
 /// sits (it starts at offset 0, 0 and ends at the last point).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MotionPath {
     pub points: Vec<(f32, f32)>,
@@ -438,6 +461,7 @@ impl MotionPath {
 /// Which click starts each of an object's animations. 0 = automatically (on the timeline); 1, 2, ...
 /// = the learner's first, second, ... click on the slide (as in a PowerPoint presentation). Effects with
 /// the same number play together; their delays count from that click.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClickSteps {
     pub entrance: u32,
@@ -454,6 +478,7 @@ impl ClickSteps {
 
 /// When an object is on screen within its layer's (or slide's) timeline. Objects without timing
 /// are there for the whole timeline.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Timing {
     pub start_ms: u32,
@@ -462,6 +487,7 @@ pub struct Timing {
 }
 
 /// A run of text whose style differs from the object's. Unset fields inherit the object style.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Run {
     pub text: String,
@@ -486,6 +512,7 @@ pub struct Run {
     pub spacing: Option<f32>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Paragraph {
     pub runs: Vec<Run>,
@@ -498,6 +525,7 @@ pub struct Paragraph {
 pub const INDENT_STEP: f32 = 40.0;
 
 /// One drawing command of a freeform path, in 0..1 coordinates of the object's frame.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PathCmd {
     Move(f32, f32),
@@ -507,6 +535,38 @@ pub enum PathCmd {
     Close,
 }
 
+/// How a vector icon is colored: its lines and, behind them, what is inside. See `Object::icon_look`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IconLook {
+    /// The color of the lines the icon is drawn with (its outline color).
+    pub lines: Rgba,
+    /// The color of the inside of the icon (its fill color), if it has one.
+    pub inside: Option<Rgba>,
+    /// Extra weight added to the lines, in slide pixels (the outline width; 0 leaves them as drawn).
+    pub bold: f32,
+}
+
+/// An object's part in a group that acts as one button (see `Slide::group_role`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupRole {
+    /// It holds the group's click triggers (and the group's alt text), so it is the one named and focused.
+    pub is_owner: bool,
+    /// Some part of the group has words on it, which name the group unless the owner has alt text.
+    pub has_text: bool,
+}
+
+/// What an object's Alt text control is for (see `Object::alt_use`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AltUse {
+    /// Nothing to write: screen readers read the object's own text.
+    Hidden,
+    /// A clickable object with text on it: screen readers read the text unless it is given alt text of its own.
+    ButtonText,
+    /// An alt text box, with the name to show for it and a hint for what to write.
+    Field(&'static str, &'static str),
+}
+
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Kind {
     Rect,
@@ -538,6 +598,7 @@ pub enum Kind {
 
 /// An equation: its LaTeX source, kept so it can be edited again, and the MathML that screen readers get. The object
 /// itself is an ordinary freeform shape (`Kind::Path`) holding the typeset outlines, so every renderer draws it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationInfo {
     pub latex: String,
@@ -554,6 +615,7 @@ pub struct EquationInfo {
 
 /// What a marker shows: a title on hover (or keyboard focus) and, when it is clicked, a card with the title and a
 /// description. Clicking anywhere else closes the card.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MarkerInfo {
     pub title: String,
@@ -586,6 +648,7 @@ impl MarkerInfo {
 }
 
 /// A data-entry field. Its look comes from the object's own style (font, text color), fill and outline.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InputField {
     /// The id of the variable that holds what is typed: a text variable, or a number variable for a number field.
@@ -614,6 +677,7 @@ impl InputField {
 }
 
 /// A web page shown in a frame on the slide. The object's `alt` is the frame's title for screen readers.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WebObject {
     /// The page's address (`https://`; many sites refuse to be shown inside another page).
@@ -635,6 +699,7 @@ impl WebObject {
 
 /// A slider: the thumb's place along the track sets a number variable, and the variable's value
 /// places the thumb. The frame is the track area; the thumb is as tall as `thumb_height` of it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Slider {
     /// The id of the number variable it sets; empty while it is not linked to one.
@@ -676,6 +741,7 @@ impl Default for Slider {
 
 /// A check box: a small box ticked by clicking, drawn at the left of the object's text. Clicking
 /// moves the object between its Normal and Selected states; Disabled greys it out and ignores clicks.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Check {
     /// The box's side, in slide units.
@@ -727,6 +793,7 @@ impl Default for Check {
 /// An object that turns like a dial: turning it sets a number variable, and the variable's value
 /// sets how far it is turned. The object turns through `sweep` degrees from `min` to `max`, with
 /// the middle of the range at its drawn orientation.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Dial {
     /// The id of the number variable it sets.
@@ -765,6 +832,7 @@ fn snap_value(min: f32, max: f32, step: f32, v: f32) -> f32 {
     v.clamp(min.min(max), max.max(min))
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Object {
     pub id: String,
@@ -841,6 +909,10 @@ pub struct Object {
     /// Turning this object (like a dial) sets a number variable.
     #[serde(default)]
     pub dial: Option<Dial>,
+    /// A vector icon from the icon library: the solid shape inside its outline (see `shapes::silhouette`). An icon's
+    /// path is the band the lines make, so its outline color colors those lines, and its fill color fills the inside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Vec<PathCmd>>,
     /// The object is a check box.
     #[serde(default)]
     pub check: Option<Check>,
@@ -915,6 +987,38 @@ impl Object {
         self.states.iter().any(|s| matches!(s.name.as_str(), "Hover" | "Down" | "Disabled" | "Visited" | "Selected"))
     }
 
+    /// How this icon is colored, or None when it is not an icon from the library or has no color to draw with. The
+    /// outline color colors the lines (the icon's solid band) and the fill color fills the inside; an icon with only a
+    /// fill (the old way) draws its lines in that color.
+    pub fn icon_look(&self) -> Option<IconLook> {
+        self.icon.as_ref()?;
+        let lines = self.stroke.map(|s| s.color).or(self.fill)?;
+        Some(IconLook { lines, inside: if self.stroke.is_some() { self.fill } else { None }, bold: self.stroke.map(|s| s.width.max(0.0)).unwrap_or(0.0) })
+    }
+
+    /// What the Alt text control means for this object, so Properties shows it only where it does something.
+    /// `clickable` is whether a trigger reacts to a click on it, and `group` its part in a clickable group.
+    pub fn alt_use(&self, clickable: bool, group: Option<GroupRole>) -> AltUse {
+        // A clickable group is one control: only its owner is named (with the words of its parts, or alt text of its own).
+        if let Some(g) = group {
+            return if !g.is_owner { AltUse::Hidden } else if g.has_text { AltUse::ButtonText } else { AltUse::Field("Label", "what pressing the group does, such as Go to the home slide") };
+        }
+        let has_text = !self.text.trim().is_empty();
+        let button = clickable || self.has_button_states() || self.check.is_some() || matches!(self.kind, Kind::Hotspot);
+        if button && has_text { return AltUse::ButtonText; }
+        // Plain text is read as it is: there is nothing to describe.
+        if !button && (matches!(self.kind, Kind::Text) || has_text) { return AltUse::Hidden; }
+        match &self.kind {
+            Kind::Image => AltUse::Field("Alt text", "describe the picture"),
+            Kind::Video | Kind::Audio => AltUse::Field("Description", "what it is"),
+            Kind::Input(_) | Kind::Slider(_) => AltUse::Field("Label", "what it is for, such as Your name"),
+            Kind::Web(_) => AltUse::Field("Title", "what the page is"),
+            Kind::Pano(_) => AltUse::Field("Description", "what the 360 degree image shows"),
+            _ if button => AltUse::Field("Label", "what pressing it does, such as Go to the home slide"),
+            _ => AltUse::Field("Alt text", "describe it for screen readers"),
+        }
+    }
+
     pub fn new(id: &str, name: &str, kind: Kind, x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
             id: id.into(),
@@ -932,7 +1036,7 @@ impl Object {
             rotation: 0.0,
             line_spacing: 0.0,
             group: None,
-            table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
+            table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, icon: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
             stroke: None,
             shadow: None,
             hidden: false,
@@ -969,6 +1073,7 @@ impl Object {
 
 /// A button's glossy overlay ("shine"): a light-to-clear gradient over the fill. A stronger `alpha`
 /// is how a button's Hover state brightens it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Shine {
     pub alpha: f32,
@@ -976,6 +1081,7 @@ pub struct Shine {
     pub reverse: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObjectState {
     pub name: String,
@@ -1002,6 +1108,7 @@ pub struct ObjectState {
     pub gradient: Option<Gradient>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Bool(bool),
@@ -1009,6 +1116,7 @@ pub enum Value {
     Text(String),
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Variable {
     pub id: String,
@@ -1018,6 +1126,7 @@ pub struct Variable {
     pub built_in: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cmp {
     Eq,
@@ -1028,6 +1137,7 @@ pub enum Cmp {
     Le,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Condition {
     pub variable: String,
@@ -1037,6 +1147,7 @@ pub struct Condition {
     pub or_with_previous: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
     SlideStart,
@@ -1083,6 +1194,7 @@ impl Event {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Action {
     ShowLayer(String),
@@ -1122,6 +1234,7 @@ pub enum Action {
 }
 
 /// How `Action::AdjustVariable` combines the variable with its value.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AdjustOp {
     Add,
@@ -1149,6 +1262,7 @@ impl AdjustOp {
 /// Where the whole source picture sits relative to its frame, as fractions of the frame:
 /// `[x, y, width, height]`. Anything outside `0..1` is cropped away.
 /// The shapes a picture can be cropped to.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PictureShape {
     Oval,
@@ -1278,6 +1392,7 @@ impl Action {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Owner {
     Slide,
@@ -1285,6 +1400,7 @@ pub enum Owner {
     Object(String),
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Trigger {
     pub id: String,
@@ -1294,6 +1410,7 @@ pub struct Trigger {
     pub conditions: Vec<Condition>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layer {
     pub id: String,
@@ -1349,6 +1466,7 @@ impl Layer {
 
 fn yes() -> bool { true }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Choice {
     pub id: String,
@@ -1358,6 +1476,7 @@ pub struct Choice {
 
 /// How a question is answered. Choice questions use `Question::choices`/`multiple`; the others
 /// carry their own data.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum QuestionStyle {
     #[default]
@@ -1397,6 +1516,7 @@ pub enum QuestionStyle {
 }
 
 /// One area of a labelled picture and the label that belongs there.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LabelZone {
     pub region: HotRegion,
@@ -1422,6 +1542,7 @@ impl QuestionStyle {
 }
 
 /// An area of a picture, as fractions (0 to 1) of its width and height.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HotRegion {
     pub x: f32,
@@ -1448,6 +1569,7 @@ impl HotRegion {
 
 /// A graded question. The player draws the question UI itself (prompt, choices, submit,
 /// feedback); the slide's layers are not used for question slides.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Question {
     pub prompt: String,
@@ -1466,6 +1588,7 @@ pub struct Question {
 }
 
 /// The part of a slide a question is drawn in, in slide pixels.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct QuestionArea {
     pub x: f32,
@@ -1481,6 +1604,7 @@ impl QuestionArea {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum SlideKind {
     #[default]
@@ -1491,6 +1615,7 @@ pub enum SlideKind {
 }
 
 /// A named group of related slides. Slides are kept in scene order, so the flat slide list is also the lesson order.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub id: String,
@@ -1502,12 +1627,14 @@ pub struct Scene {
 
 /// A scene whose question slides are drawn from at random: each attempt shows `draw` of them
 /// (all when 0 or more than there are), in their order or shuffled. Other slides of the scene always show.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bank {
     pub draw: u32,
     pub shuffle: bool,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Slide {
     pub id: String,
@@ -1550,6 +1677,7 @@ pub struct Slide {
 }
 
 /// When the player's Next button works on a slide.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum NextRule {
     #[default]
@@ -1561,6 +1689,7 @@ pub enum NextRule {
 }
 
 /// What a slide looks like when the learner comes back to it.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Revisit {
     /// Back to how it starts.
@@ -1570,6 +1699,7 @@ pub enum Revisit {
     Resume,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlideNav {
     pub next: NextRule,
@@ -1583,6 +1713,40 @@ impl Default for SlideNav {
 }
 
 impl Slide {
+    /// The objects on layer `li` that are parts of group `gid` (table cells share a group id too, and are not a control).
+    pub fn group_members(&self, li: usize, gid: &str) -> Vec<usize> {
+        self.layers.get(li).map(|l| l.objects.iter().enumerate().filter(|(_, o)| o.table.is_none() && o.group.as_deref() == Some(gid)).map(|(k, _)| k).collect()).unwrap_or_default()
+    }
+
+    /// Whether a click (or double click) trigger is owned by object `id`.
+    pub fn has_click_trigger(&self, id: &str) -> bool {
+        self.triggers.iter().any(|t| matches!(t.event, Event::Click | Event::DoubleClick) && matches!(&t.owner, Owner::Object(o) if o == id))
+    }
+
+    /// The member of a group that holds its click triggers: a click trigger on one part of a group speaks for the
+    /// whole group, so the group is one control. The first part with a click trigger is the one that is named, focused
+    /// and shown in the Triggers tab. None when the group is not clickable.
+    pub fn group_owner(&self, li: usize, gid: &str) -> Option<usize> {
+        self.group_members(li, gid).into_iter().find(|&k| self.has_click_trigger(&self.layers[li].objects[k].id))
+    }
+
+    /// For object `oi` on layer `li`: its part in a clickable group, if it is in one.
+    pub fn group_role(&self, li: usize, oi: usize) -> Option<GroupRole> {
+        let o = self.layers.get(li)?.objects.get(oi)?;
+        let gid = o.group.as_deref().filter(|_| o.table.is_none())?;
+        let owner = self.group_owner(li, gid)?;
+        let members = self.group_members(li, gid);
+        Some(GroupRole { is_owner: owner == oi, has_text: members.iter().any(|&k| !self.layers[li].objects[k].text.trim().is_empty()) })
+    }
+
+    /// What screen readers call a clickable group: its owner's alt text, else the words of its parts, back to front.
+    pub fn group_name(&self, li: usize, gid: &str) -> String {
+        let Some(owner) = self.group_owner(li, gid) else { return String::new() };
+        let alt = self.layers[li].objects[owner].alt.trim();
+        if !alt.is_empty() { return alt.to_string(); }
+        self.group_members(li, gid).iter().map(|&k| self.layers[li].objects[k].text.trim()).filter(|t| !t.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
     /// Layers shown when the slide starts: the base layer plus any a slide-start trigger shows, in layer order.
     pub fn start_layers(&self) -> Vec<usize> {
         let mut out = vec![0];
@@ -1802,6 +1966,7 @@ impl Drop for LeaveOutBytes {
     fn drop(&mut self) { LEAVE_OUT_BYTES.with(|f| f.set(false)); }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Asset {
     pub name: String,
@@ -1816,6 +1981,7 @@ pub struct Asset {
 
 /// What kind of lesson a project is. The aliases read files written before the types were renamed
 /// or removed (the short "micro" kinds are now ordinary lessons).
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProjectKind {
     /// A deck-style lesson of slides with layers, triggers and quizzes.
@@ -1836,6 +2002,7 @@ impl ProjectKind {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Project {
     pub format: String,
@@ -2639,5 +2806,48 @@ mod streamed_package_tests {
             assert_eq!(back.assets[k].bytes, buffered.assets[k].bytes, "{k}");
             assert_eq!((&back.assets[k].name, &back.assets[k].mime), (&p.assets[k].name, &p.assets[k].mime));
         }
+    }
+}
+
+#[cfg(test)]
+mod alt_use_tests {
+    use super::*;
+
+    fn obj(kind: Kind, text: &str) -> Object {
+        let mut o = Object::new("o", "O", kind, 0.0, 0.0, 100.0, 50.0);
+        o.text = text.into();
+        o
+    }
+
+    #[test]
+    fn alt_text_is_offered_only_where_it_does_something() {
+        use AltUse::*;
+        // Plain text and anything with text on it is read as it is.
+        assert_eq!(obj(Kind::Text, "Hello").alt_use(false, None), Hidden);
+        assert_eq!(obj(Kind::Text, "").alt_use(false, None), Hidden);
+        assert_eq!(obj(Kind::Rect, "A label").alt_use(false, None), Hidden);
+        // A clickable object with text can use that text or its own description.
+        assert_eq!(obj(Kind::Rect, "Next").alt_use(true, None), ButtonText);
+        assert_eq!(obj(Kind::Text, "Next").alt_use(true, None), ButtonText);
+        let mut states = obj(Kind::Rect, "Go");
+        states.states = vec![ObjectState { shine: None, gradient: None, name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: states.style.clone(), asset: None, size: None }];
+        assert_eq!(states.alt_use(false, None), ButtonText, "button states make it a button without a trigger");
+        let mut check = obj(Kind::Text, "I agree");
+        check.check = Some(Check::look(0, None));
+        assert_eq!(check.alt_use(false, None), ButtonText, "a check box's label is read unless it has its own");
+        // With nothing written on it, it needs a description, named for what it is.
+        assert_eq!(obj(Kind::Image, "").alt_use(false, None), Field("Alt text", "describe the picture"));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(true, None), Field("Label", _)), "an icon or shape button needs a name");
+        assert!(matches!(obj(Kind::Hotspot, "").alt_use(false, None), Field("Label", _)));
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(false, None), Field("Alt text", _)), "an icon on its own");
+        assert!(matches!(obj(Kind::Path(vec![]), "").alt_use(true, None), Field("Label", _)));
+        assert!(matches!(obj(Kind::Web(WebObject { url: String::new(), scroll: true }), "").alt_use(false, None), Field("Title", _)));
+        assert!(matches!(obj(Kind::Video, "").alt_use(false, None), Field("Description", _)));
+        assert!(matches!(obj(Kind::Rect, "").alt_use(false, None), Field("Alt text", _)), "a plain shape may be decorative or a picture of something");
+        // In a clickable group only the owner is named: by the words of the parts, or by a label if there are none.
+        let part = GroupRole { is_owner: false, has_text: true };
+        assert_eq!(obj(Kind::Path(vec![]), "").alt_use(false, Some(part)), Hidden);
+        assert_eq!(obj(Kind::Rect, "").alt_use(true, Some(GroupRole { is_owner: true, has_text: true })), ButtonText);
+        assert!(matches!(obj(Kind::Rect, "").alt_use(true, Some(GroupRole { is_owner: true, has_text: false })), Field("Label", _)));
     }
 }

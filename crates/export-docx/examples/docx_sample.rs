@@ -1,4 +1,4 @@
-//! Writes a sample handout to the path given, for opening in Word or LibreOffice: cargo run -p brainbend-export-docx --example sample out.docx
+//! Writes a sample handout to the path given, for opening in Word or LibreOffice: cargo run -p brainbend-export-docx --example docx_sample out.docx
 use brainbend_doc::*;
 use brainbend_publish_html::HandoutOptions;
 fn main() {

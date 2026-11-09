@@ -202,6 +202,26 @@
 
   // ---- slides, layers and objects ------------------------------------------------------
   var layers = {}, objects = {}, slideEls = [], objectSlide = {};
+  // A click trigger on one part of a group speaks for the whole group, so the group is one control. For an object in
+  // such a group: the parts that hold click triggers (owners) and all the parts; otherwise null. Table cells are not groups.
+  var groupCache = {};
+  function groupOf(si, o) {
+    if (!o.group || o.table) return null;
+    var key = si + '|' + o.group;
+    if (!groupCache[key]) {
+      var s = slides[si], g = { owners: [], members: [] };
+      s.layers.forEach(function (l) { l.objects.forEach(function (m) {
+        if (m.group !== o.group || m.table) return;
+        g.members.push(m);
+        if (s.triggers.some(function (t) { return (t.event === 'Click' || t.event === 'DoubleClick') && t.owner.Object === m.id; })) g.owners.push(m.id);
+      }); });
+      groupCache[key] = g;
+    }
+    return groupCache[key].owners.length ? groupCache[key] : null;
+  }
+  function runClickTriggers(si, eventName, ownerIds) {
+    slides[si].triggers.forEach(function (t) { if (t.event === eventName && ownerIds.indexOf(t.owner.Object) >= 0) runTrigger(t); });
+  }
   slides.forEach(function (slide, si) {
     var sEl = el('div', 'slide');
     sEl.style.display = 'none';
@@ -329,6 +349,14 @@
             return 'C' + c.Curve.join(' ');
           }).join(''));
           pth.setAttribute('vector-effect', 'non-scaling-stroke');
+          // A vector icon: its solid inside is drawn behind the lines it is made of (see icon_look in the model).
+          if (o.icon && o.icon.length) {
+            var inner = document.createElementNS(ns, 'path');
+            inner.setAttribute('d', o.icon.map(function (c) { return c === 'Close' ? 'Z' : c.Move ? 'M' + c.Move.join(' ') : c.Line ? 'L' + c.Line.join(' ') : 'C' + c.Curve.join(' '); }).join(''));
+            inner.setAttribute('stroke', 'none');
+            psvg.appendChild(inner);
+            node._inside = inner;
+          }
           psvg.appendChild(pth); node.appendChild(psvg);
           node._path = pth;
           if (o.gradient) {
@@ -356,6 +384,11 @@
         label.style.padding = m[1] + 'px ' + m[2] + 'px ' + m[3] + 'px ' + m[0] + 'px';
         node.appendChild(label);
         if (o.decorative && !o.states.length && !slides[si].triggers.some(function (t) { return t.event === 'Click' && t.owner.Object === o.id; })) node.setAttribute('aria-hidden', 'true');
+        // Plain decoration (words, a picture, a shape or an icon that nothing reacts to) lets a click through to what is
+        // under it, so words or an icon laid on a button do not stop the button working. Links in its text still work.
+        var grp = groupOf(si, o), isGroupPart = !!grp && grp.owners.indexOf(o.id) < 0;
+        var plainKind = typeof o.kind === 'string' ? ['Rect', 'Ellipse', 'Text', 'Image', 'Line', 'LineUp'].indexOf(o.kind) >= 0 : !!(o.kind && o.kind.Path);
+        if (plainKind && !grp && !o.states.length && !o.check && !o.dial && !o.marker && !o.button_set && !o.hit_area && !slides[si].triggers.some(function (t) { return t.owner.Object === o.id; })) node.style.pointerEvents = 'none';
         lEl.appendChild(node);
         var entry = { node: node, label: label, o: o, si: si, layerId: layer.id, state: o.initial_state, hover: false, down: false };
         objects[o.id] = entry;
@@ -384,7 +417,7 @@
         node.addEventListener('mouseenter', function () { enterHover('hover'); });
         node.addEventListener('dblclick', function () {
           if (entry.state === 'Disabled') return;
-          slides[si].triggers.forEach(function (t) { if (t.event === 'DoubleClick' && t.owner.Object === o.id) runTrigger(t); });
+          runClickTriggers(si, 'DoubleClick', grp ? grp.owners : [o.id]);
         });
         node.addEventListener('mouseleave', function () { leaveHover('hover'); });
         node.addEventListener('mousedown', function () { entry.down = true; draw(entry); });
@@ -392,9 +425,7 @@
         node.addEventListener('click', function () {
           if (entry.state === 'Disabled') return;
           selectInSet(entry);
-          slides[si].triggers.forEach(function (t) {
-            if (t.event === 'Click' && t.owner.Object === o.id) runTrigger(t);
-          });
+          runClickTriggers(si, 'Click', grp ? grp.owners : [o.id]);
           // A button with a Visited state shows it from the first press on (unless a trigger or a set has moved it elsewhere).
           if (has(o, 'Visited') && (entry.state === 'Normal' || entry.state === o.initial_state)) setObjectState(entry, 'Visited');
         });
@@ -404,9 +435,16 @@
         if (clickable) {
           node.setAttribute('role', 'button'); node.tabIndex = 0;
           if (o.alt) node.setAttribute('aria-label', o.alt);
+          else if (grp) node.setAttribute('aria-label', grp.members.map(function (m) { return (m.text || '').trim(); }).filter(Boolean).join(' '));
           entry.clickable = true;
           node.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); node.click(); } });
           draw(entry);
+        }
+        // Another part of a clickable group: a click runs the group's triggers, and screen readers read the group once.
+        if (isGroupPart) {
+          node.setAttribute('aria-hidden', 'true'); entry.cursor = 'pointer'; node.style.cursor = 'pointer';
+          node.addEventListener('click', function () { runClickTriggers(si, 'Click', grp.owners); });
+          node.addEventListener('dblclick', function () { runClickTriggers(si, 'DoubleClick', grp.owners); });
         }
         var hoverOnly = !clickable && node.getAttribute('tabindex') === null && slides[si].triggers.some(function (t) { return (t.event === 'Hover' || t.event === 'MouseLeave') && t.owner.Object === o.id; });
         if (hoverOnly) node.tabIndex = 0;
@@ -1181,7 +1219,17 @@
     var o = entry.o, s = stateFor(entry);
     var fill = s ? s.fill : o.fill, text = s ? s.text : o.text, st = s ? s.style : o.style, rich = s ? s.rich : o.rich;
     var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow, grad = s ? s.gradient : o.gradient;
-    if (entry.node._path) {
+    if (entry.node._path && entry.node._inside) {
+      // An icon: the outline color colors its lines, the fill color its inside, and the outline width makes the lines bolder.
+      var lines = stroke ? stroke.color : fill, bold = stroke ? stroke.width : 0;
+      entry.node.style.background = 'none';
+      entry.node._inside.setAttribute('fill', stroke && fill ? css(fill) : 'none');
+      entry.node._path.setAttribute('fill', lines ? css(lines) : 'none');
+      entry.node._path.setAttribute('stroke', lines && bold > 0 ? css(lines) : 'none');
+      entry.node._path.setAttribute('stroke-width', bold > 0 ? bold : 0);
+      entry.node._path.setAttribute('stroke-linejoin', 'round');
+      stroke = null;
+    } else if (entry.node._path) {
       entry.node.style.background = 'none';
       entry.node._path.setAttribute('fill', (!s && entry.node._gradId) ? 'url(#' + entry.node._gradId + ')' : fill ? css(fill) : 'none');
       entry.node._path.setAttribute('stroke', stroke ? css(stroke.color) : 'none');

@@ -376,6 +376,25 @@ impl Part<'_> {
     /// One object as a shape element. `ph` writes it as a placeholder of the layout (template mode
     /// when `template` is set, so its text is the prompt).
     fn shape(&mut self, o: &Object, template: bool, out: &mut String) {
+        // A vector icon is two shapes in PowerPoint: its inside in the fill color, then its lines in the outline color.
+        if let Some(look) = o.icon_look() {
+            if let (Some(c), Some(sil)) = (look.inside, o.icon.clone()) {
+                let mut inside = o.clone();
+                inside.kind = Kind::Path(sil);
+                inside.icon = None;
+                inside.fill = Some(c);
+                inside.stroke = None;
+                inside.decorative = true;
+                inside.alt = String::new();
+                self.shape(&inside, template, out);
+            }
+            let mut lines = o.clone();
+            lines.icon = None;
+            lines.fill = Some(look.lines);
+            lines.stroke = None;
+            self.shape(&lines, template, out);
+            return;
+        }
         let has_text = !o.text.is_empty() || template;
         if o.marker.is_some() { self.notes.add("Marker pop-ups (the title on hover and the description card) were left out; the marker itself is a plain shape."); }
         if o.check.is_some() { self.notes.add("Check boxes are exported as text; the box itself is left out."); }

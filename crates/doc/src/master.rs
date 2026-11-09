@@ -8,6 +8,7 @@ use crate::{Action, Align, Kind, Object, Project, Rgba, Slide, TextStyle, VAlign
 use serde::{Deserialize, Serialize};
 
 /// The shape of a background gradient.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GradientKind {
     /// Along a line at an angle.
@@ -39,6 +40,7 @@ pub fn reflect_stops(stops: &[(f32, Rgba)]) -> Vec<(f32, Rgba)> {
 }
 
 /// Where a gradient sits on the slide, as fractions of the slide's width and height.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GradientGeom {
     /// The middle of a radial or angular gradient.
@@ -133,6 +135,7 @@ pub fn gradient_css(kind: GradientKind, angle: f32, stops: &[(f32, Rgba)], geom:
 }
 
 /// What fills a slide's background.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Background {
@@ -186,6 +189,7 @@ pub const THEME_COLOR_NAMES: [&str; 10] =
 
 /// A palette and a pair of fonts that new content starts from. Objects keep literal colors, so
 /// changing the theme does not recolor what already exists.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     pub name: String,
@@ -233,6 +237,7 @@ impl Theme {
     pub fn page(&self) -> Rgba { self.color(1) }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaceholderKind {
     Heading2,
@@ -285,6 +290,7 @@ impl PlaceholderKind {
 }
 
 /// The shapes and background every slide starts from.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Master {
     #[serde(default)]
@@ -295,6 +301,7 @@ pub struct Master {
 
 /// A page design (Title Slide, Title and Content, ...): placeholders plus optional extra shapes
 /// and a background of its own.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SlideLayout {
     pub id: String,

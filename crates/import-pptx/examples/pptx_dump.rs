@@ -1,4 +1,4 @@
-//! `cargo run -p brainbend-import-pptx --example dump -- file.pptx` prints a summary of the import.
+//! `cargo run -p brainbend-import-pptx --example pptx_dump -- file.pptx` prints a summary of the import.
 fn main() {
     let path = std::env::args().nth(1).expect("path to a .pptx");
     let f = std::fs::File::open(&path).unwrap();

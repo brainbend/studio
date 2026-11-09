@@ -1,6 +1,6 @@
 [package]
 name = "brainbend-studio"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,10 +12,10 @@ earcutr = "0.5.0"
 i_overlay = "9.1"
 latex-rust = "3.0.1"
 pulldown-latex = "0.8"
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 rfd = "0.17.2"
 skrifa = "0.44"
-brainbend-doc = { path = "../../crates/doc" }
+brainbend-doc = { path = "../../crates/doc", features = ["schema"] }
 brainbend-fonts = { path = "../../crates/fonts" }
 brainbend-import-legacy = { path = "../../crates/import-legacy" }
 brainbend-import-pptx = { path = "../../crates/import-pptx" }
@@ -25,10 +25,16 @@ brainbend-export-pdf = { path = "../../crates/export-pdf" }
 brainbend-publish-html = { path = "../../crates/publish-html" }
 brainbend-spell = { path = "../../crates/spell" }
 brainbend-video = { path = "../../crates/video" }
+brainbend-mcp = { path = "../../crates/mcp" }
+brainbend-assistant = { path = "../../crates/assistant" }
 ureq = "3"
 serde_json = "1.0.154"
 semver = "1.0.28"
 minisign-verify = "0.3.0"
+alacritty_terminal = "0.26.0"
+portable-pty = "0.9.0"
+resvg = "0.49.0"
 
 [dev-dependencies]
+tiny_http = "0.12"
 egui_kittest = { version = "0.36", features = ["snapshot", "wgpu"] }

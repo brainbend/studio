@@ -10,3 +10,10 @@ authors.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 zip = { version = "9", default-features = false, features = ["deflate"] }
+schemars = { version = "1", optional = true }
+jsonschema = { version = "0.30", default-features = false, optional = true }
+json-patch = { version = "4", optional = true }
+
+[features]
+# A JSON Schema of the document model, for telling an AI tool what can be set (see the MCP controller).
+schema = ["dep:schemars", "dep:jsonschema", "dep:json-patch"]

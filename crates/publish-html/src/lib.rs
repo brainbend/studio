@@ -240,7 +240,7 @@ body.side-anim #stage{{transition:transform .22s ease,left .22s ease}}
 #nav .nav-controls button.ctl-item[aria-checked=true]{{background:transparent;color:var(--p-fg);font-weight:700}}
 #nav .nav-controls button.ctl-item[aria-checked=true]::before{{content:"\2713";position:absolute;left:12px}}
 #nav button:focus-visible{{outline:3px solid #6aa8e6}}
-.obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.hidden-by-layer{{display:none !important}}
+.obj{{position:absolute;box-sizing:border-box;user-select:none;pointer-events:auto}}.obj a{{pointer-events:auto}}.hidden-by-layer{{display:none !important}}
 .obj:focus-visible{{outline:3px solid #1a1a1a;outline-offset:3px}}
 #slide-title:focus{{outline:0}}
 @media (forced-colors:active){{.obj:focus-visible,#nav button:focus-visible,#menu button:focus-visible{{outline-color:Highlight}}}}
