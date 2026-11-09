@@ -86,22 +86,85 @@ pub fn clean_notes(raw: &str) -> String {
     lines.join("\n")
 }
 
-/// The ending of the file name that holds this system's update.
-pub fn platform_suffix() -> Option<&'static str> {
-    if cfg!(target_os = "macos") {
-        Some("-macos-universal.zip")
-    } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
-        Some("-windows-arm64.zip")
-    } else if cfg!(target_os = "windows") {
-        Some("-windows.zip")
-    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-        Some("-linux-aarch64.tar.gz")
-    } else if cfg!(target_os = "linux") {
-        Some("-linux.tar.gz")
-    } else {
-        None
+/// How this copy of the app was put on the computer, which decides what file updates it and how that file is installed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    /// The macOS app, or an unpacked zip or tar.gz: the program replaces itself.
+    Portable,
+    /// The Windows installer: the new .msi is run.
+    Msi,
+    /// A Debian or Ubuntu package: the new .deb is installed with the system's own permission prompt.
+    Deb,
+    /// A Fedora or Red Hat package: the new .rpm is installed the same way.
+    Rpm,
+    /// An AppImage: the new AppImage takes its place.
+    AppImage,
+}
+
+impl Kind {
+    /// What the update window says about how this kind installs.
+    pub fn note(self) -> Option<&'static str> {
+        match self {
+            Kind::Portable => None,
+            Kind::Msi => Some("Windows will ask for permission to run the installer."),
+            Kind::Deb | Kind::Rpm => Some("Your system will ask for permission to install the package."),
+            Kind::AppImage => Some("The new AppImage takes the place of this one."),
+        }
     }
 }
+
+/// What kind of install the running program is. `appimage` is the APPIMAGE variable an AppImage sets, `program_files` the
+/// folders the Windows installer uses, and `packages` says which of dpkg and rpm this Linux system has.
+pub fn detect_kind(exe: &Path, appimage: Option<&std::ffi::OsStr>, program_files: &[PathBuf], packages: (bool, bool)) -> Kind {
+    if cfg!(target_os = "linux") {
+        if appimage.is_some_and(|a| !a.is_empty()) { return Kind::AppImage; }
+        if exe.starts_with("/usr/bin") {
+            if packages.0 { return Kind::Deb; }
+            if packages.1 { return Kind::Rpm; }
+        }
+    }
+    if cfg!(target_os = "windows") && program_files.iter().any(|d| !d.as_os_str().is_empty() && exe.starts_with(d)) { return Kind::Msi; }
+    Kind::Portable
+}
+
+/// `detect_kind` for the running app.
+pub fn kind() -> Kind {
+    let Ok(exe) = std::env::current_exe() else { return Kind::Portable };
+    let folders: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(Arm)", "ProgramW6432"].iter().filter_map(std::env::var_os).map(PathBuf::from).collect();
+    detect_kind(&exe, std::env::var_os("APPIMAGE").as_deref(), &folders, (Path::new("/usr/bin/dpkg").exists(), Path::new("/usr/bin/rpm").exists()))
+}
+
+/// The ending of the file name that holds this kind of install's update.
+pub fn suffix_for(kind: Kind) -> Option<&'static str> {
+    let arm = cfg!(target_arch = "aarch64");
+    if cfg!(target_os = "macos") {
+        return Some("-macos-universal.zip");
+    }
+    if cfg!(target_os = "windows") {
+        return Some(match (kind, arm) {
+            (Kind::Msi, false) => "-windows.msi",
+            (Kind::Msi, true) => "-windows-arm64.msi",
+            (_, false) => "-windows.zip",
+            (_, true) => "-windows-arm64.zip",
+        });
+    }
+    if cfg!(target_os = "linux") {
+        return Some(match (kind, arm) {
+            (Kind::Deb, false) => "_amd64.deb",
+            (Kind::Deb, true) => "_arm64.deb",
+            (Kind::Rpm, false) => ".x86_64.rpm",
+            (Kind::Rpm, true) => ".aarch64.rpm",
+            (Kind::AppImage, false) => "-x86_64.AppImage",
+            (Kind::AppImage, true) => "-aarch64.AppImage",
+            (_, false) => "-linux.tar.gz",
+            (_, true) => "-linux-aarch64.tar.gz",
+        });
+    }
+    None
+}
+
+/// The ending of the file name that holds this system's update.
+pub fn platform_suffix() -> Option<&'static str> { suffix_for(kind()) }
 
 /// The download for a system and the signature that goes with it, if the release has both.
 pub fn pick_assets<'a>(release: &'a Release, suffix: &str) -> Option<(&'a Asset, &'a Asset)> {
@@ -255,6 +318,12 @@ fn stage_into(release: &Release, progress: &Progress, key: &minisign_verify::Pub
     std::fs::create_dir_all(&out).map_err(|e| format!("could not prepare the update: {e}"))?;
     let archive = dir.join(&file.name);
     std::fs::write(&archive, &data).map_err(|e| format!("could not save the update: {e}"))?;
+    if kind() != Kind::Portable {
+        // An installer, a package or an AppImage is used as it is.
+        let kept = out.join(&file.name);
+        std::fs::rename(&archive, &kept).map_err(|e| format!("could not save the update: {e}"))?;
+        return Ok(kept);
+    }
     extract(&archive, &out)?;
     let payload = find_payload(&out)?;
     let _ = std::fs::remove_file(&archive);
@@ -307,10 +376,46 @@ pub fn install(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Swaps the new program in for the running one (a running program can be renamed on Windows, not overwritten).
+/// Runs a helper script that outlives this process: it waits for us to quit, installs, and opens the app again.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn spawn_helper(script: &str, args: &[&Path]) -> Result<(), String> {
+    let mut c = std::process::Command::new("/bin/sh");
+    c.arg("-c").arg(script).arg("sh").arg(std::process::id().to_string());
+    for a in args { c.arg(a); }
+    c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .spawn().map(|_| ()).map_err(|e| format!("could not start the update: {e}"))
+}
+
+/// Installs a package with the system's own permission prompt (pkexec), then opens the app again whether or not it worked.
+#[cfg(all(unix, not(target_os = "macos")))]
+const PACKAGE_SCRIPT: &str = r#"pid=$1; kind=$2; pkg=$3; app=$4
+while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+if [ "$kind" = deb ]; then pkexec dpkg -i "$pkg"; else pkexec rpm -U --replacepkgs "$pkg"; fi
+exec "$app"
+"#;
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn replace_file(staged: &Path, target: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let next = target.with_extension("new");
+    std::fs::copy(staged, &next).map_err(|e| format!("no permission to replace the app in {} ({e})", target.parent().map(|p| p.display().to_string()).unwrap_or_default()))?;
+    std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("could not install the update: {e}"))?;
+    std::fs::rename(&next, target).map_err(|e| format!("could not install the update: {e}"))
+}
+
+/// Swaps the new program in for the running one, or hands the download to the installer that put this copy here.
 #[cfg(target_os = "windows")]
 pub fn install(staged: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     let exe = std::env::current_exe().map_err(|e| format!("could not find the running app: {e}"))?;
+    if kind() == Kind::Msi {
+        // The installer cannot replace the program while it runs, so a script waits for us to quit, runs it, and opens the app.
+        let script = staged.with_extension("cmd");
+        let text = format!("@echo off\r\ntimeout /t 2 /nobreak >nul\r\nmsiexec /i \"{}\" /passive /norestart\r\nstart \"\" \"{}\"\r\n", staged.display(), exe.display());
+        std::fs::write(&script, text).map_err(|e| format!("could not prepare the update: {e}"))?;
+        std::process::Command::new("cmd").arg("/C").arg(&script).creation_flags(0x0800_0000).spawn().map_err(|e| format!("could not start the update: {e}"))?;
+        return Ok(());
+    }
     let old = exe.with_extension("exe.old");
     let _ = std::fs::remove_file(&old);
     std::fs::rename(&exe, &old).map_err(|e| format!("no permission to replace the app in {} ({e})", exe.parent().map(|p| p.display().to_string()).unwrap_or_default()))?;
@@ -322,16 +427,21 @@ pub fn install(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Swaps the new program in for the running one (the old file is replaced in one step, so it never half-exists).
+/// Swaps the new program in for the running one (the old file is replaced in one step, so it never half-exists), or hands
+/// the download to the package system that put this copy here.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn install(staged: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
     let exe = std::env::current_exe().map_err(|e| format!("could not find the running app: {e}"))?;
-    let next = exe.with_extension("new");
-    std::fs::copy(staged, &next).map_err(|e| format!("no permission to replace the app in {} ({e})", exe.parent().map(|p| p.display().to_string()).unwrap_or_default()))?;
-    std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("could not install the update: {e}"))?;
-    std::fs::rename(&next, &exe).map_err(|e| format!("could not install the update: {e}"))?;
-    std::process::Command::new(&exe).spawn().map_err(|e| format!("could not restart: {e}"))?;
+    let target = match kind() {
+        Kind::Deb | Kind::Rpm => {
+            let which = if kind() == Kind::Deb { "deb" } else { "rpm" };
+            return spawn_helper(PACKAGE_SCRIPT, &[Path::new(which), staged, &exe]);
+        }
+        Kind::AppImage => std::env::var_os("APPIMAGE").map(PathBuf::from).ok_or("could not find the AppImage file")?,
+        _ => exe,
+    };
+    replace_file(staged, &target)?;
+    std::process::Command::new(&target).spawn().map_err(|e| format!("could not restart: {e}"))?;
     Ok(())
 }
 
@@ -543,6 +653,7 @@ impl super::App {
                 }
                 State::Ready { .. } => {
                     ui.label("The update is downloaded and checked. BrainBend Studio will close and open again with the new version.");
+                    if let Some(note) = kind().note() { ui.weak(note); }
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         if ui.button("Restart now").clicked() { act = Some(Act::Restart); }
@@ -556,6 +667,7 @@ impl super::App {
                         if ui.button("Release page").clicked() { act = Some(Act::Page); }
                         if ui.button("Later").clicked() { act = Some(Act::Later); }
                     });
+                    if let (true, Some(note)) = (can_install, kind().note()) { ui.add_space(2.0); ui.weak(note); }
                     if !can_install { ui.add_space(2.0); ui.weak("This release has no signed download for your system. Get it from the release page."); }
                 }
             }
@@ -624,6 +736,27 @@ mod tests {
         assert!(is_newer("0.2.0-rc.1", &v("0.2.0")), "a release beats its candidate");
         assert!(!is_newer("0.2.0", &v("0.2.0-rc.1")));
         assert!(!is_newer("garbage", &v("0.2.0")));
+    }
+
+    #[test]
+    fn each_kind_of_install_is_told_apart_and_has_its_own_download() {
+        use std::ffi::OsStr;
+        let none: Vec<PathBuf> = vec![];
+        assert_eq!(detect_kind(Path::new("/home/me/Studio/brainbend-studio"), None, &none, (true, true)), Kind::Portable, "an unpacked copy updates itself");
+        assert_eq!(detect_kind(Path::new("/home/me/x"), Some(OsStr::new("")), &none, (true, true)), Kind::Portable, "an empty APPIMAGE is not an AppImage");
+        if cfg!(target_os = "linux") {
+            assert_eq!(detect_kind(Path::new("/tmp/.mount_x/usr/bin/brainbend-studio"), Some(OsStr::new("/home/me/Studio.AppImage")), &none, (true, true)), Kind::AppImage);
+            assert_eq!(detect_kind(Path::new("/usr/bin/brainbend-studio"), None, &none, (true, false)), Kind::Deb);
+            assert_eq!(detect_kind(Path::new("/usr/bin/brainbend-studio"), None, &none, (false, true)), Kind::Rpm);
+            assert_eq!(detect_kind(Path::new("/opt/studio/brainbend-studio"), None, &none, (true, true)), Kind::Portable);
+            for (k, end) in [(Kind::Deb, ".deb"), (Kind::Rpm, ".rpm"), (Kind::AppImage, ".AppImage"), (Kind::Portable, ".tar.gz")] { assert!(suffix_for(k).unwrap().ends_with(end)); }
+        }
+        if cfg!(target_os = "windows") {
+            let pf = vec![PathBuf::from(r"C:\Program Files")];
+            assert_eq!(detect_kind(Path::new(r"C:\Program Files\BrainBend Studio\brainbend-studio.exe"), None, &pf, (false, false)), Kind::Msi);
+            assert_eq!(detect_kind(Path::new(r"C:\Users\me\Studio\brainbend-studio.exe"), None, &pf, (false, false)), Kind::Portable);
+            assert!(suffix_for(Kind::Msi).unwrap().ends_with(".msi") && suffix_for(Kind::Portable).unwrap().ends_with(".zip"));
+        }
     }
 
     #[test]

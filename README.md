@@ -80,12 +80,13 @@ Parts can be grouped so a card made of a shape, an icon and some words works as 
 
 Press **Publish** to choose how the project goes out:
 
+- **LMS**: a SCORM package (`.zip`) for SCORM 1.2 or SCORM 2004 4th Edition, reporting completion, score and pass/fail.
 - **Web**: an HTML5 folder named for the project, ready for any web server.
-- **Other LMS**: a SCORM package (`.zip`) for SCORM 1.2 or SCORM 2004 4th Edition, reporting completion, score and pass/fail.
 - **PDF**: a PDF file saved directly (no print dialog): a handout in portrait or landscape, with 1, 2 or 3 slides per page, optional correct answers, space for notes, slide notes and alt text.
 - **Print**: the same handout in your browser's print dialog, for a printer or its own "Save as PDF".
 - **Word**: an editable .docx handout with a picture of each slide (questions as they look in the lesson), on a portrait page: one slide with its notes and alt text, or two slides to a page.
 - **PowerPoint**: a `.pptx` file.
+- **Video**: an MP4 of the lesson. Each slide shows for its timeline's length or as long as its sound plays, slide transitions are blended in, and sound that starts by itself is mixed in.
 
 ## License
 
