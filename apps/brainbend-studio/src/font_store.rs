@@ -70,6 +70,9 @@ fn register(defs: &mut egui::FontDefinitions, loaded: &mut BTreeMap<String, (Str
     true
 }
 
+/// The font the editor's own interface (ribbon, panels, dialogs) is drawn in.
+pub(super) const UI_FONT: &str = "Inter";
+
 /// Starts the editor's fonts: the icon font, the interface fonts and the two families every project can use.
 pub(super) fn install(ctx: &egui::Context) {
     let mut defs = egui::FontDefinitions::default();
@@ -80,6 +83,12 @@ pub(super) fn install(ctx: &egui::Context) {
         st.pending.clear();
         for name in ["Montserrat", "Open Sans"] {
             if let Some(fam) = brainbend_fonts::lookup(name) { register(&mut defs, &mut st.loaded, &fam); }
+        }
+        // The interface's own font: Inter, drawn evenly at the small sizes of the ribbon and panels. It goes first, so the
+        // fonts egui comes with remain for the symbols Inter lacks. Slide text uses the fonts authors choose, not this.
+        if let Some(bytes) = brainbend_fonts::lookup(UI_FONT).and_then(|f| f.face_for(false, false).and_then(|face| face.static_bytes())) {
+            defs.font_data.insert("ui".into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
+            defs.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "ui".into());
         }
         st.defs = Some(defs.clone());
     });
