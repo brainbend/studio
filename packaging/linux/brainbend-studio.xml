@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-brainbend">
+    <comment>BrainBend Studio project</comment>
+    <glob pattern="*.brainbend"/>
+  </mime-type>
+  <mime-type type="application/x-brainbend-story">
+    <comment>Course file</comment>
+    <glob pattern="*.story"/>
+  </mime-type>
+</mime-info>

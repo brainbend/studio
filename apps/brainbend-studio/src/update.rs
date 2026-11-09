@@ -90,8 +90,12 @@ pub fn clean_notes(raw: &str) -> String {
 pub fn platform_suffix() -> Option<&'static str> {
     if cfg!(target_os = "macos") {
         Some("-macos-universal.zip")
+    } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
+        Some("-windows-arm64.zip")
     } else if cfg!(target_os = "windows") {
         Some("-windows.zip")
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Some("-linux-aarch64.tar.gz")
     } else if cfg!(target_os = "linux") {
         Some("-linux.tar.gz")
     } else {
