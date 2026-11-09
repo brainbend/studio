@@ -535,6 +535,17 @@ pub enum PathCmd {
     Close,
 }
 
+/// How a vector icon is colored: its lines and, behind them, what is inside. See `Object::icon_look`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IconLook {
+    /// The color of the lines the icon is drawn with (its outline color).
+    pub lines: Rgba,
+    /// The color of the inside of the icon (its fill color), if it has one.
+    pub inside: Option<Rgba>,
+    /// Extra weight added to the lines, in slide pixels (the outline width; 0 leaves them as drawn).
+    pub bold: f32,
+}
+
 /// An object's part in a group that acts as one button (see `Slide::group_role`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GroupRole {
@@ -898,6 +909,10 @@ pub struct Object {
     /// Turning this object (like a dial) sets a number variable.
     #[serde(default)]
     pub dial: Option<Dial>,
+    /// A vector icon from the icon library: the solid shape inside its outline (see `shapes::silhouette`). An icon's
+    /// path is the band the lines make, so its outline color colors those lines, and its fill color fills the inside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Vec<PathCmd>>,
     /// The object is a check box.
     #[serde(default)]
     pub check: Option<Check>,
@@ -972,6 +987,15 @@ impl Object {
         self.states.iter().any(|s| matches!(s.name.as_str(), "Hover" | "Down" | "Disabled" | "Visited" | "Selected"))
     }
 
+    /// How this icon is colored, or None when it is not an icon from the library or has no color to draw with. The
+    /// outline color colors the lines (the icon's solid band) and the fill color fills the inside; an icon with only a
+    /// fill (the old way) draws its lines in that color.
+    pub fn icon_look(&self) -> Option<IconLook> {
+        self.icon.as_ref()?;
+        let lines = self.stroke.map(|s| s.color).or(self.fill)?;
+        Some(IconLook { lines, inside: if self.stroke.is_some() { self.fill } else { None }, bold: self.stroke.map(|s| s.width.max(0.0)).unwrap_or(0.0) })
+    }
+
     /// What the Alt text control means for this object, so Properties shows it only where it does something.
     /// `clickable` is whether a trigger reacts to a click on it, and `group` its part in a clickable group.
     pub fn alt_use(&self, clickable: bool, group: Option<GroupRole>) -> AltUse {
@@ -1012,7 +1036,7 @@ impl Object {
             rotation: 0.0,
             line_spacing: 0.0,
             group: None,
-            table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
+            table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, icon: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
             stroke: None,
             shadow: None,
             hidden: false,

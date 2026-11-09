@@ -2549,8 +2549,11 @@ impl App {
     fn insert_icon(&mut self, icon: &icons::Icon) {
         let Some((cmds, aspect)) = icons::outline(icon) else { return };
         let (w, h) = if aspect >= 1.0 { (200.0, 200.0 / aspect) } else { (200.0 * aspect, 200.0) };
+        let silhouette = brainbend_doc::shapes::silhouette(&cmds);
         let mut o = blank_object(self.new_id("obj"), &icon.title(), Kind::Path(cmds), 0.0, 0.0, w, h);
-        o.fill = Some(self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255)));
+        // Lines in the outline color, and no fill until the author gives the inside one.
+        o.stroke = Some(Stroke { color: self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255)), width: 0.0 });
+        o.icon = Some(silhouette);
         o.alt = icon.title();
         self.insert(o);
     }
@@ -4632,7 +4635,13 @@ impl App {
                 else if ellipse { painter.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, color(f))); }
                 else { painter.rect_filled(r, o.radius * scale, color(f)); }
             }
-            if let Kind::Path(cmds) = &o.kind {
+            if let (Kind::Path(cmds), Some(look)) = (&o.kind, o.icon_look()) {
+                // A vector icon: what its lines enclose in the fill color, then the lines in the outline color.
+                let figs = path_polygons(cmds, r);
+                if let (Some(inside), Some(sil)) = (look.inside, o.icon.as_ref()) { fill_figures(painter, &path_polygons(sil, r), &|p| p, &|_| color(inside)); }
+                fill_figures(painter, &figs, &|p| p, &|_| color(look.lines));
+                if look.bold > 0.0 { for k in 0..12 { let a = std::f32::consts::TAU * k as f32 / 12.0; let off = egui::vec2(a.cos(), a.sin()) * (look.bold * scale / 2.0); fill_figures(painter, &figs, &move |p| p + off, &|_| color(look.lines)); } }
+            } else if let Kind::Path(cmds) = &o.kind {
                 let figs = path_polygons(cmds, r);
                 if let (Some(g), true) = (&o.gradient, !g_is_empty(&o.gradient)) {
                     fill_figures(painter, &figs, &|p| p, &|p| gradient_at(&g.stops, gradient_t(r, g.angle, p)));
@@ -4818,6 +4827,13 @@ impl App {
             effects_paint::behind(painter, o, r, scale, o.fill.map(color), &rot);
         }
         match &o.kind {
+            Kind::Path(cmds) if o.icon_look().is_some() => {
+                let look = o.icon_look().unwrap();
+                let figs = path_polygons(cmds, r);
+                if let (Some(inside), Some(sil)) = (look.inside, o.icon.as_ref()) { fill_figures(painter, &path_polygons(sil, r), &rot, &|_| color(inside)); }
+                fill_figures(painter, &figs, &rot, &|_| color(look.lines));
+                if look.bold > 0.0 { for k in 0..12 { let a = std::f32::consts::TAU * k as f32 / 12.0; let off = egui::vec2(a.cos(), a.sin()) * (look.bold * scale / 2.0); fill_figures(painter, &figs, &|p| rot(p) + off, &|_| color(look.lines)); } }
+            }
             Kind::Path(cmds) => {
                 let figs = path_polygons(cmds, r);
                 if let (Some(f), Some(edge), true) = (o.fill, soft, o.gradient.is_none()) { effects_paint::soft_fill(painter, &figs, r, color(f), edge, &rot); }
@@ -9311,7 +9327,7 @@ mod tests {
             let icon = icons::all().iter().find(|i| i.names[0] == name).unwrap();
             a.insert_icon(icon);
             let o = a.selected_object().unwrap();
-            assert!(matches!(o.kind, Kind::Path(_)) && o.fill.is_some() && o.stroke.is_none());
+            assert!(matches!(o.kind, Kind::Path(_)) && o.icon.is_some() && o.stroke.is_some() && o.fill.is_none(), "lines in the outline color, nothing inside until it is given one");
             assert_eq!(o.alt, name.replace('-', " "), "described for screen readers");
         }
         {
@@ -9719,6 +9735,37 @@ mod tests {
         h.state_mut().project.as_mut().unwrap().slides[0].triggers.clear();
         h.run_steps(2);
         assert_eq!(h.state().trigger_owner(0).map(|(id, _, g)| (id, g)), Some(("icon".to_string(), false)));
+    }
+
+    /// An icon's outline color colors its lines and its fill color the inside (issue: icons).
+    #[test]
+    fn gui_icon_lines_take_the_outline_color_and_the_inside_the_fill_color() {
+        let mut a = app();
+        a.file_view = false;
+        {
+            let p = a.project.as_mut().unwrap();
+            let mut objs = vec![];
+            for (i, (name, bold)) in [("house", 0.0), ("magnifying-glass", 0.0), ("house", 6.0), ("envelope", 0.0)].into_iter().enumerate() {
+                let icon = icons::all().iter().find(|ic| ic.names[0] == name).unwrap();
+                let (cmds, aspect) = icons::outline(icon).unwrap();
+                let (w, h) = if aspect >= 1.0 { (300.0, 300.0 / aspect) } else { (300.0 * aspect, 300.0) };
+                let mut o = Object::new(&format!("i{i}"), name, Kind::Path(cmds.clone()), 120.0 + 420.0 * (i % 4) as f32, 200.0, w, h);
+                o.icon = Some(brainbend_doc::shapes::silhouette(&cmds));
+                o.stroke = Some(Stroke { color: Rgba(192, 57, 43, 255), width: bold });
+                o.fill = Some(Rgba(249, 231, 159, 255));
+                objs.push(o);
+            }
+            p.slides[0].layers[0].objects = objs;
+        }
+        let mut h = harness(a);
+        h.run_steps(4);
+        let look = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].icon_look().unwrap();
+        assert_eq!((look.lines, look.inside.map(|c| c.hex()), look.bold), (Rgba(192, 57, 43, 255), Some("#F9E79F".to_string()), 6.0), "outline color is the lines, fill the inside, width the weight");
+        // An icon with only a fill (made before icons had their own colors) keeps drawing its lines in that color.
+        let mut old = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
+        old.stroke = None;
+        assert_eq!(old.icon_look().map(|l| (l.lines, l.inside)), Some((Rgba(249, 231, 159, 255), None)));
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("icons-colors.png")).unwrap(); }
     }
 
     #[test]

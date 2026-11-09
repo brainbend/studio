@@ -116,13 +116,14 @@ fn table() -> Vec<(Access, ToolDef)> {
             }), &["slide"]), false),
         tool(Access::Read, "find_icons", "Searches the icon library by words in the icons' names (house, arrow-right, check, phone, warning, ...) and returns names to use with add_icon. Use an icon instead of a symbol or emoji character in text, which the fonts often cannot draw.",
             schema(json!({ "query": { "type": "string", "description": "A word or two, such as house or arrow right." }, "count": { "type": "integer", "minimum": 1, "maximum": 40, "description": "How many names to return (default 12)." } }), &["query"]), true),
-        tool(Access::Edit, "add_icon", "Adds an icon from the library to a slide as a vector shape that scales without blurring and takes a fill color. `icon` is a name from find_icons. It is `size` pixels on its longest side (default 120) and centred on the slide unless x and y are given. It is in the lesson's text color unless you give `color` (use a theme or palette color). Its alt text is the icon's name unless you give `alt` or mark it decorative. For an icon button, put the icon next to or on a shape and give the shape the click trigger.",
+        tool(Access::Edit, "add_icon", "Adds an icon from the library to a slide as a vector shape that scales without blurring and takes a fill color. `icon` is a name from find_icons. It is `size` pixels on its longest side (default 120) and centred on the slide unless x and y are given. Its lines are in the lesson's text color unless you give `color` (use a theme or palette color), and `fill` colors the inside of the icon, such as the body of a house. Its alt text is the icon's name unless you give `alt` or mark it decorative. For an icon button, put the icon next to or on a shape and give the shape the click trigger.",
             schema(json!({
                 "slide": slide_prop(),
                 "icon": { "type": "string", "description": "The icon's name, such as house or arrow-right." },
                 "size": { "type": "number", "description": "Pixels on the icon's longest side (default 120)." },
                 "x": { "type": "number" }, "y": { "type": "number" },
-                "color": color_prop("The icon's color"),
+                "color": color_prop("The color of the icon's lines (its outline color)"),
+                "fill": color_prop("The color of the inside of the icon, behind its lines (leave out for none)"),
                 "alt": { "type": "string", "description": "What the icon means for people who cannot see it, such as Back to the home slide." },
                 "decorative": { "type": "boolean", "description": "True when the icon only decorates." },
                 "name": { "type": "string", "description": "A name for the object." },
@@ -1353,11 +1354,19 @@ mod tests {
         assert_eq!((r["type"].as_str(), r["alt"].as_str()), (Some("vector shape"), Some("house")), "{r}");
         let o = a.project.as_ref().unwrap().slides[0].layers[0].objects.last().unwrap().clone();
         assert!(matches!(o.kind, Kind::Path(_)));
-        assert_eq!(o.fill, Some(a.project.as_ref().unwrap().theme.text()), "the lesson's text color unless told otherwise");
+        assert_eq!((o.stroke.map(|s| s.color), o.fill), (Some(a.project.as_ref().unwrap().theme.text()), None), "lines in the lesson's text color unless told otherwise, nothing inside");
+        let look = o.icon_look().expect("an icon from the library");
+        assert_eq!((look.lines, look.inside, look.bold), (a.project.as_ref().unwrap().theme.text(), None, 0.0));
+        assert!(o.icon.as_ref().is_some_and(|sil| !sil.is_empty()), "the solid inside is kept so it can be filled");
         assert!((o.w.max(o.h) - 200.0).abs() <= 1.0 && ((o.x + o.w / 2.0) - 960.0).abs() <= 1.0, "200 on its longest side, centred: {} {} {} {}", o.x, o.y, o.w, o.h);
         // Chosen color, place, and the words spelled however they are written.
         let r = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "Arrow Right", "color": "#E87722", "x": 50, "y": 60, "alt": "Next slide" })).unwrap();
         assert_eq!((r["alt"].as_str(), r["x"].as_f64(), r["y"].as_f64()), (Some("Next slide"), Some(50.0), Some(60.0)));
+        // The outline color colors the lines and the fill color the inside.
+        run(&mut a, "add_icon", json!({ "slide": 1, "icon": "house", "color": "#C0392B", "fill": "#F9E79F" })).unwrap();
+        let o = a.project.as_ref().unwrap().slides[0].layers[0].objects.last().unwrap().clone();
+        let look = o.icon_look().unwrap();
+        assert_eq!((look.lines.hex().as_str(), look.inside.map(|c| c.hex()).as_deref()), ("#C0392B", Some("#F9E79F")));
         let r = run(&mut a, "add_icon", json!({ "slide": 1, "icon": "star", "decorative": true })).unwrap();
         assert!(r["alt"].is_null() || r["alt"] == "", "{r}");
         assert!(a.project.as_ref().unwrap().slides[0].layers[0].objects.last().unwrap().decorative);

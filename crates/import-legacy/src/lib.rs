@@ -554,7 +554,7 @@ fn convert_shapes(list: Option<Node>, ctx: &mut Ctx, hidden: bool) -> Vec<Object
             asset,
             states,
             initial_state,
-            placeholder: None, gradient: None, rotation: rotation_of(n), line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop, dial, check, hit_area, mask: None, dash: dash_of(n), media: media_of(n), hide_on_layers: hidden_on_layers(n), button_set: n.attribute("grpId").filter(|g| !g.trim().is_empty()).map(String::from), poster: (tag == "video").then(|| n.attribute("thumbG")).flatten().filter(|g| ctx.assets.contains_key(*g)).map(String::from),
+            placeholder: None, gradient: None, rotation: rotation_of(n), line_spacing: 0.0, group: None, table: None, table_span: None, table_borders: None, emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop, dial, icon: None, check, hit_area, mask: None, dash: dash_of(n), media: media_of(n), hide_on_layers: hidden_on_layers(n), button_set: n.attribute("grpId").filter(|g| !g.trim().is_empty()).map(String::from), poster: (tag == "video").then(|| n.attribute("thumbG")).flatten().filter(|g| ctx.assets.contains_key(*g)).map(String::from),
         });
     }
     out
@@ -603,7 +603,7 @@ fn table_cells(n: Node, left: f32, top: f32, hidden: bool, ctx: &mut Ctx) -> Vec
                     x: x, y, w: if span_w > 0.0 { span_w } else { w }, h: if span_h > 0.0 { span_h } else { heights.get(ri).copied().unwrap_or(40.0) },
                     fill, stroke: if all_alike { sides[0] } else { None }, shadow: None, glow: None, soft_edge: 0.0, reflection: None, hidden, margins, radius: 0.0,
                     alt: String::new(), text_rotation: 0, role: TextRole::Normal, marker: None, equation: None, captions: None, rich, entrance: None, exit: None, timing: None,
-                    text, style, asset: None, states: vec![], initial_state: String::new(), placeholder: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: Some(base_id.clone()), table: Some((ri as u16, ci as u16)), table_span: (span != (1, 1)).then_some(span), table_borders: (!all_alike).then_some(sides), emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
+                    text, style, asset: None, states: vec![], initial_state: String::new(), placeholder: None, gradient: None, rotation: 0.0, line_spacing: 0.0, group: Some(base_id.clone()), table: Some((ri as u16, ci as u16)), table_span: (span != (1, 1)).then_some(span), table_borders: (!all_alike).then_some(sides), emphasis: None, motion: None, click_steps: Default::default(), decorative: false, crop: None, dial: None, icon: None, check: None, hit_area: None, mask: None, dash: LineDash::Solid, media: Default::default(), hide_on_layers: vec![], button_set: None, poster: None,
                 });
             }
             x += w;

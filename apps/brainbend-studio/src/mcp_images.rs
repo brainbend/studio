@@ -182,7 +182,10 @@ impl App {
         let decorative = bool_arg(a, "decorative")?.unwrap_or(false);
         let alt = text_arg(a, "alt")?.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let mut o = blank_object(self.new_id("obj"), text_arg(a, "name")?.as_deref().unwrap_or(&icon.title()), Kind::Path(cmds), 0.0, 0.0, w, h);
-        o.fill = Some(color);
+        // Lines in the outline color (default the lesson's text color) and, if asked, the inside in the fill color.
+        o.stroke = Some(Stroke { color, width: 0.0 });
+        o.fill = color_arg(a, "fill")?;
+        o.icon = Some(brainbend_doc::shapes::silhouette(match &o.kind { Kind::Path(c) => c, _ => unreachable!() }));
         o.decorative = decorative;
         o.alt = if decorative { String::new() } else { alt.unwrap_or_else(|| icon.title()) };
         o.x = x.unwrap_or(((sw - w) / 2.0).max(0.0)).round();

@@ -349,6 +349,14 @@
             return 'C' + c.Curve.join(' ');
           }).join(''));
           pth.setAttribute('vector-effect', 'non-scaling-stroke');
+          // A vector icon: its solid inside is drawn behind the lines it is made of (see icon_look in the model).
+          if (o.icon && o.icon.length) {
+            var inner = document.createElementNS(ns, 'path');
+            inner.setAttribute('d', o.icon.map(function (c) { return c === 'Close' ? 'Z' : c.Move ? 'M' + c.Move.join(' ') : c.Line ? 'L' + c.Line.join(' ') : 'C' + c.Curve.join(' '); }).join(''));
+            inner.setAttribute('stroke', 'none');
+            psvg.appendChild(inner);
+            node._inside = inner;
+          }
           psvg.appendChild(pth); node.appendChild(psvg);
           node._path = pth;
           if (o.gradient) {
@@ -434,7 +442,7 @@
         }
         // Another part of a clickable group: a click runs the group's triggers, and screen readers read the group once.
         if (isGroupPart) {
-          node.setAttribute('aria-hidden', 'true'); node.style.cursor = 'pointer';
+          node.setAttribute('aria-hidden', 'true'); entry.cursor = 'pointer'; node.style.cursor = 'pointer';
           node.addEventListener('click', function () { runClickTriggers(si, 'Click', grp.owners); });
           node.addEventListener('dblclick', function () { runClickTriggers(si, 'DoubleClick', grp.owners); });
         }
@@ -1211,7 +1219,17 @@
     var o = entry.o, s = stateFor(entry);
     var fill = s ? s.fill : o.fill, text = s ? s.text : o.text, st = s ? s.style : o.style, rich = s ? s.rich : o.rich;
     var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow, grad = s ? s.gradient : o.gradient;
-    if (entry.node._path) {
+    if (entry.node._path && entry.node._inside) {
+      // An icon: the outline color colors its lines, the fill color its inside, and the outline width makes the lines bolder.
+      var lines = stroke ? stroke.color : fill, bold = stroke ? stroke.width : 0;
+      entry.node.style.background = 'none';
+      entry.node._inside.setAttribute('fill', stroke && fill ? css(fill) : 'none');
+      entry.node._path.setAttribute('fill', lines ? css(lines) : 'none');
+      entry.node._path.setAttribute('stroke', lines && bold > 0 ? css(lines) : 'none');
+      entry.node._path.setAttribute('stroke-width', bold > 0 ? bold : 0);
+      entry.node._path.setAttribute('stroke-linejoin', 'round');
+      stroke = null;
+    } else if (entry.node._path) {
       entry.node.style.background = 'none';
       entry.node._path.setAttribute('fill', (!s && entry.node._gradId) ? 'url(#' + entry.node._gradId + ')' : fill ? css(fill) : 'none');
       entry.node._path.setAttribute('stroke', stroke ? css(stroke.color) : 'none');

@@ -377,3 +377,71 @@ mod tests {
         assert_eq!(cloud.iter().filter(|c| matches!(c, PathCmd::Move(..))).count(), 1);
     }
 }
+
+/// The solid shape of a path made of several outlines: just the outlines that are not inside another one. An icon is
+/// the band its lines make, with an outline round its outside and another round its inside; this is the outside alone,
+/// so what the lines enclose can be filled behind them.
+pub fn silhouette(cmds: &[PathCmd]) -> Vec<PathCmd> {
+    let mut figs: Vec<Vec<PathCmd>> = vec![];
+    for c in cmds {
+        match c {
+            PathCmd::Move(..) => figs.push(vec![*c]),
+            other => { if let Some(f) = figs.last_mut() { f.push(*other); } }
+        }
+    }
+    let polys: Vec<Vec<(f32, f32)>> = figs.iter().map(|f| flatten(f)).collect();
+    let inside = |p: (f32, f32), poly: &[(f32, f32)]| {
+        let mut c = false;
+        let mut j = poly.len().wrapping_sub(1);
+        for i in 0..poly.len() {
+            let (a, b) = (poly[i], poly[j]);
+            if (a.1 > p.1) != (b.1 > p.1) && p.0 < (b.0 - a.0) * (p.1 - a.1) / (b.1 - a.1) + a.0 { c = !c; }
+            j = i;
+        }
+        c
+    };
+    let mut out = vec![];
+    for (i, f) in figs.iter().enumerate() {
+        let Some(&first) = polys[i].first() else { continue };
+        if !polys.iter().enumerate().any(|(j, other)| j != i && inside(first, other)) { out.extend(f.iter().copied()); }
+    }
+    out
+}
+
+/// A figure as points, curves sampled.
+fn flatten(fig: &[PathCmd]) -> Vec<(f32, f32)> {
+    let mut pts = vec![];
+    let mut cur = (0.0f32, 0.0f32);
+    for c in fig {
+        match *c {
+            PathCmd::Move(x, y) | PathCmd::Line(x, y) => { pts.push((x, y)); cur = (x, y); }
+            PathCmd::Curve(a, b, c2, d, x, y) => {
+                for k in 1..=8 {
+                    let (t, u) = (k as f32 / 8.0, 1.0 - k as f32 / 8.0);
+                    pts.push((cur.0 * u * u * u + 3.0 * a * u * u * t + 3.0 * c2 * u * t * t + x * t * t * t, cur.1 * u * u * u + 3.0 * b * u * u * t + 3.0 * d * u * t * t + y * t * t * t));
+                }
+                cur = (x, y);
+            }
+            PathCmd::Close => {}
+        }
+    }
+    pts
+}
+
+#[cfg(test)]
+mod silhouette_tests {
+    use super::*;
+
+    #[test]
+    fn the_silhouette_is_the_outside_outlines_only() {
+        // A square ring: an outer square and, inside it, a reversed inner square (the hole).
+        let ring: Vec<PathCmd> = poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]).into_iter().chain(poly(&[(0.25, 0.25), (0.25, 0.75), (0.75, 0.75), (0.75, 0.25)])).collect();
+        let s = silhouette(&ring);
+        assert_eq!(s, poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]), "the hole is covered");
+        // Two separate shapes both stay, and an island inside a hole does not (the outside already covers it).
+        let two: Vec<PathCmd> = ring.iter().copied().chain(poly(&[(2.0, 0.0), (3.0, 0.0), (3.0, 1.0), (2.0, 1.0)])).chain(poly(&[(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)])).collect();
+        let s = silhouette(&two);
+        assert_eq!(s.iter().filter(|c| matches!(c, PathCmd::Move(..))).count(), 2, "{s:?}");
+        assert!(silhouette(&[]).is_empty());
+    }
+}

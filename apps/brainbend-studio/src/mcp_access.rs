@@ -69,8 +69,10 @@ impl App {
             let (cmds, aspect) = crate::icons::outline(ic).ok_or("That icon could not be drawn.")?;
             let side = (h * 0.5).round().max(8.0);
             let (iw, ih) = if aspect >= 1.0 { (side, (side / aspect).round().max(1.0)) } else { ((side * aspect).round().max(1.0), side) };
+            let cmds_for_silhouette = cmds.clone();
             let mut ico = blank_object(self.new_id("obj"), &format!("{} icon", ic.title()), Kind::Path(cmds), (x + h * 0.25).round(), (y + (h - ih) / 2.0).round(), iw, ih);
-            ico.fill = Some(ink);
+            ico.stroke = Some(Stroke { color: ink, width: 0.0 });
+            ico.icon = Some(brainbend_doc::shapes::silhouette(&cmds_for_silhouette));
             // Part of the button: the button's own words name it, so the icon is skipped by screen readers.
             ico.decorative = true;
             let group = self.new_id("group");

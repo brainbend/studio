@@ -154,9 +154,22 @@ fn object_html(o: &Object, p: &Project) -> String {
                 PathCmd::Curve(a, b, c2, d2, e, f) => format!("C{a} {b} {c2} {d2} {e} {f}"),
                 PathCmd::Close => "Z".into(),
             }).collect();
+            let svg_d = |cmds: &[PathCmd]| -> String { cmds.iter().map(|c| match c {
+                PathCmd::Move(x, y) => format!("M{x} {y}"),
+                PathCmd::Line(x, y) => format!("L{x} {y}"),
+                PathCmd::Curve(a, b, c2, d2, e, f) => format!("C{a} {b} {c2} {d2} {e} {f}"),
+                PathCmd::Close => "Z".into(),
+            }).collect() };
+            if let Some(look) = o.icon_look() {
+                // A vector icon: the inside in the fill color, then its lines in the outline color.
+                let inside = match (look.inside, o.icon.as_ref()) { (Some(c), Some(sil)) => format!("<path d=\"{}\" fill=\"{}\"/>", svg_d(sil), css(c)), _ => String::new() };
+                let (stroke, sw) = if look.bold > 0.0 { (css(look.lines), look.bold) } else { ("none".into(), 0.0) };
+                let _ = write!(inner, "<svg viewBox=\"0 0 1 1\" preserveAspectRatio=\"none\" width=\"100%\" height=\"100%\" style=\"overflow:visible\">{inside}<path d=\"{d}\" fill=\"{}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" stroke-linejoin=\"round\" vector-effect=\"non-scaling-stroke\"/></svg>", css(look.lines));
+            } else {
             let fill = o.fill.map(css).unwrap_or_else(|| "none".into());
             let (stroke, sw) = o.stroke.map(|s| (css(s.color), s.width)).unwrap_or(("none".into(), 0.0));
             let _ = write!(inner, "<svg viewBox=\"0 0 1 1\" preserveAspectRatio=\"none\" width=\"100%\" height=\"100%\" style=\"overflow:visible\"><path d=\"{d}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/></svg>");
+            }
         }
         Kind::Line | Kind::LineUp => {
             let (y1, y2) = if matches!(o.kind, Kind::Line) { (0.0, o.h) } else { (o.h, 0.0) };
