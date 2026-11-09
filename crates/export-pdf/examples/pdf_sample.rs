@@ -1,4 +1,4 @@
-//! Writes a sample handout: cargo run -p brainbend-export-pdf --example sample out.pdf [slide.png] [per_page] [landscape]
+//! Writes a sample handout: cargo run -p brainbend-export-pdf --example pdf_sample out.pdf [slide.png] [per_page] [landscape]
 use brainbend_doc::*;
 use brainbend_publish_html::{HandoutOptions, HandoutOrientation};
 fn main() {

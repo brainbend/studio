@@ -557,6 +557,8 @@ mod tests {
         }
     }
 
+    // These run /bin/sh, printf and stty, which Windows does not have.
+    #[cfg(unix)]
     #[test]
     fn a_program_is_told_whether_the_background_is_light_or_dark() {
         let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -585,6 +587,7 @@ mod tests {
     }
 
     /// Runs `sh` with a script in a terminal, without the login shell.
+    #[cfg(unix)]
     fn sh(script: &str) -> Terminal {
         let ctx = egui::Context::default();
         let mut t = Terminal::spawn("Test", "", &[], None, &[], true, &ctx).unwrap();
@@ -593,6 +596,7 @@ mod tests {
         t
     }
 
+    #[cfg(unix)]
     fn wait_for(t: &mut Terminal, what: &str) -> String {
         for _ in 0..400 {
             t.pump();
@@ -603,6 +607,8 @@ mod tests {
         panic!("never saw {what:?}; the screen was:\n{}", t.screen_text());
     }
 
+    // These run /bin/sh, printf and stty, which Windows does not have.
+    #[cfg(unix)]
     #[test]
     fn what_a_program_prints_reaches_the_screen_and_what_is_typed_reaches_it() {
         let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -616,6 +622,8 @@ mod tests {
         wait_for(&mut t, "pasted-text");
     }
 
+    // These run /bin/sh, printf and stty, which Windows does not have.
+    #[cfg(unix)]
     #[test]
     fn it_follows_the_size_and_notices_the_program_ending() {
         let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -634,6 +642,8 @@ mod tests {
         assert!(t.exited.as_deref().is_some_and(|s| s.contains('3')), "{:?}", t.exited);
     }
 
+    // These run /bin/sh, printf and stty, which Windows does not have.
+    #[cfg(unix)]
     #[test]
     fn a_tool_that_is_not_installed_says_so_instead_of_leaving_a_blank_terminal() {
         let _guard = SHELL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -643,5 +653,6 @@ mod tests {
         wait_for(&mut t, "was not found");
     }
 
+    #[cfg(unix)]
     static SHELL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }
