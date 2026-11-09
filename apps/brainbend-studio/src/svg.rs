@@ -45,8 +45,29 @@ fn fonts(with_system: bool) -> Arc<usvg::fontdb::Database> {
     SYSTEM.get_or_init(|| { let mut db = BUNDLED.get_or_init(bundled).clone(); db.load_system_fonts(); Arc::new(db) }).clone()
 }
 
+/// Refuses an SVG whose entity definitions could expand without end. Real SVGs only define entities as plain text (old
+/// Illustrator files give a few namespace addresses), but a hostile one can make each entity from several of the one
+/// before until a few lines become gigabytes. So an entity that contains another one, a very long one, or a great many
+/// are refused before the file is read any further.
+fn refuse_entity_bombs(bytes: &[u8]) -> Result<(), String> {
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(256 * 1024)]);
+    let Some(start) = text.find("<!DOCTYPE") else { return Ok(()) };
+    let doctype = &text[start..];
+    let doctype = &doctype[..doctype.find("]>").map(|i| i + 2).unwrap_or(doctype.len())];
+    let mut count = 0;
+    for part in doctype.split("<!ENTITY").skip(1) {
+        count += 1;
+        let value = part.split(['"', '\'']).nth(1).unwrap_or("");
+        if count > 32 || value.len() > 2048 || value.contains('&') {
+            return Err("That SVG defines entities in a way that could expand without end, so it was not opened.".into());
+        }
+    }
+    Ok(())
+}
+
 /// Draws an SVG to a PNG with its transparency kept.
 pub fn render(bytes: &[u8]) -> Result<Rendered, String> {
+    refuse_entity_bombs(bytes)?;
     if bytes.len() > MAX_SVG_BYTES { return Err(format!("That SVG is over {} MB, which is more than a lesson should carry.", MAX_SVG_BYTES / 1024 / 1024)); }
     let has_text = String::from_utf8_lossy(bytes).contains("<text");
     let mut opt = usvg::Options::default();
@@ -129,8 +150,12 @@ mod tests {
         assert!(render(b"hello").unwrap_err().contains("could not be read"));
         let bomb = r##"<?xml version="1.0"?><!DOCTYPE s [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;"><!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;"><!ENTITY e "&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;"><!ENTITY f "&e;&e;&e;&e;&e;&e;&e;&e;&e;&e;"><!ENTITY g "&f;&f;&f;&f;&f;&f;&f;&f;&f;&f;"><!ENTITY h "&g;&g;&g;&g;&g;&g;&g;&g;&g;&g;">]><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>&h;</text></svg>"##;
         let started = std::time::Instant::now();
-        let _ = render(bomb.as_bytes());
-        assert!(started.elapsed() < std::time::Duration::from_secs(5), "an entity bomb must not hang the app");
+        let e = render(bomb.as_bytes()).unwrap_err();
+        assert!(e.contains("expand without end"), "{e}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "refused at once, not after expanding it");
+        // Plain entities, as old Illustrator files have them, are fine.
+        let illustrator = r##"<?xml version="1.0" encoding="utf-8"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [<!ENTITY ns_svg "http://www.w3.org/2000/svg"><!ENTITY ns_xlink "http://www.w3.org/1999/xlink">]><svg xmlns="&ns_svg;" xmlns:xlink="&ns_xlink;" width="10" height="10"><rect width="10" height="10" fill="#00ff00"/></svg>"##;
+        assert!(render(illustrator.as_bytes()).is_ok(), "plain entities still work");
         // A huge size is drawn at a sane one, and a very large file is refused.
         let huge = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100000" height="50000"><rect width="100000" height="50000" fill="#00ff00"/></svg>"##;
         let r = render(huge.as_bytes()).unwrap();
