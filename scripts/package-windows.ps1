@@ -16,4 +16,6 @@ dotnet tool install --global wix --version 5.0.2 2>$null
 wix build -arch $Arch -d Version=$msiVersion -d Exe=$exe -d Icon=target/icons/brainbend-studio.ico `
   -o "release-files/BrainBend-Studio-$Tag-$suffix.msi" packaging/windows/brainbend-studio.wxs
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+# WiX also writes a debugging file (.wixpdb) next to the installer; it is not part of the download.
+Remove-Item release-files/*.wixpdb -ErrorAction SilentlyContinue
 Get-ChildItem release-files
