@@ -17,12 +17,12 @@
     <ComponentGroup Id="App" Directory="INSTALLFOLDER">
       <Component Id="Exe">
         <File Id="StudioExe" Source="$(Exe)" Name="brainbend-studio.exe" KeyPath="yes" />
-        <ProgId Id="BrainBend.Project" Description="BrainBend Studio project" Icon="app.ico">
+        <ProgId Id="BrainBend.Project" Description="BrainBend Studio project">
           <Extension Id="brainbend" ContentType="application/x-brainbend">
             <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" TargetFile="StudioExe" />
           </Extension>
         </ProgId>
-        <ProgId Id="BrainBend.Story" Description="Course file" Icon="app.ico">
+        <ProgId Id="BrainBend.Story" Description="Course file">
           <Extension Id="story" ContentType="application/x-brainbend-story">
             <Verb Id="open" Command="Open" Argument="&quot;%1&quot;" TargetFile="StudioExe" />
           </Extension>

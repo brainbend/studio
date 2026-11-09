@@ -29,45 +29,52 @@
 </p>
 
 > [!NOTE]
-> BrainBend Studio is a work in progress. Web Lessons are not available to create yet.
+> BrainBend Studio is a work in progress. New features are being added in every update.
 
 ## Runs where you do
 
 A native desktop app, not a browser tab. It works offline and keeps your files on your computer.
 
-| Platform | Download |
+| Platform | Downloads |
 |---|---|
 | **macOS** | One universal `.dmg` that runs natively on Apple silicon and Intel Macs |
-| **Windows** | A portable `.exe` in a `.zip` |
-| **Linux** | A `.tar.gz` with the binary |
+| **Windows** | An installer (`.msi`) or a portable `.exe` in a `.zip`, for x64 and arm64 |
+| **Linux** | `.deb`, `.rpm`, an AppImage, or a `.tar.gz` with the binary, for x86_64 and aarch64 |
 
-Every change is built and tested on macOS, Windows and Linux. Releases are on the [Releases page](https://github.com/brainbend/studio/releases) and the app can check for updates itself.
+Releases are on the [Releases page](https://github.com/brainbend/studio/releases) and the app can check for updates itself. Every download is signed, and each release lists SHA-256 checksums in a signed `SHA256SUMS.txt`.
+
+## Build with AI
+
+Connect your own AI tool and let it build lessons while you watch. Run Claude Code, Codex or Gemini CLI in a Terminal tab inside Studio, or chat with Claude, OpenAI or Gemini using your own API key. The AI can set up your brand (theme colors, fonts and layouts), build slides on your layouts, find royalty-free pictures, add icons and SVG diagrams, build buttons, check accessibility and set the player's options. A design you already made is not changed until you say yes, and every change can be undone.
 
 ## What you can add
+
+**Theme** (Theme tab)
+
+| Group | Options |
+|---|---|
+| Master | Layout Builder (build your own slide layouts) · Layout (change a slide's layout) · Slide Size (16:9 or 4:3) |
+| Brand | Background (color, gradient or picture) · Colors (your project's colors) · Headings and Body fonts |
+
+**Slides** (Slides tab)
+
+| Kind | Slides |
+|---|---|
+| Content | A blank slide, or one from a slide layout · New Scene |
+| Graded questions | Multiple choice · Multiple response · True / False · Fill in the blank · Matching · Sequencing · Fill in the blanks · Drag the words · Mark the words · Number · Sort into groups · Find the hotspot · Label the picture · Choose from lists · Dictation |
+| Survey questions (not scored) | Rating scale · Free text |
+| Results | A quiz results slide that reports the score |
+| Course | Variables · Pass mark |
 
 **Objects** (Objects tab)
 
 | Group | Objects |
 |---|---|
 | Text | Text Box · Table · Slide Number |
-| Media | Picture · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolor) · Web Object |
-| Interactive | Button (with Normal, Hover, Down, Visited, Disabled and Selected states) · Slider · Hotspot (rectangle, oval or freeform) · Dial · Input (check box, radio button, text entry, number entry) · Marker |
+| Media | Picture (including SVG) · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolor) · Web Object |
+| Interactive | Button (with Normal, Hover, Down, Visited, Disabled and Selected states) · Slider · Hotspot (rectangle, oval or freeform) · Dial (knob or needle) · Input (check box, radio button, text entry, number entry) · Marker |
 
-**Slides** (Slides tab)
-
-| Kind | Slides |
-|---|---|
-| Content | A blank slide, or one from a slide layout |
-| Graded questions | Multiple choice · Multiple response · True / False · Fill in the blank · Matching · Sequencing · Fill in the blanks · Drag the words · Mark the words · Number · Sort into groups · Find the hotspot · Label the picture · Choose from lists · Dictation |
-| Survey questions (not scored) | Rating scale · Free text |
-| Results | A quiz results slide that reports the score |
-
-## Fonts
-
-- **Bundled:** 20 open-licensed families, including Inter, Roboto, Lato, Poppins, Montserrat, Open Sans, Playfair Display, Lora and JetBrains Mono, each shown in its own face in the font menu.
-- **From Google Fonts:** add any of the 1,900+ families from inside the app. They are saved on your computer and show up in every font menu.
-- **Installed on your computer:** every font you have is available while you edit.
-- **Published lessons carry their fonts.** Bundled and Google fonts are embedded in the web, SCORM and PDF output so a lesson looks the same on every learner's computer. An installed font is embedded only where its own license allows it; the Publish dialog lists which fonts travel and which fall back.
+Parts can be grouped so a card made of a shape, an icon and some words works as one button for the mouse, the keyboard and screen readers.
 
 ## Publish
 
@@ -79,9 +86,6 @@ Press **Publish** to choose how the project goes out:
 - **Print**: the same handout in your browser's print dialog, for a printer or its own "Save as PDF".
 - **Word**: an editable .docx handout with a picture of each slide (questions as they look in the lesson), on a portrait page: one slide with its notes and alt text, or two slides to a page.
 - **PowerPoint**: a `.pptx` file.
-- **Video**: an MP4 of the lesson. Each slide shows for its timeline's length or as long as its sound plays, slide transitions are blended in, and sound that starts by itself is mixed in. Effects and motion paths are not played yet, and a report afterwards lists what the video leaves out. Making video needs the free ffmpeg program: the first time, Studio asks and downloads it once from [studio-components](https://github.com/brainbend/studio-components).
-
-BrainBend Review and BrainBend LMS are marked Coming soon.
 
 ## License
 
