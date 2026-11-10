@@ -1814,6 +1814,13 @@ impl App {
         group(ui, "AI", |ui| {
             if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
         });
+        group(ui, "Windows", |ui| {
+            let mut inside = self.windows_inside;
+            if ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Settings, spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.").changed() {
+                self.windows_inside = inside;
+                crate::prefs::set_bool("tool_windows_inside", inside);
+            }
+        });
         group(ui, "Updates", |ui| {
             ui.horizontal(|ui| {
                 let checking = matches!(self.updater.state, update::State::Checking(_));

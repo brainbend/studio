@@ -487,19 +487,10 @@ impl Default for Updater {
 impl Updater {
     /// The saved preference, with the check on when nothing is saved.
     pub fn load() -> Self {
-        let on_launch = settings_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .and_then(|v| v["check_for_updates"].as_bool())
-            .unwrap_or(true);
-        Self { on_launch, ..Self::default() }
+        Self { on_launch: crate::prefs::get_bool("check_for_updates").unwrap_or(true), ..Self::default() }
     }
 
-    pub fn save(&self) {
-        let Some(path) = settings_path() else { return };
-        if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
-        let _ = std::fs::write(path, serde_json::json!({ "check_for_updates": self.on_launch }).to_string());
-    }
+    pub fn save(&self) { crate::prefs::set_bool("check_for_updates", self.on_launch); }
 
     /// "Check for Updates": an update already known opens its window; otherwise a check runs and, when it ends, a window
     /// says what it found.
