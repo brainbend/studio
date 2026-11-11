@@ -165,9 +165,9 @@ fn number(ui: &mut egui::Ui, w: f32, v: &mut f32, range: std::ops::RangeInclusiv
 impl App {
     /// The formatting bars for the selected object (the panel's heading and Copy Style button are above them).
     pub(crate) fn format_accordion(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
+        ui.ctx().data_mut(|d| { d.insert_temp(egui::Id::new("format-bar-scope"), 0u8); d.insert_temp(egui::Id::new("panel-compact"), true); });
         let primary = self.ribbon_target();
-        let Some(_) = primary else { return };
+        let Some(_) = primary else { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("panel-compact"), false)); return };
         let mut edited = primary.clone();
         let obj = edited.as_mut().unwrap();
         let mut changed = false;
@@ -188,6 +188,7 @@ impl App {
         if draws { panel_fill_and_line(ui, obj, &mut changed); }
         if draws && !is_line { panel_effects(ui, obj, &mut changed); }
         self.panel_arrange(ui);
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("panel-compact"), false));
         if let (true, Some(before), Some(after)) = (changed, primary.as_ref(), edited.as_ref()) {
             self.apply_object_edit(ctx, before, after);
         }
@@ -198,7 +199,22 @@ impl App {
         section(ui, "text", "Text Formatting", open, |ui| {
             row(ui, "Style", |ui, _| self.text_styles_menu(ui));
             row(ui, "Font", |ui, w| { *changed |= crate::font_store::font_menu(ui, "pf-font", &mut obj.style.font_family, w - 8.0); });
-            row(ui, "Size", |ui, w| { *changed |= number(ui, w, &mut obj.style.size, 4.0..=400.0, " pt"); });
+            row(ui, "Size", |ui, w| {
+                *changed |= number(ui, (w - 92.0).max(40.0), &mut obj.style.size, 4.0..=400.0, " pt");
+                let sizes = ui.add_sized([22.0, ROW_H], egui::Button::new("▾")).on_hover_text("Common sizes");
+                egui::Popup::from_toggle_button_response(&sizes).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
+                    for z in [18.0, 24.0, 28.0, 32.0, 36.0, 40.0, 48.0, 60.0, 72.0, 96.0, 120.0] {
+                        if ui.selectable_label(obj.style.size == z, format!("{z:.0}")).clicked() { obj.style.size = z; *changed = true; }
+                    }
+                });
+                let cur = self.text_sel.and_then(|(a, _)| obj.char_fmts().get(a).and_then(|(_, f)| f.size)).unwrap_or(obj.style.size);
+                for (up, tip) in [(true, "Grow font"), (false, "Shrink font")] {
+                    if compact_text_button(ui, grow_job(ui, up), tip).clicked() {
+                        let next = step_size(cur, up);
+                        self.edit_text_range(move |o, a, b, whole| { if whole { o.style.size = next; } o.format_range(a, b, &Attr::Size(next)); });
+                    }
+                }
+            });
             row(ui, "Color", |ui, w| {
                 let mut c = Some(obj.style.color);
                 if color_field(ui, w, &mut c, None) { if let Some(c) = c { obj.style.color = c; *changed = true; } }

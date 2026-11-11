@@ -208,6 +208,7 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
 
 /// `big_widget`, at least `min_w` wide.
 fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, min_w: f32) -> egui::Response {
+    if panel_compact(ui) { return compact_widget(ui, icon, label, caret, selected); }
     let lines = label_lines(ui, label);
     let font = egui::FontId::proportional(11.5);
     let widest = lines.iter().enumerate().map(|(i, l)| {
@@ -240,6 +241,29 @@ fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
                 ui.painter().text(egui::pos2(rect.center().x, y), egui::Align2::CENTER_TOP, line, font, col);
             }
         }
+    }
+    resp
+}
+
+/// In the Properties panel the big ribbon buttons are one row tall: the icon, the name and a caret beside each other.
+fn panel_compact(ui: &egui::Ui) -> bool { ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("panel-compact"))).unwrap_or(false) }
+
+fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
+    let plain = label.replace('\n', " ");
+    let font = egui::FontId::proportional(12.0);
+    let tw = ui.fonts_mut(|f| f.layout_no_wrap(plain.clone(), font.clone(), egui::Color32::WHITE).size().x);
+    let w = 8.0 + 18.0 + tw + if caret { 16.0 } else { 6.0 };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), plain.clone()));
+    if ui.is_rect_visible(rect) {
+        let enabled = ui.is_enabled();
+        let vis = ui.style().interact_selectable(&resp, selected);
+        ui.painter().rect_filled(rect, 3.0, if selected { vis.bg_fill } else if resp.hovered() { vis.weak_bg_fill } else { ui.visuals().widgets.inactive.weak_bg_fill });
+        let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
+        let icon_col = if !selected && enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
+        ui.painter().text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(14.0, icons()), icon_col);
+        ui.painter().text(egui::pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, &plain, font, col);
+        if caret { chevron(ui.painter(), egui::pos2(rect.right() - 9.0, rect.center().y), 2.8, col); }
     }
     resp
 }
@@ -2068,13 +2092,21 @@ impl App {
                     ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
                     if resp.on_hover_text(st.label()).clicked() { pick = Some(st); }
                 }
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
-                    opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
-                    opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
-                });
+                if !panel_mode(ui) {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
+                        opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
+                        opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
+                    });
+                }
             });
+            // In the Properties panel the options go under the swatches, where there is room for their words.
+            if panel_mode(ui) {
+                opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
+                opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
+                opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
+            }
         });
         // Rows and columns, merging and choosing cells: two menus rather than a row of word buttons.
         let mut op = None;
@@ -2154,7 +2186,8 @@ impl App {
         }
         if obj.table.is_some() { self.table_groups(ui); }
         let is_media = matches!(obj.kind, Kind::Video | Kind::Audio);
-        if is_media {
+        // The Properties panel has Playback and Captions among its Settings.
+        if is_media && !panel_mode(ui) {
             group(ui, "Playback", |ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;

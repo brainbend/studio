@@ -3294,7 +3294,20 @@ impl App {
     /// The side panel for a selected table: its controls live in the ribbon's Table Tools tab.
     fn table_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(2.0);
-        ui.label(egui::RichText::new("TABLE").strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+        let panel = self.format_where.panel();
+        let can_paste = self.style_clip.is_some();
+        let (mut copy, mut paste) = (false, false);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("TABLE").strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+            if panel {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ribbon::format_panel::expand_buttons(ui);
+                    (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
+                });
+            }
+        });
+        if copy { self.style_clip = self.selected_object().map(|o| Box::new(o.clone())); self.status = "Style copied. Select another object and choose Paste Style.".into(); }
+        if paste { self.paste_style(ctx); }
         ui.label(egui::RichText::new("Click a cell, then shift-click another to choose a block of cells.").weak().size(12.0));
         ui.add_space(4.0);
         if self.format_where.panel() {
