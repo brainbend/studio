@@ -154,7 +154,7 @@ pub(crate) fn color_field(ui: &mut egui::Ui, w: f32, cur: &mut Option<Rgba>, non
 }
 
 /// A drop-down as wide as the row: returns the choice made, if any.
-fn pick<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, w: f32, shown: &str, options: &[(T, &str)], cur: Option<T>) -> Option<T> {
+pub(crate) fn pick<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, w: f32, shown: &str, options: &[(T, &str)], cur: Option<T>) -> Option<T> {
     let mut picked = None;
     egui::ComboBox::from_id_salt(id).width(w - 8.0).selected_text(shown).show_ui(ui, |ui| {
         for (v, l) in options {
@@ -193,6 +193,7 @@ impl App {
         }
         if draws { panel_fill_and_line(ui, obj, &mut changed); }
         if draws && !is_line { panel_effects(ui, obj, &mut changed); }
+        if !matches!(obj.kind, Kind::Hotspot) { panel_animation(ui, obj, &mut changed); }
         self.panel_arrange(ui);
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("panel-compact"), false));
         if let (true, Some(before), Some(after)) = (changed, primary.as_ref(), edited.as_ref()) {
@@ -394,5 +395,119 @@ fn panel_effects(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
             if pane == EffectPane::Corners { ui.label(egui::RichText::new("Corners").strong()); }
             *changed |= effect_pane_in(ui, obj, pane, true);
         }
+    });
+}
+
+/// When an object starts its effect: by itself, or when the learner clicks (and which click).
+fn starts_row(ui: &mut egui::Ui, id: &str, step: &mut u32) -> bool {
+    let mut changed = false;
+    row(ui, "Starts", |ui, w| {
+        let opts = [(false, "automatically"), (true, "on click")];
+        if let Some(on_click) = pick(ui, id, w, if *step == 0 { "automatically" } else { "on click" }, &opts, Some(*step > 0)) {
+            if on_click && *step == 0 { *step = 1; changed = true; }
+            if !on_click && *step > 0 { *step = 0; changed = true; }
+        }
+    });
+    if *step > 0 { row(ui, "Click number", |ui, w| { changed |= ui.add_sized([w, ROW_H], egui::DragValue::new(step).range(1..=99)).changed(); }); }
+    changed
+}
+
+/// An entrance or exit: the effect, how it starts and how long it takes.
+fn effect_rows(ui: &mut egui::Ui, id: &str, title: &str, effect: &mut Option<Entrance>, step: &mut u32, entering: bool) -> bool {
+    let mut changed = false;
+    let mut opts: Vec<(Option<EffectKind>, &str)> = vec![(None, "None")];
+    opts.extend(EFFECT_KINDS.iter().map(|k| (Some(*k), effect_label(*k))));
+    let cur = effect.map(|e| e.kind);
+    let shown = cur.map(effect_label).unwrap_or("None");
+    row(ui, title, |ui, w| {
+        if let Some(v) = pick(ui, id, w, shown, &opts, Some(cur)) {
+            match v {
+                None => *effect = None,
+                Some(k) => { let prev = *effect; *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) }); }
+            }
+            changed = true;
+        }
+    });
+    if let Some(en) = effect.as_mut() {
+        changed |= starts_row(ui, &format!("{id}-starts"), step);
+        row(ui, "Duration", |ui, w| { changed |= number_u32(ui, w, &mut en.duration_ms, 50..=10000, " ms"); });
+        if entering { changed |= delay_leftover(ui, &mut en.delay_ms); }
+    }
+    changed
+}
+
+fn number_u32(ui: &mut egui::Ui, w: f32, v: &mut u32, range: std::ops::RangeInclusive<u32>, suffix: &str) -> bool {
+    ui.add_sized([w, ROW_H], egui::DragValue::new(v).range(range).speed(10.0).suffix(suffix.to_string())).changed()
+}
+
+/// The Animation bar of the Properties panel: how the selected object comes in, leaves, draws attention and moves.
+fn panel_animation(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
+    section(ui, "animation", "Animation", false, |ui| {
+        *changed |= effect_rows(ui, "pa-entrance", "Entrance", &mut obj.entrance, &mut obj.click_steps.entrance, true);
+        ui.separator();
+        let had_exit = obj.exit.is_some();
+        let exit_changed = effect_rows(ui, "pa-exit", "Exit", &mut obj.exit, &mut obj.click_steps.exit, false);
+        // An exit plays when the object leaves, so an object that stays to the end of the timeline is given an end to leave at.
+        if exit_changed && !had_exit && obj.exit.is_some() && obj.click_steps.exit == 0 && obj.timing.map_or(true, |t| t.dur_ms.is_none()) {
+            let start = obj.timing.map_or(0, |t| t.start_ms);
+            obj.timing = Some(Timing { start_ms: start, dur_ms: Some(2000) });
+        }
+        if obj.exit.is_some() { ui.weak("Leaves when its bar ends on the timeline."); }
+        *changed |= exit_changed;
+
+        ui.separator();
+        // Emphasis.
+        let mut eopts: Vec<(Option<EmphasisKind>, &str)> = vec![(None, "None")];
+        eopts.extend(EmphasisKind::ALL.iter().map(|k| (Some(*k), k.label())));
+        let ecur = obj.emphasis.map(|e| e.kind);
+        row(ui, "Emphasis", |ui, w| {
+            if let Some(v) = pick(ui, "pa-emphasis", w, ecur.map(|k| k.label()).unwrap_or("None"), &eopts, Some(ecur)) {
+                obj.emphasis = v.map(|k| { let old = obj.emphasis; Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) } });
+                *changed = true;
+            }
+        });
+        if let Some(e) = obj.emphasis.as_mut() {
+            *changed |= starts_row(ui, "pa-emphasis-starts", &mut obj.click_steps.emphasis);
+            row(ui, "Lasts", |ui, w| { *changed |= number_u32(ui, w, &mut e.duration_ms, 100..=60_000, " ms"); });
+            row(ui, "Plays", |ui, w| { *changed |= ui.add_sized([w, ROW_H], egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed(); });
+            *changed |= delay_leftover(ui, &mut e.delay_ms);
+        }
+
+        ui.separator();
+        // Motion path.
+        let mut mopts: Vec<(Option<PathPreset>, &str)> = vec![(None, "None")];
+        mopts.extend(PathPreset::ALL.iter().map(|k| (Some(*k), k.label())));
+        row(ui, "Motion", |ui, w| {
+            let shown = if obj.motion.is_some() { "Path (pick to change)" } else { "None" };
+            if let Some(v) = pick(ui, "pa-motion", w, shown, &mopts, if obj.motion.is_none() { Some(None) } else { None }) {
+                match v {
+                    None => obj.motion = None,
+                    Some(k) => {
+                        let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
+                        let mut m = MotionPath::preset(k);
+                        m.delay_ms = delay;
+                        m.duration_ms = dur;
+                        obj.motion = Some(m);
+                    }
+                }
+                *changed = true;
+            }
+        });
+        if let Some(m) = obj.motion.as_mut() {
+            *changed |= starts_row(ui, "pa-motion-starts", &mut obj.click_steps.motion);
+            row(ui, "Takes", |ui, w| { *changed |= number_u32(ui, w, &mut m.duration_ms, 100..=120_000, " ms"); });
+            row(ui, "Curve", |ui, _| { *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points").changed(); });
+            row(ui, "Points", |ui, _| {
+                if ui.small_button("+ Point").on_hover_text("Add a point after the last one. Drag the points on the slide to shape the path").clicked() {
+                    let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
+                    m.points.push((lx + 120.0, ly));
+                    *changed = true;
+                }
+                if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
+            });
+            *changed |= delay_leftover(ui, &mut m.delay_ms);
+        }
+        ui.separator();
+        row(ui, "Visibility", |ui, _| { *changed |= ui.checkbox(&mut obj.hidden, "Hidden when the slide starts").changed(); });
     });
 }

@@ -6509,6 +6509,7 @@ impl App {
                 let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
                 let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
                 let layer_idx = self.layer;
+                let in_layout = self.in_master_view();
                 let proj = self.project.as_mut().unwrap();
                 let before = proj.slides.clone();
                 let mut changed = false;
@@ -6565,6 +6566,40 @@ impl App {
                         changed |= ui.checkbox(&mut proj.slides[slide_idx].auto_advance, "Go to the next slide when it ends").changed();
                     }
                 });
+                if !in_layout { ribbon::format_panel::section(ui, "transition", "Transition", false, |ui| {
+                    use brainbend_doc::{Transition, TransitionKind};
+                    let sl = &mut proj.slides[slide_idx];
+                    let cur = sl.transition;
+                    let mut opts: Vec<(Option<TransitionKind>, &str)> = vec![(None, "None")];
+                    opts.extend(TransitionKind::ALL.iter().map(|k| (Some(*k), k.label())));
+                    let now = (sl.fade_ms > 0).then_some(cur.kind);
+                    ribbon::format_panel::row(ui, "Effect", |ui, w| {
+                        if let Some(v) = ribbon::format_panel::pick(ui, "slide-transition", w, now.map(|k| k.label()).unwrap_or("None"), &opts, Some(now)) {
+                            match v {
+                                None => sl.fade_ms = 0,
+                                Some(k) => { sl.transition = Transition::of(k); if sl.fade_ms == 0 { sl.fade_ms = 500; } }
+                            }
+                            changed = true;
+                        }
+                    });
+                    let variants = Transition::variants(sl.transition.kind);
+                    if sl.fade_ms > 0 && variants.len() > 1 {
+                        ribbon::format_panel::row(ui, "Options", |ui, w| {
+                            let labels: Vec<(usize, String)> = variants.iter().enumerate().map(|(i, v)| (i, v.variant_label())).collect();
+                            let opts: Vec<(usize, &str)> = labels.iter().map(|(i, l)| (*i, l.as_str())).collect();
+                            let at = variants.iter().position(|v| v.variant_label() == sl.transition.variant_label());
+                            if let Some(i) = ribbon::format_panel::pick(ui, "slide-transition-variant", w, &sl.transition.variant_label(), &opts, at) { sl.transition = variants[i]; changed = true; }
+                        });
+                    }
+                    if sl.fade_ms > 0 {
+                        ribbon::format_panel::row(ui, "Duration", |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut sl.fade_ms).range(50..=5000).speed(10.0).suffix(" ms")).changed(); });
+                        if ui.button("Apply to all slides").clicked() {
+                            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
+                            for s2 in proj.slides.iter_mut() { s2.fade_ms = ms; s2.transition = tr; }
+                            changed = true;
+                        }
+                    }
+                }); }
                 ribbon::format_panel::section(ui, "navigation", "Navigation", false, |ui| {
                     let nav = &mut proj.slides[slide_idx].nav;
                     ui.horizontal(|ui| {
@@ -11604,6 +11639,33 @@ mod tests {
         h.run_steps(4);
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
         assert!(o.dial.is_some() && o.check.is_none(), "now a dial, no longer a check box");
+    }
+
+    #[test]
+    fn animation_settings_are_in_the_panels_for_the_slide_and_for_the_object() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        a.format_where = ribbon::FormatWhere::Panel;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("Animation").is_some(), "the object has an Animation bar");
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("format-bar-open", 0u8)), vec!["animation".to_string()]));
+        h.run_steps(8);
+        for label in ["Entrance", "Exit", "Emphasis", "Motion"] { assert!(h.query_by_label(label).is_some(), "{label} row"); }
+        h.get_by_label("Hidden when the slide starts").click();
+        h.run_steps(3);
+        assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].hidden, "hidden at the start, set in the panel");
+        // The slide's transition, with nothing selected.
+        h.state_mut().selected = None;
+        h.state_mut().project.as_mut().unwrap().slides[0].fade_ms = 400;
+        h.run_steps(3);
+        assert!(h.query_by_label("Transition").is_some(), "the slide has a Transition bar");
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("format-bar-open", 1u8)), vec!["transition".to_string()]));
+        h.run_steps(8);
+        assert!(h.query_by_label("Duration").is_some() && h.query_by_label("Apply to all slides").is_some(), "its duration and Apply to all");
     }
 
     #[test]
