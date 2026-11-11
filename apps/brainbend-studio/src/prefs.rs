@@ -4,13 +4,24 @@ use std::path::PathBuf;
 
 fn home_dir() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from) }
 
-pub fn path() -> Option<PathBuf> { Some(home_dir()?.join(".brainbend-studio").join("settings.json")) }
+/// Tests never read or write the real settings file.
+pub fn path() -> Option<PathBuf> { if cfg!(test) { None } else { Some(home_dir()?.join(".brainbend-studio").join("settings.json")) } }
 
 fn read() -> serde_json::Map<String, serde_json::Value> {
     path().and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default()
+}
+
+pub fn get_str(key: &str) -> Option<String> { read().get(key).and_then(|v| v.as_str()).map(str::to_string) }
+
+pub fn set_str(key: &str, value: &str) {
+    let Some(path) = path() else { return };
+    let mut all = read();
+    all.insert(key.into(), value.into());
+    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    let _ = std::fs::write(path, serde_json::Value::Object(all).to_string());
 }
 
 pub fn get_bool(key: &str) -> Option<bool> { read().get(key).and_then(|v| v.as_bool()) }

@@ -4,6 +4,8 @@
 //! changed are then written to every selected object, so formatting works on multi-selections too.
 use super::*;
 
+pub(crate) mod format_panel;
+
 // Phosphor icon codepoints (regular weight).
 pub const UNDO: char = '\u{e024}';
 pub const REDO: char = '\u{e026}';
@@ -607,6 +609,18 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// The tabs, left to right, in the order an author works through them. Layout Builder shows only inside its own mode.
 pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"];
 pub const HOME_TAB: usize = 1;
+
+/// Where the formatting controls (font, paragraph, fill, line, effects, arrange...) are offered: in the ribbon's Home tab, in
+/// an accordion at the top of the Properties tab, or in both. An app setting: it follows the person, not the project.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum FormatWhere { Ribbon, Panel, #[default] Both }
+
+impl FormatWhere {
+    pub fn ribbon(self) -> bool { self != FormatWhere::Panel }
+    pub fn panel(self) -> bool { self != FormatWhere::Ribbon }
+    pub fn key(self) -> &'static str { match self { FormatWhere::Ribbon => "ribbon", FormatWhere::Panel => "panel", FormatWhere::Both => "both" } }
+    pub fn load() -> Self { match crate::prefs::get_str("formatting_in").as_deref() { Some("ribbon") => FormatWhere::Ribbon, Some("panel") => FormatWhere::Panel, _ => if cfg!(test) { FormatWhere::Ribbon } else { FormatWhere::Both } } }
+}
 pub const THEME_TAB: usize = 2;
 pub const SLIDES_TAB: usize = 3;
 pub const OBJECTS_TAB: usize = 4;
@@ -684,7 +698,15 @@ fn rows(ui: &mut egui::Ui) {
 const CAP_H: f32 = 14.0;
 
 /// A ribbon group: a fixed-height column of controls, its caption centred underneath, and a thin divider line.
+/// Whether the controls are being drawn into the Properties panel (as bars) rather than the ribbon.
+fn panel_mode(ui: &egui::Ui) -> bool { ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("panel-groups"))).unwrap_or(false) }
+
 fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
+    // In the Properties panel a group is a bar of the accordion instead of a block of the ribbon.
+    if panel_mode(ui) {
+        format_panel::section(ui, caption, caption, false, |ui| { add(ui); });
+        return;
+    }
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
         let body = ui.vertical(|ui| {
@@ -1186,6 +1208,7 @@ fn quick_styles(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
 }
 
 fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    if panel_mode(ui) { return; }
     let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
     let is_pic = matches!(obj.kind, Kind::Image);
     let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
@@ -1280,7 +1303,10 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
                 // The Layout Builder has its own short tab list, with its own tab first; that tab exists only there.
+                let drop_home = !self.format_where.ribbon();
+                if drop_home && self.ribbon_tab == HOME_TAB { self.ribbon_tab = OBJECTS_TAB; }
                 let order: Vec<usize> = if master { vec![0, MASTER_TAB, HOME_TAB, OBJECTS_TAB, ANIMATIONS_TAB, HELP_TAB] } else { (0..TABS.len()).filter(|&i| i != MASTER_TAB).collect() };
+                let order: Vec<usize> = order.into_iter().filter(|&i| !(drop_home && i == HOME_TAB)).collect();
                 for i in order {
                     let name = TABS[i];
                     let sel = self.ribbon_tab == i && i != 0;
@@ -1340,7 +1366,7 @@ impl App {
                             ui.spacing_mut().item_spacing.x = 3.0;
                             ui.add_enabled_ui(!self.try_mode, |ui| {
                             match self.ribbon_tab {
-                                HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
+                                HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed, true),
                                 OBJECTS_TAB => self.insert_tab(ui, normal),
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
                                 THEME_TAB => self.design_tab(ui, ctx),
@@ -1814,12 +1840,23 @@ impl App {
         group(ui, "AI", |ui| {
             if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
         });
-        group(ui, "Windows", |ui| {
+        group(ui, "Studio Options", |ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Formatting in");
+                    let now = self.format_where;
+                    egui::ComboBox::from_id_salt("format-where").selected_text(match now { FormatWhere::Ribbon => "The ribbon", FormatWhere::Panel => "Properties panel", FormatWhere::Both => "Both" }).show_ui(ui, |ui| {
+                        for (v, l) in [(FormatWhere::Ribbon, "The ribbon"), (FormatWhere::Panel, "Properties panel"), (FormatWhere::Both, "Both")] {
+                            if ui.selectable_label(now == v, l).clicked() { self.format_where = v; crate::prefs::set_str("formatting_in", v.key()); }
+                        }
+                    }).response.on_hover_text("Where font, paragraph, fill, line, effects and arrange controls are offered: the ribbon's Home tab, an accordion in the Properties panel, or both. This follows you, not the project.");
+                });
             let mut inside = self.windows_inside;
             if ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Settings, spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.").changed() {
                 self.windows_inside = inside;
                 crate::prefs::set_bool("tool_windows_inside", inside);
             }
+            });
         });
         group(ui, "Updates", |ui| {
             ui.horizontal(|ui| {
@@ -1830,11 +1867,11 @@ impl App {
         });
     }
 
-    fn home_tab(&mut self, ui: &mut egui::Ui, normal: bool, obj: Option<&mut Object>, changed: &mut bool) {
+    fn home_tab(&mut self, ui: &mut egui::Ui, normal: bool, obj: Option<&mut Object>, changed: &mut bool, clipboard: bool) {
         let has_sel = self.selected.is_some();
         let n_sel = self.selection().len();
         let mut list_click: Option<ListStyle> = None;
-        group(ui, "Clipboard", |ui| {
+        if clipboard { group(ui, "Clipboard", |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(normal && self.clipboard.is_some(), |ui| {
                     if big_button(ui, PASTE, "Paste", "Paste (⌘V)").clicked() { self.paste(); }
@@ -1854,7 +1891,7 @@ impl App {
                     });
                 });
             });
-        });
+        }); }
         // Every control is always shown; with nothing to apply to, a stand-in object is edited and the
         // controls are disabled, so the ribbon keeps its shape as the selection changes.
         let mut stand_in = Object::new("none", "none", Kind::Rect, 0.0, 0.0, 0.0, 0.0);
@@ -2229,6 +2266,7 @@ impl App {
 
     /// Order, group and align the selection. Shared by the selection groups on Home.
     fn arrange_group(&mut self, ui: &mut egui::Ui, has_sel: bool, n_sel: usize) {
+        if panel_mode(ui) { return; }
         group(ui, "Arrange", |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(has_sel, |ui| {
@@ -3183,12 +3221,19 @@ fn effects_preview(ui: &mut egui::Ui, obj: &Object) {
 enum EffectPane { Presets, Shadow, Glow, Reflection, Soft, Corners }
 
 /// The contents of one Effects popup: a small preview, then that effect's controls. Returns true when anything changed.
-fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
+fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool { effect_pane_in(ui, obj, pane, false) }
+
+/// `effect_pane`; `inline` is for the Properties panel, where it takes the panel's width and has no preview of its own.
+fn effect_pane_in(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane, inline: bool) -> bool {
     let mut changed = false;
-    ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
-    ui.spacing_mut().slider_width = 96.0;
-    effects_preview(ui, obj);
-    ui.add_space(6.0);
+    if !inline {
+        ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
+        ui.spacing_mut().slider_width = 96.0;
+        effects_preview(ui, obj);
+        ui.add_space(6.0);
+    } else {
+        ui.spacing_mut().slider_width = 90.0;
+    }
     match pane {
         EffectPane::Presets => {
             for (name, tip) in [("None", "Remove every effect"), ("Soft shadow", "A gentle shadow just below"), ("Warm glow", "A warm halo"), ("Mirror", "A faded reflection below")] {
@@ -3262,6 +3307,7 @@ fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
 
 /// The Effects group of the ribbon: a button for each effect, lit while the object uses it.
 fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    if panel_mode(ui) { return; }
     let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
     let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
     let is_pic = matches!(obj.kind, Kind::Image);

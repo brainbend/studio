@@ -293,6 +293,8 @@ struct App {
     updater: update::Updater,
     /// Tool windows open inside the app rather than as windows of their own (see `prefs::tool_windows_inside`).
     windows_inside: bool,
+    /// Where the formatting controls are offered (an app setting).
+    format_where: ribbon::FormatWhere,
     /// The window that asks before the video program (ffmpeg) is downloaded.
     video_support: video_support::VideoSupport,
     font_store: font_store::FontStore,
@@ -494,7 +496,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), format_where: ribbon::FormatWhere::load(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -3286,12 +3288,18 @@ impl App {
 
     /// The Table section of the Properties panel and the right-click menu: merge, split and looks.
     /// The side panel for a selected table: its controls live in the ribbon's Table Tools tab.
-    fn table_panel(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new("Table").strong());
+    fn table_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("TABLE").strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
         ui.label(egui::RichText::new("Click a cell, then shift-click another to choose a block of cells.").weak().size(12.0));
         ui.add_space(4.0);
-        ui.label("Styles, rows and columns, merging and borders are on the Home tab, under TABLE. Font, fill and alignment there apply to the chosen cells.");
-        if ui.button("Open Home").clicked() { self.ribbon_tab = ribbon::HOME_TAB; }
+        if self.format_where.panel() {
+            // Styles, rows and columns, merging, borders, and font, fill and alignment for the chosen cells.
+            self.format_accordion(ui, ctx);
+        } else {
+            ui.label("Styles, rows and columns, merging and borders are on the Home tab, under TABLE. Font, fill and alignment there apply to the chosen cells.");
+            if ui.button("Open Home").clicked() { self.ribbon_tab = ribbon::HOME_TAB; }
+        }
     }
 
     /// What a hyperlink looks like in text: the theme's hyperlink color (accent 1), as the PowerPoint export sets it.
@@ -6400,7 +6408,7 @@ impl App {
         let mut want_thumb: Option<(usize, usize)> = None;
         let mut restore_ratio = false;
         let mut want_poster: Option<(usize, usize, PosterWant)> = None;
-        let mut open_states = false;
+        let mut copy_look = false;
         // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
         let wide_panel = self.right_tab == AI_TAB && self.assistant.shows_terminal();
         egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
@@ -6417,7 +6425,7 @@ impl App {
             // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
             // tab away.
             if !self.in_master_view() && self.right_tab != AI_TAB {
-                egui::Panel::bottom("layers-panel").resizable(true).default_size(250.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
+                egui::Panel::bottom(if self.format_where.panel() { "layers-panel-with-formatting" } else { "layers-panel" }).resizable(true).default_size(if self.format_where.panel() { 150.0 } else { 250.0 }).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
             }
@@ -6447,17 +6455,35 @@ impl App {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let n_sel = self.selection().len();
             if n_sel > 1 && self.selected_object().is_some_and(|o| o.table.is_some()) {
-                self.table_panel(ui);
+                self.table_panel(ui, ctx);
                 return;
             }
             if n_sel > 1 && self.group_panel(ui, ctx, slide_idx) { return; }
             if n_sel > 1 {
-                ui.label(format!("{n_sel} objects selected"));
-                ui.label("Drag to move them together. Shift-click adds or removes one. Formatting and alignment are on the Home tab.");
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new(format!("{n_sel} OBJECTS")).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                if self.format_where.panel() {
+                    // What is chosen below is applied to every selected object.
+                    ui.label(egui::RichText::new("Drag to move them together. Shift-click adds or removes one.").weak().size(12.0));
+                    ui.add_space(4.0);
+                    self.format_accordion(ui, ctx);
+                } else {
+                    ui.label("Drag to move them together. Shift-click adds or removes one. Formatting and alignment are on the Home tab.");
+                }
                 return;
             }
             let Some((li, oi)) = self.selected else {
-                ui.label("Nothing selected. Click an object on the canvas.");
+                ui.add_space(2.0);
+                let layer_idx = self.layer;
+                // With no object chosen, the panel is about the layer picked in the list below, or the slide when that is the base layer.
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(if layer_idx > 0 { "LAYER" } else { "SLIDE" }).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                    if layer_idx > 0 {
+                        let name = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(layer_idx)).map(|l| l.name.clone()).unwrap_or_default();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate()); });
+                    }
+                });
+                ui.add_space(2.0);
                 let mut ctr = self.id_counter;
                 let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
                 let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
@@ -6468,8 +6494,12 @@ impl App {
                 let mut want_asset: Option<AssetWant> = None;
                 let number_vars: Vec<(String, String)> = proj.variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
                 let mut delete_layer = None;
-                ui.separator();
-                section_label(ui, "Slide");
+                // The slide's own bars, the layer's and an object's are separate lists: each remembers which bar of it is open.
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), if layer_idx > 0 { 2u8 } else { 1u8 }));
+                if layer_idx == 0 {
+                // A question or results slide opens on what makes it that; any other slide opens on its settings.
+                let plain_slide = matches!(proj.slides[slide_idx].kind, SlideKind::Normal);
+                ribbon::format_panel::section(ui, "slide-settings", "Settings", plain_slide, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Name");
                     changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
@@ -6478,36 +6508,25 @@ impl App {
                 if proj.slides[slide_idx].layout.is_some() {
                     changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
                 }
+                });
                 let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
                 match &mut proj.slides[slide_idx].kind {
                     SlideKind::Question(q) => {
-                        egui::ScrollArea::vertical().id_salt("qedit").max_height(440.0).show(ui, |ui| {
-                            changed |= question_editor(ui, q, &mut gen, &mut want_asset, &number_vars);
-                            changed |= question_area_editor(ui, q, slide_w, slide_h);
+                        ribbon::format_panel::section(ui, "question", "Question", true, |ui| {
+                            egui::ScrollArea::vertical().id_salt("qedit").max_height(440.0).show(ui, |ui| {
+                                changed |= question_editor(ui, q, &mut gen, &mut want_asset, &number_vars);
+                                changed |= question_area_editor(ui, q, slide_w, slide_h);
+                            });
                         });
                     }
                     SlideKind::Results => {
-                        ui.label("Shows the quiz score, pass or fail, and a Retry button. Put it after the last question.");
+                        ribbon::format_panel::section(ui, "results", "Results", true, |ui| {
+                            ui.label("Shows the quiz score, pass or fail, and a Retry button. Put it after the last question.");
+                        });
                     }
                     SlideKind::Normal => {}
                 }
-                ui.separator();
-                section_label(ui, "Layer");
-                if let Some(layer) = proj.slides[slide_idx].layers.get_mut(layer_idx) {
-                    ui.horizontal(|ui| {
-                        ui.label("Name");
-                        changed |= ui.text_edit_singleline(&mut layer.name).changed();
-                    });
-                    if layer_idx > 0 {
-                        changed |= ui.checkbox(&mut layer.modal, "Block clicks on the layers beneath").on_hover_text("While this layer shows, learners cannot click the base layer").changed();
-                        changed |= ui.checkbox(&mut layer.hide_others, "Hide the slide's other layers when it shows").changed();
-                        changed |= ui.checkbox(&mut layer.pause_base, "Pause the base layer while it shows").on_hover_text("The slide's timeline and its video or audio stop, and run on when this layer hides").changed();
-                    }
-                    if layer_idx > 0 && ui.button("Delete layer").clicked() { delete_layer = Some(layer_idx); }
-                }
-                ui.separator();
-                section_label(ui, "Timeline");
-                {
+                ribbon::format_panel::section(ui, "timeline", "Timeline", false, |ui| {
                     let last = proj.slides[slide_idx].layers.len() - 1;
                     let li = layer_idx.min(last);
                     ui.horizontal(|ui| {
@@ -6524,10 +6543,8 @@ impl App {
                     if li == 0 {
                         changed |= ui.checkbox(&mut proj.slides[slide_idx].auto_advance, "Go to the next slide when it ends").changed();
                     }
-                }
-                ui.separator();
-                section_label(ui, "Navigation");
-                {
+                });
+                ribbon::format_panel::section(ui, "navigation", "Navigation", false, |ui| {
                     let nav = &mut proj.slides[slide_idx].nav;
                     ui.horizontal(|ui| {
                         ui.label("Next button");
@@ -6548,13 +6565,12 @@ impl App {
                             }
                         });
                     });
-                }
+                });
                 // Random questions: a scene can show each learner a different selection of its question slides.
                 let scene_id = proj.slides[slide_idx].scene.clone();
                 let questions = proj.slides.iter().filter(|s| s.scene == scene_id && matches!(s.kind, SlideKind::Question(_))).count();
                 if questions > 0 {
-                    ui.separator();
-                    section_label(ui, "Random questions");
+                    ribbon::format_panel::section(ui, "random-questions", "Random Questions", false, |ui| {
                     if let Some(sc) = proj.scenes.iter_mut().find(|c| c.id == scene_id) {
                         let mut on = sc.bank.is_some();
                         if ui.checkbox(&mut on, "Show a random selection of this scene's questions").on_hover_text("Each attempt draws different question slides from this scene, so two learners (or two tries) do not see the same quiz. The score counts only the questions shown.").changed() {
@@ -6570,7 +6586,32 @@ impl App {
                             changed |= ui.checkbox(&mut b.shuffle, "Shuffle the order").changed();
                         }
                     }
+                    });
                 }
+                } else if proj.slides[slide_idx].layers.get(layer_idx).is_some() {
+                    // A layer other than the base layer: what it does to the slide while it shows, and how long it runs.
+                    ribbon::format_panel::section(ui, "layer-shows", "When This Layer Shows", true, |ui| {
+                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
+                        changed |= ui.checkbox(&mut layer.modal, "Block clicks on the layers beneath").on_hover_text("While this layer shows, learners cannot click the base layer").changed();
+                        changed |= ui.checkbox(&mut layer.hide_others, "Hide the slide's other layers when it shows").changed();
+                        changed |= ui.checkbox(&mut layer.pause_base, "Pause the base layer while it shows").on_hover_text("The slide's timeline and its video or audio stop, and run on when this layer hides").changed();
+                    });
+                    ribbon::format_panel::section(ui, "layer-timeline", "Timeline", false, |ui| {
+                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
+                        ui.horizontal(|ui| {
+                            let mut timed = layer.duration_ms.is_some();
+                            if ui.checkbox(&mut timed, "Layer length").on_hover_text("Length of the timeline; timed objects follow it").changed() {
+                                layer.duration_ms = if timed { Some(5000) } else { None };
+                                changed = true;
+                            }
+                            if let Some(d) = layer.duration_ms.as_mut() {
+                                changed |= ui.add(egui::DragValue::new(d).range(250..=3_600_000).speed(50.0).suffix(" ms")).changed();
+                            }
+                        });
+                    });
+                }
+                ui.add_space(8.0);
+                ui.weak("Click an object on the canvas to edit it.");
 
                 self.id_counter = ctr;
                 if changed {
@@ -6598,6 +6639,9 @@ impl App {
             let layer_choices: Vec<(String, String)> = self.project.as_ref().unwrap().slides[slide_idx].layers.iter().map(|l| (l.id.clone(), l.name.clone())).collect();
             let text_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Text(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
             let num_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
+            let kind_title = self.format_title();
+            let (painter_on, panel_formatting) = (self.painter.is_some(), self.format_where.panel());
             let proj = self.project.as_mut().unwrap();
             // Slides are small (assets live on the project), so a per-frame copy is cheap.
             let before = proj.slides.clone();
@@ -6607,8 +6651,20 @@ impl App {
             };
             let group_role = proj.slides[slide_idx].group_role(li, oi);
             let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
-            ui.label(egui::RichText::new(kind_name(&obj.kind)).weak());
             let mut changed = false;
+            // What is selected, in the main color, with the Format Painter beside it when formatting is in this panel.
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let title = kind_title.map(str::to_string).unwrap_or_else(|| kind_name(&obj.kind).to_uppercase());
+                ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                if panel_formatting {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.selectable_label(painter_on, "Copy Look").on_hover_text("Format Painter: copy this object's look, then click another object to give it the same look. Esc cancels.").clicked() { copy_look = true; }
+                    });
+                }
+            });
+            ui.add_space(2.0);
+            ribbon::format_panel::section(ui, "settings", "Settings", true, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Name");
                 changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
@@ -6718,19 +6774,6 @@ impl App {
                 else if w.url.trim_start().starts_with("http://") { ui.colored_label(ui.visuals().warn_fg_color, "http:// pages are blocked inside https:// courses by most browsers. Use https:// if the site has it."); }
                 ui.weak("Some sites refuse to be shown inside another page. Add alt text above: it names the frame for screen readers.");
             }
-            if matches!(obj.kind, Kind::Video | Kind::Audio) {
-                egui::CollapsingHeader::new("Playback").default_open(true).show(ui, |ui| {
-                    let m = &mut obj.media;
-                    changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                    changed |= ui.checkbox(&mut m.looped, "Loop").changed();
-                    changed |= ui.checkbox(&mut m.muted, "Muted").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("Volume");
-                        let mut pct = (m.volume * 100.0).round();
-                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%")).changed() { m.volume = pct / 100.0; changed = true; }
-                    });
-                });
-            }
             if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
                 let old_text = obj.text.clone();
                 ui.label("Text");
@@ -6745,38 +6788,64 @@ impl App {
                     }
                     changed = true;
                 }
-                ui.weak("Font, color and alignment are on the Home tab. To format part of the text, double-click it on the slide, select words, and press ⌘B / ⌘I / ⌘U.");
+                ui.weak("To format part of the text, double-click it on the slide, select words, and press ⌘B / ⌘I / ⌘U.");
             }
-            egui::CollapsingHeader::new("Size and position").default_open(false).show(ui, |ui| {
-                egui::Grid::new("geom").show(ui, |ui| {
-                    for (label, v) in [("X", &mut obj.x), ("Y", &mut obj.y), ("Width", &mut obj.w), ("Height", &mut obj.h)] {
-                        ui.label(label);
-                        changed |= ui.add(egui::DragValue::new(v).speed(1.0)).changed();
-                        ui.end_row();
-                    }
-                    if matches!(obj.kind, Kind::Image | Kind::Video) {
-                        ui.label("");
-                        if ui.button("Restore aspect ratio").on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { restore_ratio = true; }
-                        ui.end_row();
-                    }
-                    ui.label("Rotation");
-                    changed |= ui.add(egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
-                    ui.end_row();
-                });
             });
+            if matches!(obj.kind, Kind::Video | Kind::Audio) {
+                ribbon::format_panel::section(ui, "playback", "Playback", true, |ui| {
+                    let m = &mut obj.media;
+                    changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
+                    changed |= ui.checkbox(&mut m.looped, "Loop").changed();
+                    changed |= ui.checkbox(&mut m.muted, "Muted").changed();
+                    ui.horizontal(|ui| {
+                        ui.label("Volume");
+                        let mut pct = (m.volume * 100.0).round();
+                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%")).changed() { m.volume = pct / 100.0; changed = true; }
+                    });
+                });
+            }
+            ribbon::format_panel::section(ui, "size-position", "Size and Position", false, |ui| {
+                for (label, v) in [("X", &mut obj.x), ("Y", &mut obj.y), ("Width", &mut obj.w), ("Height", &mut obj.h)] {
+                    ribbon::format_panel::row(ui, label, |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(v).speed(1.0)).changed(); });
+                }
+                ribbon::format_panel::row(ui, "Rotation", |ui, w| {
+                    changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
+                });
+                if matches!(obj.kind, Kind::Image | Kind::Video) {
+                    if ui.add_sized([ui.available_width(), 22.0], egui::Button::new("Restore Aspect Ratio")).on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { restore_ratio = true; }
+                }
+            });
+            // What the object is (its name, text and size) is above; its formatting follows, then what it does.
+            let commit = |this: &mut App, before: Vec<Slide>, changed: bool| {
+                if changed {
+                    // One undo step per continuous edit (drag or typing burst).
+                    let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
+                    if !(this.edit_open && editing) { this.push_undo(before); }
+                    this.edit_open = true;
+                    this.dirty = true;
+                } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
+                    this.edit_open = false;
+                }
+            };
+            commit(self, before, changed);
+            if self.format_where.panel() { self.format_accordion(ui, ctx); }
+            let proj = self.project.as_mut().unwrap();
+            let before = proj.slides.clone();
+            let mut changed = false;
+            let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
             if let Kind::Slider(sl) = &mut obj.kind {
                 let mut pick_thumb = false;
-                egui::CollapsingHeader::new("Slider").default_open(true).show(ui, |ui| { changed |= controls::slider_editor(ui, sl, &num_vars, &mut pick_thumb); });
+                ribbon::format_panel::section(ui, "slider", "Slider", true, |ui| { changed |= controls::slider_editor(ui, sl, &num_vars, &mut pick_thumb); });
                 if pick_thumb { want_thumb = Some((li, oi)); }
             }
             if matches!(obj.kind, Kind::Text | Kind::Rect) {
-                egui::CollapsingHeader::new("Check box").default_open(obj.check.is_some()).show(ui, |ui| { changed |= controls::check_editor(ui, obj); });
+                ribbon::format_panel::section(ui, &format!("check-{}", obj.id), "Check box", obj.check.is_some(), |ui| { changed |= controls::check_editor(ui, obj); });
             }
             if !matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
-                egui::CollapsingHeader::new("Dial").default_open(obj.dial.is_some()).show(ui, |ui| { changed |= controls::dial_editor(ui, &mut obj.dial, &num_vars); });
+                ribbon::format_panel::section(ui, &format!("dial-{}", obj.id), "Dial", obj.dial.is_some(), |ui| { changed |= controls::dial_editor(ui, &mut obj.dial, &num_vars); });
             }
             if li == 0 && layer_choices.len() > 1 {
-                egui::CollapsingHeader::new("Hide when layers show").default_open(!obj.hide_on_layers.is_empty()).show(ui, |ui| {
+                ribbon::format_panel::section(ui, &format!("hide-{}", obj.id), "Hide when layers show", !obj.hide_on_layers.is_empty(), |ui| {
                     ui.weak("This object is not drawn while any ticked layer is showing.");
                     for (lid, lname) in layer_choices.iter().skip(1) {
                         let mut on = obj.hide_on_layers.contains(lid);
@@ -6786,9 +6855,6 @@ impl App {
                         }
                     }
                 });
-            }
-            if states_panel::supports_states(obj) && ui.button(format!("States ({})…", obj.states.len())).on_hover_text("Edit this object's states in the States tab").clicked() {
-                open_states = true;
             }
             if states_panel::supports_states(obj) && !obj.states.is_empty() {
                 ui.horizontal(|ui| {
@@ -6815,7 +6881,10 @@ impl App {
                     });
         });
 
-        if open_states { self.bottom_tab = 2; }
+        if copy_look {
+            self.painter = if self.painter.is_some() { None } else { self.selected_object().map(|o| (o.id.clone(), Box::new(o.clone()))) };
+            self.status = if self.painter.is_some() { "Format Painter: click the object that should get this look. Esc cancels.".into() } else { String::new() };
+        }
         if restore_ratio { self.restore_aspect_ratio(); }
         if let Some((li, oi)) = want_thumb {
             if let Some((key, _, _, _)) = self.load_image_asset() {
@@ -10104,7 +10173,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(786.0, 657.0), egui::pos2(736.0, 607.0));
+        let (from, to) = (egui::pos2(776.0, 650.0), egui::pos2(726.0, 600.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11354,6 +11423,78 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { img.save(std::path::PathBuf::from(dir).join("button-effects.png")).unwrap(); }
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects;
         assert!(o[0].shadow.is_some() && o[1].glow.is_some() && o[2].soft_edge == 30.0 && o[3].reflection.is_some(), "the effects are kept on the objects");
+    }
+
+    #[test]
+    fn formatting_can_live_in_the_ribbon_the_properties_panel_or_both() {
+        use egui_kittest::kittest::Queryable;
+        let with = |mode: ribbon::FormatWhere| {
+            let mut a = app();
+            let mut o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+            o.fill = Some(Rgba(3, 83, 158, 255));
+            a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+            a.selected = Some((0, 0));
+            a.format_where = mode;
+            let mut h = harness(a);
+            h.run_steps(5);
+            h
+        };
+        let h = with(ribbon::FormatWhere::Ribbon);
+        assert!(h.query_by_label("Home").is_some() && h.query_by_label("Fill and Line").is_none(), "ribbon only: the Home tab, no accordion");
+        let h = with(ribbon::FormatWhere::Both);
+        assert!(h.query_by_label("Home").is_some() && h.query_by_label("Fill and Line").is_some(), "both: the Home tab and the accordion");
+        let h = with(ribbon::FormatWhere::Panel);
+        assert!(h.query_by_label("Home").is_none(), "panel only: there is no Home tab");
+        assert!(h.query_by_label("Fill and Line").is_some() && h.query_by_label("Paragraph").is_some() && h.query_by_label("Arrange").is_some(), "the accordion has the sections");
+        assert_ne!(h.state().ribbon_tab, ribbon::HOME_TAB, "a tab that is not there is not the open one");
+    }
+
+    #[test]
+    fn opening_one_bar_of_the_properties_panel_closes_the_one_that_was_open() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        a.format_where = ribbon::FormatWhere::Panel;
+        let mut h = harness(a);
+        h.run_steps(5);
+        assert!(h.query_by_label("Read as").is_some() && h.query_by_label("Width").is_none(), "Settings starts open");
+        h.get_by_label("Size and Position").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Width").is_some() && h.query_by_label("Read as").is_none(), "opening Size and Position closed Settings");
+        h.get_by_label("Size and Position").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Width").is_none() && h.query_by_label("Read as").is_none(), "clicking the open bar closes it, and nothing else opens");
+    }
+
+    #[test]
+    fn a_table_has_its_options_in_the_properties_panel_when_formatting_lives_there() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.format_where = ribbon::FormatWhere::Panel;
+        a.insert_table(2, 2);
+        let mut h = harness(a);
+        h.run_steps(5);
+        assert!(h.query_by_label("Table Styles").is_some() && h.query_by_label("Rows & Columns").is_some() && h.query_by_label("Borders").is_some(), "the table's groups are bars in the panel");
+        assert!(h.query_by_label("Open Home").is_none(), "it does not send you to a tab that is not there");
+    }
+
+    #[test]
+    fn the_panel_is_about_the_slide_or_about_the_layer_picked_in_the_list() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.format_where = ribbon::FormatWhere::Panel;
+        a.add_layer();
+        a.selected = None;
+        let mut h = harness(a);
+        h.state_mut().layer = 0;
+        h.run_steps(5);
+        assert!(h.query_by_label("Navigation").is_some() && h.query_by_label("When This Layer Shows").is_none(), "the base layer is the slide: its bars, no layer bar");
+        h.state_mut().layer = 1;
+        h.run_steps(5);
+        assert!(h.query_by_label("When This Layer Shows").is_some() && h.query_by_label("Navigation").is_none(), "another layer shows what it does to the slide");
+        assert!(h.query_by_label("Delete layer").is_none(), "deleting is in the layers list");
     }
 
     #[test]
@@ -13766,14 +13907,14 @@ mod tests {
         let (li, oi) = add_stretched(&mut a, Kind::Image, "photo");
         let mut h = harness(a);
         h.run_steps(4);
-        h.get_by_label("Size and position").click();
+        h.get_by_label("Size and Position").click();
         h.run_steps(3);
-        h.get_by_label("Restore aspect ratio").click();
+        h.get_by_label("Restore Aspect Ratio").click();
         h.run_steps(3);
         assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].h, 300.0, "the button restores the proportions");
         h.state_mut().insert_rect();
         h.run_steps(4);
-        assert!(h.query_by_label("Restore aspect ratio").is_none(), "a shape has no original proportions");
+        assert!(h.query_by_label("Restore Aspect Ratio").is_none(), "a shape has no original proportions");
     }
 
     #[test]
