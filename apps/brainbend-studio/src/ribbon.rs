@@ -1182,7 +1182,7 @@ impl App {
                         let label = over.text(egui::pos2(text_x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, name, font, ui.visuals().strong_text_color());
                         // The line glides from the tab it was under to this one.
                         let ctx = ui.ctx().clone();
-                        let left = ctx.animate_value_with_time(egui::Id::new("tab-line-left"), label.left(), 0.18);
+                        let left = ctx.animate_value_with_time(egui::Id::new("tab-line-left"), if tab_icon.is_some() { icon_x - 7.0 } else { label.left() }, 0.18);
                         let right = ctx.animate_value_with_time(egui::Id::new("tab-line-right"), label.right(), 0.18);
                         over.rect_filled(egui::Rect::from_min_max(egui::pos2(left, label.bottom() + 2.0), egui::pos2(right, label.bottom() + 4.5)), 1.0, blue);
                     } else {
