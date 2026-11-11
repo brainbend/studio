@@ -11648,30 +11648,30 @@ mod tests {
         h.run_steps(4);
         assert!(h.query_by_label("Text Box").is_none(), "closed: no groups showing");
         for label in ["Try It", "Preview", "Publish"] { assert!(h.query_by_label(label).is_some(), "{label} stays in reach"); }
-        h.get_by_label("Add Objects").click();
+        h.get_by_label("Objects").click();
         h.run_steps(4);
         assert!(h.query_by_label("Text Box").is_some(), "a click on the tab opens the ribbon");
-        h.get_by_label("Add Slides").click();
+        h.get_by_label("Slides").click();
         h.run_steps(4);
         assert!(h.query_by_label("Text Box").is_none(), "another tab switches it: Text Box still there, tab={}", h.state().ribbon_tab);
         assert!(h.query_by_label_contains("Multiple choice").is_some(), "Multiple choice not found, open={} tab={}", h.state().ribbon_open, h.state().ribbon_tab);
-        h.get_by_label("Add Slides").click();
+        h.get_by_label("Slides").click();
         h.run_steps(4);
         assert!(h.query_by_label_contains("Multiple choice").is_none(), "a click on the open tab closes it");
-        h.get_by_label("Add Objects").click();
+        h.get_by_label("Objects").click();
         h.run_steps(4);
         h.key_press(egui::Key::Escape);
         h.run_steps(4);
         assert!(h.query_by_label("Text Box").is_none(), "Escape closes it");
         // The pin, on the ribbon itself, keeps it open.
-        h.get_by_label("Add Objects").click();
+        h.get_by_label("Objects").click();
         h.run_steps(4);
         h.get_by_label("Keep the ribbon open under the tabs").click();
         h.run_steps(4);
         assert!(h.state().ribbon_pinned && h.query_by_label("Text Box").is_some(), "pinned: the ribbon is open under the tabs");
-        h.get_by_label("Add Slides").click();
+        h.get_by_label("Slides").click();
         h.run_steps(4);
-        h.get_by_label("Add Slides").click();
+        h.get_by_label("Slides").click();
         h.run_steps(4);
         assert!(h.query_by_label_contains("Multiple choice").is_some(), "pinned, clicking a tab only switches to it");
     }
@@ -11684,7 +11684,7 @@ mod tests {
         a.ribbon_pinned = false;
         let mut h = harness(a);
         h.run_steps(4);
-        h.get_by_label("Add Objects").click();
+        h.get_by_label("Objects").click();
         h.run_steps(4);
         assert!(h.query_by_label("Text Box").is_some());
         let at = egui::pos2(700.0, 650.0);
@@ -12956,19 +12956,19 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The ribbon is for adding things and for the project as a whole: File, Project, Add Slides, Add Objects, Help.
+    /// The ribbon is for adding things and for the project as a whole: File, Project, Slides, Objects, Help.
     #[test]
-    fn the_tabs_are_project_add_slides_and_add_objects_and_project_holds_the_project_wide_groups() {
+    fn the_tabs_are_project_slides_and_objects_and_project_holds_the_project_wide_groups() {
         use egui_kittest::kittest::Queryable;
-        assert_eq!(ribbon::TABS, ["File", "Project", "Add Slides", "Add Objects", "Layout Builder", "Help"]);
+        assert_eq!(ribbon::TABS, ["File", "Project", "Slides", "Objects", "Layout Builder", "Help"]);
         let mut a = app();
         a.file_view = false;
         let mut h = harness(a);
         h.run_steps(4);
         let x = |h: &egui_kittest::Harness<'static, App>, name: &str| h.query_all_by_label(name).next().map(|n| { use egui_kittest::kittest::NodeT; n.accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) });
-        let xs: Vec<f64> = ["Project", "Add Slides", "Add Objects", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
+        let xs: Vec<f64> = ["Project", "Slides", "Objects", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in that order: {xs:?}");
-        for gone in ["Home", "Theme", "Review", "Animations", "Slides", "Objects", "Layout Builder"] { assert!(h.query_by_label(gone).is_none(), "{gone} is not a tab (Layout Builder shows only in its own mode)"); }
+        for gone in ["Home", "Theme", "Review", "Animations", "Layout Builder"] { assert!(h.query_by_label(gone).is_none(), "{gone} is not a tab (Layout Builder shows only in its own mode)"); }
         h.state_mut().ribbon_tab = ribbon::PROJECT_TAB;
         h.run_steps(3);
         for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Background", "Spelling", "Focus Order", "Variables"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Project"); }
@@ -12979,13 +12979,13 @@ mod tests {
         // Variables and Pass mark moved here from the slides.
         h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.run_steps(3);
-        assert!(h.query_all_by_label("Variables").next().is_none() && h.query_all_by_label_contains("Pass mark").next().is_none(), "Add Slides no longer holds Variables or Pass mark");
-        // Inside the Layout Builder the bar is Layout Builder first, then Project and Add Objects.
+        assert!(h.query_all_by_label("Variables").next().is_none() && h.query_all_by_label_contains("Pass mark").next().is_none(), "Slides no longer holds Variables or Pass mark");
+        // Inside the Layout Builder the bar is Layout Builder first, then Project and Objects.
         h.state_mut().enter_master_view();
         h.run_steps(4);
-        let xs: Vec<f64> = ["Layout Builder", "Project", "Add Objects"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        let xs: Vec<f64> = ["Layout Builder", "Project", "Objects"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
-        assert!(h.query_all_by_label("Add Slides").next().is_none() && h.query_all_by_label("Help").next().is_none(), "the other tabs wait outside the master view");
+        assert!(h.query_all_by_label("Slides").next().is_none() && h.query_all_by_label("Help").next().is_none(), "the other tabs wait outside the master view");
     }
 
     /// While the Layout Builder is open its Close button leads the ribbon, on every tab.
@@ -13013,7 +13013,7 @@ mod tests {
         h.state_mut().ribbon_tab = ribbon::PROJECT_TAB;
         h.run_steps(3);
         assert!(h.query_all_by_label_contains("Transition").next().is_none(), "a layout has no slide transitions");
-        assert!(h.query_by_label("Help").is_none(), "the Layout Builder offers File, Project and Add Objects");
+        assert!(h.query_by_label("Help").is_none(), "the Layout Builder offers File, Project and Objects");
         h.query_all_by_label("Close").next().unwrap().click();
         h.run_steps(3);
         assert!(!h.state().in_master_view());

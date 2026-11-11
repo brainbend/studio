@@ -23,6 +23,9 @@ pub const JUSTIFY: char = '\u{e482}';
 pub const FUNCTION: char = '\u{ebe4}';
 pub const PIN: char = '\u{e316}';
 pub const THUMBTACK: char = '\u{e3e2}';
+pub const MENU: char = '\u{e2f0}';
+pub const GEAR: char = '\u{e270}';
+pub const PLUS: char = '\u{e3d4}';
 pub const BOLT: char = '\u{e2de}';
 pub const GAUGE: char = '\u{e628}';
 pub const HASH: char = '\u{e2a2}';
@@ -492,7 +495,7 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 
 /// The tabs, left to right. The Layout Builder tab shows only inside its own mode. Everything about the chosen slide or
 /// object is in the Properties panel; the ribbon is for adding things and for the project as a whole.
-pub const TABS: [&str; 6] = ["File", "Project", "Add Slides", "Add Objects", "Layout Builder", "Help"];
+pub const TABS: [&str; 6] = ["File", "Project", "Slides", "Objects", "Layout Builder", "Help"];
 pub const PROJECT_TAB: usize = 1;
 pub const SLIDES_TAB: usize = 2;
 pub const OBJECTS_TAB: usize = 3;
@@ -1163,14 +1166,20 @@ impl App {
                     let sel = shown && self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0, 26.0), egui::Sense::click());
+                    // Each tab has a small icon before its name (the Layout Builder tab has none).
+                    let tab_icon = match i { 0 => Some(MENU), PROJECT_TAB => Some(GEAR), SLIDES_TAB | OBJECTS_TAB => Some(PLUS), HELP_TAB => Some(QUESTION), _ => None };
+                    let lead = if tab_icon.is_some() { 20.0 } else { 0.0 };
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0 + lead, 26.0), egui::Sense::click());
+                    let text_x = rect.center().x + lead / 2.0;
+                    let icon_x = rect.left() + 11.0 + 7.0;
                     if sel {
                         // Cut from the ribbon: the card's own color, reaching down to meet the card, with a blue line under the label.
                         let blue = ui.visuals().selection.bg_fill;
                         let over = ui.painter().with_clip_rect(ui.clip_rect().expand2(egui::vec2(0.0, 4.0)));
                         let joined = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.bottom() + 2.0));
                         over.rect_filled(joined, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, card);
-                        let label = over.text(egui::pos2(rect.center().x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, name, font, ui.visuals().strong_text_color());
+                        if let Some(ic) = tab_icon { over.text(egui::pos2(icon_x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, ic, egui::FontId::new(14.0, icons()), ui.visuals().strong_text_color()); }
+                        let label = over.text(egui::pos2(text_x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, name, font, ui.visuals().strong_text_color());
                         // The line glides from the tab it was under to this one.
                         let ctx = ui.ctx().clone();
                         let left = ctx.animate_value_with_time(egui::Id::new("tab-line-left"), label.left(), 0.18);
@@ -1178,7 +1187,8 @@ impl App {
                         over.rect_filled(egui::Rect::from_min_max(egui::pos2(left, label.bottom() + 2.0), egui::pos2(right, label.bottom() + 4.5)), 1.0, blue);
                     } else {
                         if resp.hovered() { ui.painter().rect_filled(rect, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, ui.visuals().text_color().gamma_multiply(0.10)); }
-                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, name, font, ui.visuals().text_color());
+                        if let Some(ic) = tab_icon { ui.painter().text(egui::pos2(icon_x, rect.center().y), egui::Align2::CENTER_CENTER, ic, egui::FontId::new(14.0, icons()), ui.visuals().text_color()); }
+                        ui.painter().text(egui::pos2(text_x, rect.center().y), egui::Align2::CENTER_CENTER, name, font, ui.visuals().text_color());
                     }
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
                     if resp.clicked() {
