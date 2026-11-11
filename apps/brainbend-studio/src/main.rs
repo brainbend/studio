@@ -6507,6 +6507,7 @@ impl App {
                 let mut want_asset: Option<AssetWant> = None;
                 let number_vars: Vec<(String, String)> = proj.variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
                 let mut delete_layer = None;
+                let mut show_master_set: Option<(String, bool)> = None;
                 // The slide's own bars, the layer's and an object's are separate lists: each remembers which bar of it is open.
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), if layer_idx > 0 { 2u8 } else { 1u8 }));
                 if layer_idx == 0 {
@@ -6518,7 +6519,15 @@ impl App {
                     changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
                 });
                 // The master's and layout's shapes only exist for a slide that uses a layout.
-                if proj.slides[slide_idx].layout.is_some() {
+                if let (true, Some(id)) = (in_layout, proj.slides[slide_idx].layout.clone()) {
+                    // In the Layout Builder the slide is a layout: its switch decides whether the master's shapes show behind it.
+                    if let Some(l) = proj.layouts.iter().find(|l| l.id == id) {
+                        let mut on = l.show_master;
+                        if ui.checkbox(&mut on, "Show master shapes").on_hover_text("Draw the master's shapes behind this layout").changed() { show_master_set = Some((id, on)); }
+                    }
+                } else if in_layout {
+                    ui.label(egui::RichText::new("Shapes and background here appear on every layout").weak().size(12.0));
+                } else if proj.slides[slide_idx].layout.is_some() {
                     changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
                 }
                 });
@@ -6661,6 +6670,13 @@ impl App {
                 ui.weak("Click an object on the canvas to edit it.");
 
                 self.id_counter = ctr;
+                if let Some((id, on)) = show_master_set {
+                    let before = self.project.as_ref().map(Snap::of);
+                    if let (Some(before), Some(l)) = (before, self.project.as_mut().and_then(|p| p.layouts.iter_mut().find(|l| l.id == id))) {
+                        l.show_master = on;
+                        self.commit_project_edit(ctx, before);
+                    }
+                }
                 if changed {
                     let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
                     if !(self.edit_open && editing) {
@@ -12960,7 +12976,7 @@ mod tests {
     #[test]
     fn the_tabs_are_project_slides_and_objects_and_project_holds_the_project_wide_groups() {
         use egui_kittest::kittest::Queryable;
-        assert_eq!(ribbon::TABS, ["File", "Project", "Slides", "Objects", "Layout Builder", "Help"]);
+        assert_eq!(ribbon::TABS, ["File", "Project", "Slides", "Objects", "Help"]);
         let mut a = app();
         a.file_view = false;
         let mut h = harness(a);
@@ -12968,7 +12984,7 @@ mod tests {
         let x = |h: &egui_kittest::Harness<'static, App>, name: &str| h.query_all_by_label(name).next().map(|n| { use egui_kittest::kittest::NodeT; n.accesskit_node().raw_bounds().map(|b| b.x0).unwrap_or(0.0) });
         let xs: Vec<f64> = ["Project", "Slides", "Objects", "Help"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right in that order: {xs:?}");
-        for gone in ["Home", "Theme", "Review", "Animations", "Layout Builder"] { assert!(h.query_by_label(gone).is_none(), "{gone} is not a tab (Layout Builder shows only in its own mode)"); }
+        for gone in ["Home", "Theme", "Review", "Animations", "Layout Builder"] { assert!(h.query_by_label(gone).is_none(), "{gone} is not a tab"); }
         h.state_mut().ribbon_tab = ribbon::PROJECT_TAB;
         h.run_steps(3);
         for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Background", "Spelling", "Focus Order", "Variables"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Project"); }
@@ -12980,43 +12996,52 @@ mod tests {
         h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.run_steps(3);
         assert!(h.query_all_by_label("Variables").next().is_none() && h.query_all_by_label_contains("Pass mark").next().is_none(), "Slides no longer holds Variables or Pass mark");
-        // Inside the Layout Builder the bar is Layout Builder first, then Project and Objects.
+        // Inside the Layout Builder the bar is File, Project and Objects.
         h.state_mut().enter_master_view();
         h.run_steps(4);
-        let xs: Vec<f64> = ["Layout Builder", "Project", "Objects"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
+        let xs: Vec<f64> = ["Project", "Objects"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n} tab in the master view"))).collect();
         assert!(xs.windows(2).all(|w| w[0] < w[1]), "{xs:?}");
         assert!(h.query_all_by_label("Slides").next().is_none() && h.query_all_by_label("Help").next().is_none(), "the other tabs wait outside the master view");
     }
 
-    /// While the Layout Builder is open its Close button leads the ribbon, on every tab.
+    /// The Layout Builder has no ribbon of its own: its tabs are File, Project and Objects, the layout controls are in the
+    /// left panel and the Properties panel, and Placeholder is in the Objects tab everywhere.
     #[test]
-    fn the_layout_builder_close_button_is_on_every_tab_and_not_outside() {
+    fn the_layout_builder_uses_the_ordinary_ribbon_and_the_panels_for_layout_settings() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
         let mut h = harness(a);
         h.run_steps(3);
-        assert!(h.query_all_by_label("Close").next().is_none(), "not shown outside the Layout Builder");
         assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Try It").is_some(), "shown outside the Layout Builder");
+        assert!(h.query_by_label("Placeholder").is_some(), "Placeholder is in the Objects tab outside the Layout Builder");
         h.state_mut().enter_master_view();
-        for tab in [ribbon::MASTER_TAB, ribbon::PROJECT_TAB, ribbon::OBJECTS_TAB] {
-            h.state_mut().ribbon_tab = tab;
-            h.run_steps(3);
-            assert_eq!(h.query_all_by_label("Close").count(), 1, "one Close button on tab {tab}");
-            assert!(h.query_by_label("Publish").is_none() && h.query_by_label("Try It").is_none(), "Try It, Preview and Publish are not shown in the Layout Builder (tab {tab})");
-        }
-        let x = |h: &egui_kittest::Harness<'_, App>, l: &str| h.query_all_by_label_contains(l).next().unwrap().rect().min.x;
-        h.state_mut().ribbon_tab = ribbon::MASTER_TAB;
-        h.run_steps(3);
-        assert!(x(&h, "Close") < x(&h, "Insert Layout"), "Close comes before the tab's own groups");
-        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("layout-builder-ribbon.png")).unwrap(); }
+        h.state_mut().slide = 1;
+        h.run_steps(4);
+        assert!(h.query_by_label("Placeholder").is_some(), "and inside it");
+        assert!(h.query_all_by_label("Close").next().is_none() && h.query_all_by_label_contains("Insert Layout").next().is_none(), "no builder-only ribbon controls");
+        assert!(h.query_by_label("Publish").is_none() && h.query_by_label("Try It").is_none(), "Try It, Preview and Publish are not shown in the Layout Builder");
+        assert!(h.query_by_label("Help").is_none() && h.query_by_label("Slides").is_none(), "the Layout Builder offers File, Project and Objects");
         h.state_mut().ribbon_tab = ribbon::PROJECT_TAB;
         h.run_steps(3);
         assert!(h.query_all_by_label_contains("Transition").next().is_none(), "a layout has no slide transitions");
-        assert!(h.query_by_label("Help").is_none(), "the Layout Builder offers File, Project and Objects");
-        h.query_all_by_label("Close").next().unwrap().click();
-        h.run_steps(3);
-        assert!(!h.state().in_master_view());
+        // The layout's own switch is in the Properties panel.
+        assert!(h.state().project.as_ref().unwrap().layouts[0].show_master);
+        h.get_by_label("Show master shapes").click();
+        h.run_steps(4);
+        assert!(!h.state().project.as_ref().unwrap().layouts[0].show_master, "the checkbox in the panel sets the layout");
+        h.state_mut().undo();
+        h.run_steps(2);
+        assert!(h.state().project.as_ref().unwrap().layouts[0].show_master, "and it can be undone");
+        h.state_mut().slide = 0;
+        h.run_steps(4);
+        assert!(h.query_all_by_label_contains("appear on every layout").next().is_some(), "the master explains itself instead");
+        // Placeholder puts a placeholder on the layout.
+        h.state_mut().slide = 1;
+        h.run_steps(2);
+        let before = h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len();
+        h.state_mut().insert_placeholder(PlaceholderKind::Heading2);
+        assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len(), before + 1);
     }
 
     /// The Layout Builder is a tab after the slides' tabs while it is open: Story View and the slide tabs stay, and
@@ -14674,6 +14699,8 @@ mod tests {
             let last = n - 1;
             h.state_mut().slide = last;
             h.run_steps(2);
+            h.get_by_label("Layout").click();
+            h.run_steps(3);
             h.get_by_label("Delete").click();
             h.run_steps(4);
             assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n - 1);

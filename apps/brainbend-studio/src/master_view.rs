@@ -86,7 +86,7 @@ impl App {
         self.selected = None;
         self.multi.clear();
         self.scene_view = false;
-        self.ribbon_tab = ribbon::MASTER_TAB;
+        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
     }
 

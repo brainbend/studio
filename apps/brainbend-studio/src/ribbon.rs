@@ -502,14 +502,13 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-/// The tabs, left to right. The Layout Builder tab shows only inside its own mode. Everything about the chosen slide or
+/// The tabs, left to right. Everything about the chosen slide or
 /// object is in the Properties panel; the ribbon is for adding things and for the project as a whole.
-pub const TABS: [&str; 6] = ["File", "Project", "Slides", "Objects", "Layout Builder", "Help"];
+pub const TABS: [&str; 5] = ["File", "Project", "Slides", "Objects", "Help"];
 pub const PROJECT_TAB: usize = 1;
 pub const SLIDES_TAB: usize = 2;
 pub const OBJECTS_TAB: usize = 3;
-pub const MASTER_TAB: usize = 4;
-pub const HELP_TAB: usize = 5;
+pub const HELP_TAB: usize = 4;
 const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
@@ -1158,8 +1157,8 @@ impl App {
         let bg = root.visuals().panel_fill;
         let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
         // The ribbon is for adding things and for the project as a whole. It stays closed until a tab is clicked (or rested
-        // on, if that is chosen), and closes again after; the pin keeps it open. The Layout Builder needs its Close button.
-        let pinned = self.ribbon_pinned || self.in_master_view();
+        // on, if that is chosen), and closes again after; the pin keeps it open.
+        let pinned = self.ribbon_pinned;
         let shown = pinned || self.ribbon_open;
         let mut clicked_tab: Option<usize> = None;
         let mut hovered_tab: Option<usize> = None;
@@ -1167,9 +1166,9 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
-                // The Layout Builder has its own short tab list, with its own tab first; that tab exists only there.
-                let order: Vec<usize> = if master { vec![0, MASTER_TAB, PROJECT_TAB, OBJECTS_TAB] } else { (0..TABS.len()).filter(|&i| i != MASTER_TAB).collect() };
-                if !order.contains(&self.ribbon_tab) { self.ribbon_tab = if master { MASTER_TAB } else { OBJECTS_TAB }; }
+                // The Layout Builder offers File, Project and Objects: layouts are made from the same objects as slides.
+                let order: Vec<usize> = if master { vec![0, PROJECT_TAB, OBJECTS_TAB] } else { (0..TABS.len()).collect() };
+                if !order.contains(&self.ribbon_tab) { self.ribbon_tab = OBJECTS_TAB; }
                 for i in order {
                     let name = TABS[i];
                     let sel = shown && self.ribbon_tab == i && i != 0;
@@ -1260,13 +1259,10 @@ impl App {
             let normal = self.project.is_some();
             let full = ui.available_rect_before_wrap();
             let h = BIG_H + CAP_H + 8.0;
-            // In the Layout Builder the way out comes first, in the main-action color, and does not scroll away.
-            let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
-            if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
-            // The pin that keeps the ribbon open sits in the card bottom right corner (the Layout Builder's ribbon cannot close).
-            let pin_w = if self.in_master_view() { 0.0 } else { 28.0 };
-            let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w - pin_w).max(80.0), h));
-            if pin_w > 0.0 {
+            // The pin that keeps the ribbon open sits in the card bottom right corner.
+            let pin_w = 28.0;
+            let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w).max(80.0), h));
+            {
                 let at = egui::Rect::from_min_size(egui::pos2(full.right() - 24.0, full.top() + h - 24.0), egui::vec2(22.0, 22.0));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
                     let tip = if self.ribbon_pinned { "The ribbon stays open under the tabs. Click to let it close again" } else { "Keep the ribbon open under the tabs" };
@@ -1287,7 +1283,6 @@ impl App {
                                 OBJECTS_TAB => self.insert_tab(ui, normal),
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
                                 PROJECT_TAB => { self.design_tab(ui, ctx); self.review_tab(ui, ctx); self.course_group(ui, ctx); }
-                                MASTER_TAB => self.master_tab(ui, ctx),
                                 HELP_TAB => self.help_tab(ui),
                                 _ => self.design_tab(ui, ctx),
                             }
@@ -2112,6 +2107,11 @@ impl App {
                         if menu_item(ui, HASH, "Slide number").clicked() { self.insert_slide_number(false); ui.close(); }
                         if menu_item(ui, HASH, "Slide number of total").clicked() { self.insert_slide_number(true); ui.close(); }
                     });
+                    big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder: an empty box that asks for text", |ui| {
+                        for k in PlaceholderKind::CHOICES {
+                            if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
+                        }
+                    });
                     self.symbol_button(ui);
                     // Hyperlink links the chosen text (or all of the object's text). With no text to link it makes a text box
                     // holding the link instead.
@@ -2552,50 +2552,6 @@ impl App {
                     }
                 });
             });
-        });
-    }
-
-    fn master_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let cur = self.slide;
-        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
-        let is_layout = cur > 0 && cur < n;
-        group(ui, "Edit", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, FILE_PLUS, "Insert Layout", "Add a new layout").clicked() { self.insert_layout(None); }
-                ui.add_enabled_ui(is_layout, |ui| {
-                    if big_button(ui, COPY, "Duplicate", "Copy this layout").clicked() { self.insert_layout(Some(cur)); }
-                    if big_button(ui, TRASH, "Delete", "Delete this layout").clicked() { self.delete_layout(cur); }
-                });
-            });
-        });
-        // Delete and Insert change the slide list and the current slide: look again before using the index.
-        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
-        let cur = self.slide.min(n.saturating_sub(1));
-        let is_layout = cur > 0 && cur < n;
-        group(ui, "Placeholders", |ui| {
-            big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder", |ui| {
-                for k in PlaceholderKind::CHOICES {
-                    if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
-                }
-            });
-        });
-        group(ui, "Layout", |ui| {
-            rows(ui);
-            let Some(proj) = self.project.as_mut() else { return };
-            let before = Snap::of(proj);
-            let mut changed = false;
-            if is_layout {
-                let id = proj.slides[cur].layout.clone().unwrap_or_default();
-                if let Some(l) = proj.layouts.iter_mut().find(|l| l.id == id) {
-                    changed |= ui.checkbox(&mut l.show_master, "Show master shapes").changed();
-                }
-            } else {
-                ui.label(egui::RichText::new("Shapes and background here appear on every layout").weak().size(12.0));
-            }
-            if changed { self.commit_project_edit(ctx, before); }
-        });
-        group(ui, "Background", |ui| {
-            if big_button(ui, BUCKET, "Background", "Background of this layout or the master").clicked() { self.background_open = !self.background_open; }
         });
     }
 
