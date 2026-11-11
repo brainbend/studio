@@ -1851,6 +1851,11 @@ impl App {
                         }
                     }).response.on_hover_text("Where font, paragraph, fill, line, effects and arrange controls are offered: the ribbon's Home tab, an accordion in the Properties panel, or both. This follows you, not the project.");
                 });
+            let mut one = self.one_section;
+            if ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.").changed() {
+                self.one_section = one;
+                crate::prefs::set_bool("one_section_open", one);
+            }
             let mut inside = self.windows_inside;
             if ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Settings, spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.").changed() {
                 self.windows_inside = inside;

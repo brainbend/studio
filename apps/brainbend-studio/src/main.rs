@@ -295,6 +295,8 @@ struct App {
     windows_inside: bool,
     /// Where the formatting controls are offered (an app setting).
     format_where: ribbon::FormatWhere,
+    /// Opening a section of the Properties panel closes the one that was open (see `prefs`).
+    one_section: bool,
     /// The window that asks before the video program (ffmpeg) is downloaded.
     video_support: video_support::VideoSupport,
     font_store: font_store::FontStore,
@@ -496,7 +498,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), format_where: ribbon::FormatWhere::load(), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: 1, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), format_where: ribbon::FormatWhere::load(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -5936,6 +5938,7 @@ impl App {
     /// One frame of the whole UI (separate from `eframe::App::ui` so tests can drive it).
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
+        root.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-one-open"), self.one_section));
         app_has_focus(egui::ViewportId::ROOT, root.input(|i| i.viewport().focused.unwrap_or(false)));
         // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
         font_store::apply_pending(root.ctx());
@@ -6481,6 +6484,8 @@ impl App {
                     if layer_idx > 0 {
                         let name = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(layer_idx)).map(|l| l.name.clone()).unwrap_or_default();
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate()); });
+                    } else if self.format_where.panel() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ribbon::format_panel::expand_buttons(ui));
                     }
                 });
                 ui.add_space(2.0);
@@ -6660,6 +6665,7 @@ impl App {
                 if panel_formatting {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.selectable_label(painter_on, "Copy Look").on_hover_text("Format Painter: copy this object's look, then click another object to give it the same look. Esc cancels.").clicked() { copy_look = true; }
+                        ribbon::format_panel::expand_buttons(ui);
                     });
                 }
             });
@@ -11466,6 +11472,36 @@ mod tests {
         h.get_by_label("Size and Position").click();
         h.run_steps(4);
         assert!(h.query_by_label("Width").is_none() && h.query_by_label("Read as").is_none(), "clicking the open bar closes it, and nothing else opens");
+    }
+
+    #[test]
+    fn sections_can_stay_open_together_and_be_opened_or_closed_all_at_once() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        a.format_where = ribbon::FormatWhere::Panel;
+        a.one_section = false;
+        let mut h = harness(a);
+        h.run_steps(5);
+        assert!(h.query_by_label("Read as").is_some(), "Settings starts open");
+        h.get_by_label("Size and Position").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Width").is_some() && h.query_by_label("Read as").is_some(), "with the option off, opening one leaves the other open");
+        h.get_by_label("Collapse all").click();
+        h.run_steps(5);
+        assert!(h.query_by_label("Width").is_none() && h.query_by_label("Read as").is_none(), "Collapse all closes every section");
+        h.get_by_label("Expand all").click();
+        h.run_steps(5);
+        assert!(h.query_by_label("Width").is_some() && h.query_by_label("Read as").is_some(), "Expand all opens every section");
+        h.state_mut().one_section = true;
+        h.get_by_label("Size and Position").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Width").is_none() && h.query_by_label("Read as").is_some(), "a click on an open bar still closes just that bar");
+        h.get_by_label("Size and Position").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Width").is_some() && h.query_by_label("Read as").is_none(), "with the option on, opening one closes the rest");
     }
 
     #[test]

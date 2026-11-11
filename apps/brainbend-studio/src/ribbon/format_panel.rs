@@ -6,18 +6,30 @@ const BAR_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
 const BLUE: egui::Color32 = egui::Color32::from_rgb(70, 150, 230);
 
-/// A group's bar. Click it to open the rows below; opening one closes the one that was open, and clicking the open one closes it.
-/// Until something has been chosen, the first bar that asks to start open is the open one.
+/// A group's bar. Click it to open the rows below; clicking the open one closes it. By default opening one closes the one that
+/// was open (the "Open one section at a time" option). Until something has been chosen, the first bar that asks to start open is the open one.
 pub(crate) fn section(ui: &mut egui::Ui, id: &str, title: &str, default_open: bool, body: impl FnOnce(&mut egui::Ui)) {
     // Which list of bars this is (the slide's or an object's): each keeps its own open bar.
     let scope: u8 = ui.ctx().data(|d| d.get_temp(egui::Id::new("format-bar-scope"))).unwrap_or(0);
     let key = egui::Id::new(("format-bar-open", scope));
-    let mut current: Option<Option<String>> = ui.ctx().data(|d| d.get_temp(key));
+    let mut current: Option<Vec<String>> = ui.ctx().data(|d| d.get_temp(key));
+    // Expand all / Collapse all: asked for in one pass, answered by every bar drawn in it or the next.
+    let ask: Option<(u64, bool)> = ui.ctx().data(|d| d.get_temp(egui::Id::new("format-bar-all")));
+    if let Some((pass, expand)) = ask {
+        let now = ui.ctx().cumulative_pass_nr();
+        if now >= pass && now <= pass + 1 {
+            let mut ids = current.take().unwrap_or_default();
+            ids.retain(|o| o != id);
+            if expand { ids.push(id.to_string()); }
+            ui.ctx().data_mut(|d| d.insert_temp(key, ids.clone()));
+            current = Some(ids);
+        }
+    }
     if current.is_none() && default_open {
-        current = Some(Some(id.to_string()));
+        current = Some(vec![id.to_string()]);
         ui.ctx().data_mut(|d| d.insert_temp(key, current.clone().unwrap()));
     }
-    let open = matches!(&current, Some(Some(o)) if o == id);
+    let open = current.as_ref().is_some_and(|o| o.iter().any(|x| x == id));
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), BAR_H), egui::Sense::click());
     let dark = ui.visuals().dark_mode;
     let base = if dark { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(228) };
@@ -36,7 +48,12 @@ pub(crate) fn section(ui: &mut egui::Ui, id: &str, title: &str, default_open: bo
     ui.painter().add(egui::Shape::convex_polygon(pts, col, egui::Stroke::NONE));
     ui.painter().text(egui::pos2(rect.left() + 24.0, rect.center().y), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(13.0), ui.visuals().strong_text_color());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
-    if resp.clicked() { let next: Option<String> = if open { None } else { Some(id.to_string()) }; ui.ctx().data_mut(|d| d.insert_temp(key, next)); }
+    if resp.clicked() {
+        let one_at_a_time = ui.ctx().data(|d| d.get_temp(egui::Id::new("format-one-open"))).unwrap_or(true);
+        let mut ids = current.unwrap_or_default();
+        if open { ids.retain(|o| o != id); } else { if one_at_a_time { ids.clear(); } ids.push(id.to_string()); }
+        ui.ctx().data_mut(|d| d.insert_temp(key, ids));
+    }
     let height_key = egui::Id::new(("format-bar-height", id));
     let frame = || egui::Frame::new().inner_margin(egui::Margin { left: 10, right: 8, top: 6, bottom: 8 });
     if t >= 1.0 {
@@ -60,6 +77,19 @@ pub(crate) fn section(ui: &mut egui::Ui, id: &str, title: &str, default_open: bo
         let full = inner.min_rect().height();
         ui.ctx().data_mut(|d| d.insert_temp(height_key, full));
         ui.allocate_space(egui::vec2(width, full * t));
+    }
+}
+
+/// Small "Expand all" and "Collapse all" buttons for the right end of a panel's heading row (put them in a right-to-left layout).
+pub(crate) fn expand_buttons(ui: &mut egui::Ui) {
+    let mut ask = None;
+    // Right-to-left, so Collapse all is added first and ends up on the right.
+    if ui.add(egui::Button::new(egui::RichText::new("Collapse all").size(11.0)).small().frame(false)).on_hover_text("Close every section").clicked() { ask = Some(false); }
+    if ui.add(egui::Button::new(egui::RichText::new("Expand all").size(11.0)).small().frame(false)).on_hover_text("Open every section").clicked() { ask = Some(true); }
+    if let Some(expand) = ask {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-all"), (pass, expand)));
+        ui.ctx().request_repaint();
     }
 }
 
