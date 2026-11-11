@@ -22,6 +22,7 @@ pub const PAINTER: char = '\u{e590}';
 pub const JUSTIFY: char = '\u{e482}';
 pub const FUNCTION: char = '\u{ebe4}';
 pub const PIN: char = '\u{e316}';
+pub const THUMBTACK: char = '\u{e3e2}';
 pub const BOLT: char = '\u{e2de}';
 pub const GAUGE: char = '\u{e628}';
 pub const HASH: char = '\u{e2a2}';
@@ -250,6 +251,11 @@ fn pr(ui: &mut egui::Ui, label: &str, f: impl FnOnce(&mut egui::Ui, f32)) {
 fn hwrap(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) { if panel_mode(ui) { ui.vertical(f); } else { ui.horizontal(f); } }
 
 fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
+    compact_widget_in(ui, icon, label, caret, selected, true)
+}
+
+/// `compact_widget`; with `filled` off the caller draws what is behind it (Publish's tinted outline).
+fn compact_widget_in(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, filled: bool) -> egui::Response {
     let plain = label.replace('\n', " ");
     let font = egui::FontId::proportional(12.0);
     let tw = ui.fonts_mut(|f| f.layout_no_wrap(plain.clone(), font.clone(), egui::Color32::WHITE).size().x);
@@ -260,7 +266,7 @@ fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
     if ui.is_rect_visible(rect) {
         let enabled = ui.is_enabled();
         let vis = ui.style().interact_selectable(&resp, selected);
-        ui.painter().rect_filled(rect, 3.0, if selected { vis.bg_fill } else if resp.hovered() { vis.weak_bg_fill } else { ui.visuals().widgets.inactive.weak_bg_fill });
+        if filled { ui.painter().rect_filled(rect, 3.0, if selected { vis.bg_fill } else if resp.hovered() { vis.weak_bg_fill } else { ui.visuals().widgets.inactive.weak_bg_fill }); }
         let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
         let icon_col = if !selected && enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
         ui.painter().text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(14.0, icons()), icon_col);
@@ -285,21 +291,6 @@ fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
         if caret && i + 1 == lines.len() { w + 14.0 } else { w }
     }).fold(0.0f32, f32::max);
     (widest + 6.0).max(36.0)
-}
-
-/// A caption under a row of controls, like `group` but without the divider after it.
-fn pinned_group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
-        let body = ui.vertical(|ui| {
-            ui.set_min_height(BIG_H);
-            add(ui);
-        });
-        let w = body.response.rect.width().max(30.0);
-        ui.allocate_ui_with_layout(egui::vec2(w, CAP_H), egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.add(egui::Label::new(egui::RichText::new(caption).size(10.5).color(ui.visuals().text_color().gamma_multiply(0.55))).wrap_mode(egui::TextWrapMode::Extend));
-        });
-    });
 }
 
 /// Large flat button (icon above a short label).
@@ -605,7 +596,6 @@ fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// Extra width an outlined button gets, so its label does not touch the border.
-const OUTLINE_PAD: f32 = 16.0;
 
 /// For a main-action button drawn as an outline: its text and icon take the main-action color, and the button's
 /// own hover fill is left off (the outline shape paints the states).
@@ -1155,7 +1145,13 @@ impl App {
         if self.pano.edit.is_some() { self.pano_chrome(root, ctx); return; }
         let bg = root.visuals().panel_fill;
         let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-        egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
+        // The ribbon is for adding things and for the project as a whole. It stays closed until a tab is clicked (or rested
+        // on, if that is chosen), and closes again after; the pin keeps it open. The Layout Builder needs its Close button.
+        let pinned = self.ribbon_pinned || self.in_master_view();
+        let shown = pinned || self.ribbon_open;
+        let mut clicked_tab: Option<usize> = None;
+        let mut hovered_tab: Option<usize> = None;
+        let strip = egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let master = self.in_master_view();
@@ -1164,7 +1160,7 @@ impl App {
                 if !order.contains(&self.ribbon_tab) { self.ribbon_tab = if master { MASTER_TAB } else { OBJECTS_TAB }; }
                 for i in order {
                     let name = TABS[i];
-                    let sel = self.ribbon_tab == i && i != 0;
+                    let sel = shown && self.ribbon_tab == i && i != 0;
                     let font = egui::FontId::proportional(14.0);
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0, 26.0), egui::Sense::click());
@@ -1186,35 +1182,88 @@ impl App {
                     }
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
                     if resp.clicked() {
-                        if i == 0 { self.leave_master_view(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { self.ribbon_tab = i; }
+                        if i == 0 { self.leave_master_view(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { clicked_tab = Some(i); }
+                    } else if self.ribbon_hover && i != 0 && resp.hovered() && !ui.input(|i| i.pointer.any_down()) {
+                        hovered_tab = Some(i);
                     }
                 }
+                // Try It, Preview and Publish are always in reach, and the pin that keeps the ribbon open.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.tab_actions(ui, master));
             });
         });
-        egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 6 })).show_separator_line(false).show(root, |ui| {
-            egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
-                flat(ui);
-                ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
-                let normal = self.project.is_some();
-                let primary = self.ribbon_target();
-                let mut edited = primary.clone();
-                let mut edit_changed = false;
-                // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
-                // Try It, Preview and Publish are for the finished lesson, so the Layout Builder does not show them.
-                let pin_w = if self.project.is_some() && !self.in_master_view() { self.pinned_width(ui) } else { 0.0 };
-                let full = ui.available_rect_before_wrap();
-                let h = BIG_H + CAP_H + 8.0;
-                // In the Layout Builder the way out comes first, in the main-action color, and does not scroll away.
-                let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
-                if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
-                let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - pin_w - 8.0 - lead_w).max(80.0), h));
-                let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
-                    egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
-                        ui.horizontal_top(|ui| {
-                            ui.set_min_height(BIG_H);
-                            ui.spacing_mut().item_spacing.x = 3.0;
-                            ui.add_enabled_ui(!self.try_mode, |ui| {
+        if let Some(i) = clicked_tab {
+            if pinned { self.ribbon_tab = i; }
+            else if self.ribbon_open && self.ribbon_tab == i { self.ribbon_open = false; }
+            else { self.ribbon_tab = i; self.ribbon_open = true; }
+            ctx.request_repaint();
+        } else if let Some(i) = hovered_tab {
+            if !pinned && !(self.ribbon_open && self.ribbon_tab == i) { self.ribbon_tab = i; self.ribbon_open = true; ctx.request_repaint(); }
+        }
+        let strip_rect = strip.response.rect;
+        if pinned {
+            egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 6 })).show_separator_line(false).show(root, |ui| {
+                self.ribbon_card(ui, ctx, card);
+            });
+        } else if self.ribbon_open {
+            // Over the slide, so nothing below it moves.
+            let width = (root.max_rect().width() - 16.0).max(200.0);
+            let area = egui::Area::new(egui::Id::new("ribbon-overlay")).order(egui::Order::Foreground).fixed_pos(egui::pos2(8.0, strip_rect.bottom())).show(ctx, |ui| {
+                egui::Frame::new().corner_radius(RIBBON_RADIUS as u8).shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(90) }).show(ui, |ui| {
+                    ui.set_width(width);
+                    self.ribbon_card(ui, ctx, card);
+                });
+            });
+            let rects = [strip_rect, area.response.rect];
+            let (pressed, pos, escape) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.key_pressed(egui::Key::Escape)));
+            let popup = egui::Popup::is_any_open(ctx);
+            let inside = pos.is_some_and(|p| rects.iter().any(|r| r.expand(2.0).contains(p)));
+            if (pressed && !inside && !popup) || (escape && !popup) { self.ribbon_open = false; self.ribbon_left_at = None; }
+            // Opened by resting on a tab: it also closes when the pointer has gone away from it.
+            if self.ribbon_hover {
+                if inside || popup || ctx.input(|i| i.pointer.any_down()) { self.ribbon_left_at = None; }
+                else {
+                    let now = ctx.input(|i| i.time);
+                    let since = *self.ribbon_left_at.get_or_insert(now);
+                    if now - since > 0.4 { self.ribbon_open = false; self.ribbon_left_at = None; }
+                    else { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
+                }
+            }
+        }
+        if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
+        self.doc_tabs(root);
+    }
+
+    /// The ribbon's card: the chosen tab's groups, scrolling sideways when they are wider than the window.
+    fn ribbon_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, card: egui::Color32) {
+        egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
+            flat(ui);
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
+            let normal = self.project.is_some();
+            let full = ui.available_rect_before_wrap();
+            let h = BIG_H + CAP_H + 8.0;
+            // In the Layout Builder the way out comes first, in the main-action color, and does not scroll away.
+            let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
+            if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
+            // The pin that keeps the ribbon open sits in the card bottom right corner (the Layout Builder's ribbon cannot close).
+            let pin_w = if self.in_master_view() { 0.0 } else { 28.0 };
+            let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w - pin_w).max(80.0), h));
+            if pin_w > 0.0 {
+                let at = egui::Rect::from_min_size(egui::pos2(full.right() - 24.0, full.top() + h - 24.0), egui::vec2(22.0, 22.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
+                    let tip = if self.ribbon_pinned { "The ribbon stays open under the tabs. Click to let it close again" } else { "Keep the ribbon open under the tabs" };
+                    if icon_button(ui, THUMBTACK, self.ribbon_pinned, tip).clicked() {
+                        self.ribbon_pinned = !self.ribbon_pinned;
+                        self.ribbon_open = false;
+                        crate::prefs::set_bool("ribbon_pinned", self.ribbon_pinned);
+                    }
+                });
+            }
+            ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.set_min_height(BIG_H);
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        ui.add_enabled_ui(!self.try_mode, |ui| {
                             match self.ribbon_tab {
                                 OBJECTS_TAB => self.insert_tab(ui, normal),
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
@@ -1223,21 +1272,40 @@ impl App {
                                 HELP_TAB => self.help_tab(ui),
                                 _ => self.design_tab(ui, ctx),
                             }
-                            });
                         });
                     });
                 });
-                if pin_w > 0.0 {
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(pin).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| self.pinned_actions(ui));
-                }
-                if let (true, Some(before), Some(after)) = (edit_changed, primary.as_ref(), edited.as_ref()) {
-                    self.apply_object_edit(ctx, before, after);
-                } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
-                    self.edit_open = false;
-                }
             });
+            ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
         });
-        self.doc_tabs(root);
+    }
+
+    /// The right end of the tab strip, right to left: Publish, Preview and Try It. (The Layout Builder shows
+    /// neither: those are for the finished lesson, and its ribbon cannot be closed.)
+    fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
+        if master { return; }
+        ui.spacing_mut().item_spacing.x = 4.0;
+        // Publish is the main action, so it is a solid button in the main-action color; it darkens while the
+        // pointer is over it, and more while pressed or while the Publish window is open.
+        let backing = ui.painter().add(egui::Shape::Noop);
+        let publishing = self.publish_open;
+        let on_primary = if ui.visuals().dark_mode { egui::Color32::from_gray(20) } else { egui::Color32::WHITE };
+        let resp = ui.scope(|ui| {
+            let v = ui.visuals_mut();
+            v.override_text_color = Some(on_primary);
+            for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
+            compact_widget_in(ui, EXPORT, "Publish", false, false, false)
+        }).inner.on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
+        if resp.clicked() { self.publish_open = true; }
+        let base = primary(ui);
+        let fill = if publishing || resp.is_pointer_button_down_on() { shade(base, 0.28) } else if resp.hovered() { shade(base, 0.14) } else { base };
+        ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
+        let preview = compact_widget(ui, PLAY, "Preview", true, false).on_hover_text("Play the lesson in your browser");
+        egui::Popup::from_toggle_button_response(&preview).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| { ui.set_min_width(190.0); self.preview_items(ui); });
+        if self.can_try() {
+            let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops.";
+            if compact_widget(ui, CLICK, "Try It", false, self.try_mode).on_hover_text(tip).clicked() { self.try_mode = !self.try_mode; }
+        }
     }
 
     /// The ribbon of the 360° editing mode: one tab with everything for markers and hotspots.
@@ -1689,6 +1757,11 @@ impl App {
             if ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.").changed() {
                 self.one_section = one;
                 crate::prefs::set_bool("one_section_open", one);
+            }
+            let mut hover = self.ribbon_hover;
+            if ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.").changed() {
+                self.ribbon_hover = hover;
+                crate::prefs::set_bool("ribbon_hover", hover);
             }
             let mut inside = self.windows_inside;
             if ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Settings, spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.").changed() {
@@ -2338,40 +2411,6 @@ impl App {
     /// The Publish choices, shared by the title bar.
     /// Whether Try It applies: slide-based projects only.
     fn can_try(&self) -> bool { self.project.as_ref().is_some_and(|p| !p.is_web()) }
-
-    /// How wide the pinned group is, so the ribbon can leave room for it at the right.
-    fn pinned_width(&self, ui: &egui::Ui) -> f32 {
-        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false) + OUTLINE_PAD];
-        if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
-        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
-    }
-
-    /// Try It, Preview and Publish: pinned at the right end of the ribbon, always in view.
-    fn pinned_actions(&mut self, ui: &mut egui::Ui) {
-        // A thin divider separates the group from the tabs' controls.
-        let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, BIG_H + CAP_H), egui::Sense::hover());
-        let col = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
-        ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
-        ui.add_space(5.0);
-        let can_try = self.can_try();
-        pinned_group(ui, "", |ui| {
-            ui.horizontal(|ui| {
-                if can_try {
-                    let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";
-                    if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
-                }
-                big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
-                // Publish is the main action, so it is outlined in the main-action color; the outline darkens and the
-                // inside tints while the pointer is over it, and more while pressed or while the Publish window is open.
-                let backing = ui.painter().add(egui::Shape::Noop);
-                let publishing = self.publish_open;
-                let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, EXPORT, "Publish", false, false, big_width(ui, "Publish", false) + OUTLINE_PAD).on_hover_text("Publish the project: to the web, an LMS, PDF and more") }).inner;
-                if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), publishing || resp.is_pointer_button_down_on()));
-            });
-        });
-    }
-
 
     /// The Preview choices, shared by the title bar.
     pub(super) fn preview_items(&mut self, ui: &mut egui::Ui) {

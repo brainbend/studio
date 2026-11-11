@@ -298,6 +298,12 @@ struct App {
     /// Where the formatting controls are offered (an app setting).
     /// Opening a section of the Properties panel closes the one that was open (see `prefs`).
     one_section: bool,
+    /// The ribbon stays open under the tabs (a person's choice); otherwise it opens over the slide when a tab is clicked.
+    ribbon_pinned: bool,
+    ribbon_open: bool,
+    /// Resting the pointer on a tab opens the ribbon too (a person's choice).
+    ribbon_hover: bool,
+    ribbon_left_at: Option<f64>,
     /// The window that asks before the video program (ffmpeg) is downloaded.
     video_support: video_support::VideoSupport,
     font_store: font_store::FontStore,
@@ -499,7 +505,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
         }
     }
@@ -11630,6 +11636,65 @@ mod tests {
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("format-bar-open", 1u8)), vec!["transition".to_string()]));
         h.run_steps(8);
         assert!(h.query_by_label("Duration").is_some() && h.query_by_label("Apply to all slides").is_some(), "its duration and Apply to all");
+    }
+
+    #[test]
+    fn the_ribbon_is_closed_until_a_tab_is_clicked_and_the_pin_keeps_it_open() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_pinned = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_none(), "closed: no groups showing");
+        for label in ["Try It", "Preview", "Publish"] { assert!(h.query_by_label(label).is_some(), "{label} stays in reach"); }
+        h.get_by_label("Add Objects").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_some(), "a click on the tab opens the ribbon");
+        h.get_by_label("Add Slides").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_none(), "another tab switches it: Text Box still there, tab={}", h.state().ribbon_tab);
+        assert!(h.query_by_label_contains("Multiple choice").is_some(), "Multiple choice not found, open={} tab={}", h.state().ribbon_open, h.state().ribbon_tab);
+        h.get_by_label("Add Slides").click();
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("Multiple choice").is_none(), "a click on the open tab closes it");
+        h.get_by_label("Add Objects").click();
+        h.run_steps(4);
+        h.key_press(egui::Key::Escape);
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_none(), "Escape closes it");
+        // The pin, on the ribbon itself, keeps it open.
+        h.get_by_label("Add Objects").click();
+        h.run_steps(4);
+        h.get_by_label("Keep the ribbon open under the tabs").click();
+        h.run_steps(4);
+        assert!(h.state().ribbon_pinned && h.query_by_label("Text Box").is_some(), "pinned: the ribbon is open under the tabs");
+        h.get_by_label("Add Slides").click();
+        h.run_steps(4);
+        h.get_by_label("Add Slides").click();
+        h.run_steps(4);
+        assert!(h.query_by_label_contains("Multiple choice").is_some(), "pinned, clicking a tab only switches to it");
+    }
+
+    #[test]
+    fn a_click_on_the_slide_closes_a_ribbon_that_is_not_pinned() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_pinned = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("Add Objects").click();
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_some());
+        let at = egui::pos2(700.0, 650.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(4);
+        assert!(h.query_by_label("Text Box").is_none(), "the ribbon closed");
     }
 
     #[test]
