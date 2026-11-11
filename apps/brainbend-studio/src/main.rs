@@ -6664,8 +6664,8 @@ impl App {
                 ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
                 if panel_formatting {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.selectable_label(painter_on, "Copy Look").on_hover_text("Format Painter: copy this object's look, then click another object to give it the same look. Esc cancels.").clicked() { copy_look = true; }
                         ribbon::format_panel::expand_buttons(ui);
+                        if ui.selectable_label(painter_on, "Copy Style").on_hover_text("Format Painter: copy this object's style, then click another object to give it the same style. Esc cancels.").clicked() { copy_look = true; }
                     });
                 }
             });

@@ -80,12 +80,25 @@ pub(crate) fn section(ui: &mut egui::Ui, id: &str, title: &str, default_open: bo
     }
 }
 
-/// Small "Expand all" and "Collapse all" buttons for the right end of a panel's heading row (put them in a right-to-left layout).
+/// A small square button holding a solid triangle, pointing down or up.
+fn triangle_button(ui: &mut egui::Ui, down: bool, tip: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+    if resp.hovered() { ui.painter().rect_filled(rect, 4.0, ui.visuals().widgets.hovered.weak_bg_fill); }
+    let c = rect.center();
+    let d = if down { 1.0 } else { -1.0 };
+    let pts = vec![c + egui::vec2(-4.5, -2.5 * d), c + egui::vec2(4.5, -2.5 * d), c + egui::vec2(0.0, 3.0 * d)];
+    ui.painter().add(egui::Shape::convex_polygon(pts, ui.visuals().text_color().gamma_multiply(0.8), egui::Stroke::NONE));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    resp.on_hover_text(tip)
+}
+
+/// Two small triangle buttons, Expand all (down) and Collapse all (up), for the right end of a panel's heading row (put them in a
+/// right-to-left layout, before anything else, so they stay at the far right).
 pub(crate) fn expand_buttons(ui: &mut egui::Ui) {
     let mut ask = None;
     // Right-to-left, so Collapse all is added first and ends up on the right.
-    if ui.add(egui::Button::new(egui::RichText::new("Collapse all").size(11.0)).small().frame(false)).on_hover_text("Close every section").clicked() { ask = Some(false); }
-    if ui.add(egui::Button::new(egui::RichText::new("Expand all").size(11.0)).small().frame(false)).on_hover_text("Open every section").clicked() { ask = Some(true); }
+    if triangle_button(ui, false, "Collapse all").clicked() { ask = Some(false); }
+    if triangle_button(ui, true, "Expand all").clicked() { ask = Some(true); }
     if let Some(expand) = ask {
         let pass = ui.ctx().cumulative_pass_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-all"), (pass, expand)));
@@ -142,7 +155,7 @@ fn number(ui: &mut egui::Ui, w: f32, v: &mut f32, range: std::ops::RangeInclusiv
 }
 
 impl App {
-    /// The formatting bars for the selected object (the panel's heading and Copy Look button are above them).
+    /// The formatting bars for the selected object (the panel's heading and Copy Style button are above them).
     pub(crate) fn format_accordion(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
         let primary = self.ribbon_target();
