@@ -1236,6 +1236,13 @@ impl App {
             let popup = egui::Popup::is_any_open(ctx);
             let inside = pos.is_some_and(|p| rects.iter().any(|r| r.expand(2.0).contains(p)));
             if (pressed && !inside && !popup) || (escape && !popup) { self.ribbon_open = false; self.ribbon_left_at = None; }
+            // Choosing something in the ribbon closes it (unless it is pinned) so what the choice opened is not hidden by it.
+            // A choice that opens a drop-down waits: the ribbon closes when the drop-down does.
+            let flag = egui::Id::new("ribbon-popup-seen");
+            let picked = ctx.interaction_snapshot(|s| s.clicked).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == area.response.layer_id);
+            let waiting: bool = ctx.data(|d| d.get_temp(flag)).unwrap_or(false);
+            if popup { ctx.data_mut(|d| d.insert_temp(flag, true)); }
+            else if picked || waiting { ctx.data_mut(|d| d.remove_temp::<bool>(flag)); self.ribbon_open = false; self.ribbon_left_at = None; ctx.request_repaint(); }
             // Opened by resting on a tab: it also closes when the pointer has gone away from it.
             if self.ribbon_hover {
                 if inside || popup || ctx.input(|i| i.pointer.any_down()) { self.ribbon_left_at = None; }
@@ -1246,6 +1253,8 @@ impl App {
                     else { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
                 }
             }
+        } else {
+            ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("ribbon-popup-seen")));
         }
         if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
         self.doc_tabs(root);

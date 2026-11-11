@@ -11692,6 +11692,41 @@ mod tests {
         assert!(h.query_by_label_contains("Multiple choice").is_some(), "pinned, clicking a tab only switches to it");
     }
 
+    /// Choosing something in a ribbon that is not pinned closes it, so what the choice opened is not hidden behind it;
+    /// a choice that opens a drop-down closes it once the drop-down does.
+    #[test]
+    fn choosing_something_in_an_unpinned_ribbon_closes_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_pinned = false;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("Project").click();
+        h.run_steps(4);
+        assert!(h.state().ribbon_open);
+        h.get_by_label("Layout Builder").click();
+        h.run_steps(5);
+        assert!(h.state().in_master_view() && !h.state().ribbon_open, "the Layout Builder opens with the ribbon out of the way");
+        h.state_mut().leave_master_view();
+        h.run_steps(3);
+        h.get_by_label("Objects").click();
+        h.run_steps(4);
+        assert!(h.state().ribbon_open);
+        h.get_by_label_contains("Slide Number").click();
+        h.run_steps(4);
+        assert!(h.state().ribbon_open, "a drop-down is open, so the ribbon waits");
+        h.get_by_label_contains("of total").click();
+        h.run_steps(5);
+        assert!(!h.state().ribbon_open, "the ribbon closes with the drop-down");
+        // Pinned, it stays.
+        h.state_mut().ribbon_pinned = true;
+        h.run_steps(3);
+        h.get_by_label("Text Box").click();
+        h.run_steps(4);
+        assert!(h.state().ribbon_pinned);
+    }
+
     #[test]
     fn a_click_on_the_slide_closes_a_ribbon_that_is_not_pinned() {
         use egui_kittest::kittest::Queryable;
