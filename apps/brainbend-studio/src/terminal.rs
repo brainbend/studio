@@ -5,7 +5,7 @@
 //! tool. The tool is started already connected to this app (see [`App::start_terminal`]), so there is nothing to set up.
 //!
 //! `portable-pty` runs the program, `alacritty_terminal` understands what it prints, and this file draws the result with egui
-//! and turns keys into what a terminal sends. It is deliberately plain: colours, scrolling, selecting and copying, pasting, and
+//! and turns keys into what a terminal sends. It is deliberately plain: colors, scrolling, selecting and copying, pasting, and
 //! the usual keys. It does not do mouse reporting, images, or tabs.
 use super::*;
 use alacritty_terminal::event::{Event as TermEvent, EventListener, WindowSize};
@@ -20,7 +20,7 @@ use std::io::{Read, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 const FONT_SIZE: f32 = 12.5;
-/// The colours of a terminal in the app's dark or light mode.
+/// The colors of a terminal in the app's dark or light mode.
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub bg: egui::Color32,
@@ -30,7 +30,7 @@ pub struct Palette {
     ansi: [(u8, u8, u8); 16],
 }
 
-/// The ANSI colours as a terminal usually shows them: on a dark background, and on a light one (where yellow and white
+/// The ANSI colors as a terminal usually shows them: on a dark background, and on a light one (where yellow and white
 /// have to be darker to be read).
 const ANSI_DARK: [(u8, u8, u8); 16] = [
     (0, 0, 0), (205, 49, 49), (13, 188, 121), (229, 229, 16), (36, 114, 200), (188, 63, 188), (17, 168, 205), (229, 229, 229),
@@ -98,7 +98,7 @@ pub struct Terminal {
     child: Box<dyn Child + Send + Sync>,
     size: (usize, usize),
     cell: (f32, f32),
-    /// The app's mode now, and when this was started (the program chose its own colours then).
+    /// The app's mode now, and when this was started (the program chose its own colors then).
     dark: bool,
     pub spawned_dark: bool,
     want_focus: bool,
@@ -169,7 +169,7 @@ impl Terminal {
                 TermEvent::PtyWrite(text) => self.send(text.as_bytes()),
                 TermEvent::Title(t) => self.title = t,
                 TermEvent::ResetTitle => self.title.clear(),
-                // A program may ask what colour the terminal is, to choose its own; it gets the answer a dark one gives.
+                // A program may ask what color the terminal is, to choose its own; it gets the answer a dark one gives.
                 TermEvent::ColorRequest(index, format) => {
                     let pal = Palette::new(self.dark);
                     let c = match index { 257 => pal.bg, _ => pal.fg };
@@ -284,7 +284,7 @@ impl Terminal {
                 if bg != pal.bg { painter.rect_filled(egui::Rect::from_min_size(egui::pos2(origin.x + c as f32 * cw, y), egui::vec2((end - c) as f32 * cw, ch)), 0.0, bg); }
                 c = end;
             }
-            // Then text, in runs of one colour; a wide character is drawn alone so the columns stay in step.
+            // Then text, in runs of one color; a wide character is drawn alone so the columns stay in step.
             let mut c = 0;
             while c < cols {
                 let (ch0, fg, _, flags) = line[c];
@@ -385,7 +385,7 @@ pub fn key_bytes(key: egui::Key, m: egui::Modifiers, app_cursor: bool) -> Option
     })
 }
 
-/// A cell's colour: one of the 16, one of the 256, a true colour, or the terminal's own.
+/// A cell's color: one of the 16, one of the 256, a true color, or the terminal's own.
 fn resolve(color: Color, pal: &Palette) -> egui::Color32 {
     match color {
         Color::Spec(Rgb { r, g, b }) => egui::Color32::from_rgb(r, g, b),
@@ -400,7 +400,7 @@ fn resolve(color: Color, pal: &Palette) -> egui::Color32 {
     }
 }
 
-/// The 256-colour palette: the 16, a 6x6x6 cube, and 24 greys.
+/// The 256-color palette: the 16, a 6x6x6 cube, and 24 greys.
 fn indexed(i: usize, pal: &Palette) -> egui::Color32 {
     match i {
         0..=15 => pal.ansi(i),
@@ -491,7 +491,7 @@ impl App {
             if ui.small_button("Settings").clicked() { self.assistant.setup_open = true; }
         });
         if let Some(e) = &self.assistant.terminal_error { ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e); }
-        // The tool chooses its own colours when it starts, so a change of mode after that reaches only the plain text.
+        // The tool chooses its own colors when it starts, so a change of mode after that reaches only the plain text.
         if self.assistant.terminal.as_ref().is_some_and(|t| t.spawned_dark != ui.visuals().dark_mode) { ui.weak("The theme changed. Restart the tool so its colors match."); }
         if let Some(t) = self.assistant.terminal.as_mut() { t.ui(ui); }
         if restart { let ctx = ui.ctx().clone(); let tool = self.assistant.term_tool; self.start_terminal(tool, &ctx); }
@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn colours_are_the_usual_ones() {
+    fn colors_are_the_usual_ones() {
         use alacritty_terminal::vte::ansi::NamedColor;
         let dark = Palette::new(true);
         assert_eq!(resolve(Color::Named(NamedColor::Red), &dark), dark.ansi(1));
@@ -547,11 +547,11 @@ mod tests {
         assert!(lum(light.bg) > 200.0 && lum(light.fg) < 80.0, "light mode: dark text on a light page");
         assert_ne!(resolve(Color::Named(alacritty_terminal::vte::ansi::NamedColor::Foreground), &dark), resolve(Color::Named(alacritty_terminal::vte::ansi::NamedColor::Foreground), &light));
         for (name, pal) in [("dark", dark), ("light", light)] {
-            // Every colour a program might print with has to stand out from the page it is printed on.
+            // Every color a program might print with has to stand out from the page it is printed on.
             for i in 1..16 {
                 if i == 7 && name == "dark" { continue; }
                 let gap = (lum(pal.ansi(i)) - lum(pal.bg)).abs();
-                assert!(gap > 35.0, "{name} mode: colour {i} is too close to the page ({gap})");
+                assert!(gap > 35.0, "{name} mode: color {i} is too close to the page ({gap})");
             }
             assert!((lum(pal.selection_bg) - lum(pal.selection_fg)).abs() > 80.0, "{name} mode: selected text can be read");
         }

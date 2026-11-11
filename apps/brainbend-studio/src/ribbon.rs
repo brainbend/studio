@@ -268,8 +268,8 @@ fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
     resp
 }
 
-/// A big ribbon button whose picture is drawn by `draw` (given the painter, the 30 x 20 frame it may draw in, the colour of the
-/// new slide and the colour of the old one), for a gallery of things no icon font has a glyph for.
+/// A big ribbon button whose picture is drawn by `draw` (given the painter, the 30 x 20 frame it may draw in, the color of the
+/// new slide and the color of the old one), for a gallery of things no icon font has a glyph for.
 fn big_drawn_button(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, draw: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32, egui::Color32)) -> egui::Response {
     let w = big_width(ui, label, false);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, BIG_H), egui::Sense::click());
@@ -290,7 +290,7 @@ fn big_drawn_button(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, d
     resp.on_hover_text(tip)
 }
 
-/// What each kind of slide transition looks like in the ribbon: the old slide in grey, the new one in colour, part way through.
+/// What each kind of slide transition looks like in the ribbon: the old slide in grey, the new one in color, part way through.
 fn draw_transition(kind: brainbend_doc::TransitionKind, p: &egui::Painter, f: egui::Rect, new: egui::Color32, old: egui::Color32) {
     use brainbend_doc::TransitionKind::*;
     let part = |x0: f32, x1: f32, y0: f32, y1: f32| egui::Rect::from_min_max(egui::pos2(f.left() + f.width() * x0, f.top() + f.height() * y0), egui::pos2(f.left() + f.width() * x1, f.top() + f.height() * y1));

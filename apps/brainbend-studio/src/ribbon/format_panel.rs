@@ -132,13 +132,19 @@ pub(crate) fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
 fn color_field(ui: &mut egui::Ui, w: f32, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
     match cur {
-        Some(c) => { ui.painter().rect_filled(rect, 3.0, color(*c)); }
+        Some(c) => {
+            ui.painter().rect_filled(rect, 3.0, color(*c));
+            // The color's code, in black or white, whichever reads on it, so even a near-black color can be told from the panel.
+            let lum = 0.299 * c.0 as f32 + 0.587 * c.1 as f32 + 0.114 * c.2 as f32;
+            let ink = if lum > 140.0 { egui::Color32::from_gray(20) } else { egui::Color32::WHITE };
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2), egui::FontId::proportional(11.5), ink);
+        }
         None => {
             ui.painter().rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, none_label.unwrap_or("None"), egui::FontId::proportional(12.0), ui.visuals().weak_text_color());
         }
     }
-    ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, ui.visuals().text_color().gamma_multiply(0.35)), egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.0, ui.visuals().text_color().gamma_multiply(0.6)), egui::StrokeKind::Inside);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Color"));
     let mut changed = false;
     egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
@@ -239,6 +245,28 @@ impl App {
                     if part.is_some() { self.format_selection(Attr::ToggleUnderline); } else { obj.style.underline = !obj.style.underline; *changed = true; }
                 }
                 if icon_button(ui, STRIKE, all_strike, "Strikethrough").clicked() { self.edit_text_range(|o, a, b, _| o.format_range(a, b, &Attr::ToggleStrike)); }
+            });
+            row(ui, "Link", |ui, w| {
+                let can = !obj.text.is_empty() && !matches!(obj.kind, Kind::Input(_) | Kind::Slider(_));
+                // The address of the chosen words, or of the first linked words when none are chosen.
+                let cur: String = span.iter().find_map(|f| f.link.clone()).unwrap_or_default();
+                let key = egui::Id::new(("pf-link", obj.id.clone()));
+                let (seen, mut text): (String, String) = ui.ctx().data(|d| d.get_temp(key)).unwrap_or((String::from("\u{0}"), String::new()));
+                if seen != cur { text = cur.clone(); }
+                let mut apply = false;
+                ui.add_enabled_ui(can, |ui| {
+                    let clear_w = if cur.is_empty() { 0.0 } else { 26.0 };
+                    let r = ui.add_sized([(w - 8.0 - clear_w).max(40.0), ROW_H], egui::TextEdit::singleline(&mut text).hint_text("https://example.com")).on_hover_text("Where the chosen words (or all the text) link to. Press Enter to apply.");
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) { apply = true; }
+                    if !cur.is_empty() && icon_button(ui, '\u{e4f6}', false, "Remove link").clicked() { text.clear(); apply = true; }
+                }).response.on_disabled_hover_text("This object has no text to link");
+                if apply {
+                    let t = text.trim().to_string();
+                    if t.is_empty() { self.link_selected(None); }
+                    else if t.starts_with("https://") || t.starts_with("http://") || t.starts_with("mailto:") { self.link_selected(Some(t)); }
+                    else { self.status = "A link starts with https://, http:// or mailto:".into(); }
+                }
+                ui.ctx().data_mut(|d| d.insert_temp(key, (cur, text)));
             });
             row(ui, "Spacing", |ui, w| {
                 let cur = span.first().and_then(|f| f.spacing).unwrap_or(0.0);

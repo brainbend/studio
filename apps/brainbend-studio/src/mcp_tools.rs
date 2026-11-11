@@ -896,7 +896,7 @@ mod tests {
     fn a_patch_that_is_wrong_changes_nothing_and_leaves_no_undo_step() {
         let mut a = app_with(1);
         for (ops, wants) in [
-            (json!([{ "op": "add", "path": "/slides/0/layers/0/objects/-", "value": { "id": "x", "colour": "red" } }]), "invalid"),
+            (json!([{ "op": "add", "path": "/slides/0/layers/0/objects/-", "value": { "id": "x", "colr": "red" } }]), "invalid"),
             (json!([{ "op": "replace", "path": "/slides/0/name", "value": 5 }]), "/slides/0/name"),
             (json!([{ "op": "remove", "path": "/slides/9" }]), "could not be applied"),
             (json!([{ "op": "remove", "path": "/assets" }]), "cannot be changed"),

@@ -6862,11 +6862,12 @@ impl App {
                 ribbon::format_panel::section(ui, "slider", "Slider", true, |ui| { changed |= controls::slider_editor(ui, sl, &num_vars, &mut pick_thumb); });
                 if pick_thumb { want_thumb = Some((li, oi)); }
             }
-            if matches!(obj.kind, Kind::Text | Kind::Rect) {
-                ribbon::format_panel::section(ui, &format!("check-{}", obj.id), "Check box", obj.check.is_some(), |ui| { changed |= controls::check_editor(ui, obj); });
-            }
-            if !matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
-                ribbon::format_panel::section(ui, &format!("dial-{}", obj.id), "Dial", obj.dial.is_some(), |ui| { changed |= controls::dial_editor(ui, &mut obj.dial, &num_vars); });
+            // A check box or a dial: an object is one or the other, chosen in one bar.
+            let can_check = matches!(obj.kind, Kind::Text | Kind::Rect);
+            let can_dial = !matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_));
+            if can_check || can_dial {
+                let on = obj.check.is_some() || obj.dial.is_some();
+                ribbon::format_panel::section(ui, &format!("interactive-{}", obj.id), "Make Interactive", on, |ui| { changed |= controls::interactive_editor(ui, obj, &num_vars, can_check, can_dial); });
             }
             if li == 0 && layer_choices.len() > 1 {
                 ribbon::format_panel::section(ui, &format!("hide-{}", obj.id), "Hide when layers show", !obj.hide_on_layers.is_empty(), |ui| {
@@ -8603,7 +8604,7 @@ mod tests {
         assert!(!h.state().assistant.setup_open, "and the window got out of the way");
         assert!(h.state().assistant.shows_terminal() && h.state().assistant.view_terminal);
         assert!(h.query_by_label("Restart").is_some() && h.query_by_label("Close").is_some());
-        // Something coloured, to look at.
+        // Something colored, to look at.
         h.state_mut().assistant.terminal.as_mut().unwrap().send(b"printf '\\033[1;32mReady\\033[0m to build your lesson\\n'\r");
         for _ in 0..60 { h.step(); std::thread::sleep(std::time::Duration::from_millis(10)); }
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("terminal.png")).unwrap(); }
@@ -11551,6 +11552,58 @@ mod tests {
         assert_eq!(o[1].fill, Some(Rgba(3, 83, 158, 255)), "the copied fill went onto the second object");
         assert_eq!(o[1].y, 300.0, "it stayed where it was");
         assert!(o[1].style.bold && o[1].rich.is_none(), "the bold words became a bold style, and its own italic is gone");
+    }
+
+    #[test]
+    fn a_link_is_shown_and_removed_in_the_text_formatting_bar() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        let mut o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
+        o.text = "Visit us".into();
+        o.format_range(0, 8, &brainbend_doc::richtext::Attr::Link(Some("https://brainbend.org".into())));
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        a.format_where = ribbon::FormatWhere::Panel;
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label("Text Formatting").click();
+        h.run_steps(5);
+        h.get_by_label("Remove link").click();
+        h.run_steps(4);
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.char_fmts().iter().all(|(_, f)| f.link.is_none()), "the link is gone from the words");
+    }
+
+    #[test]
+    fn make_interactive_turns_an_object_into_a_check_box_or_a_dial_but_not_both() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut a = app();
+        let o = Object::new("s", "S", Kind::Rect, 100.0, 100.0, 300.0, 100.0);
+        a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
+        a.selected = Some((0, 0));
+        a.format_where = ribbon::FormatWhere::Panel;
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label("Make Interactive").is_some(), "one bar for both");
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("format-bar-open", 0u8)), vec!["interactive-s".to_string()]));
+        h.run_steps(8);
+        let acts = |h: &egui_kittest::Harness<'_, App>| h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.accesskit_node().value().as_deref().is_some_and(|v| matches!(v, "Nothing special" | "Check box" | "Dial"))).map(|c| c.rect().center());
+        assert!(h.query_by_label("Acts as").is_some(), "the bar opened");
+        let found: Vec<_> = h.query_all_by_role(egui::accesskit::Role::ComboBox).map(|c| c.accesskit_node().value().map(|v| v.to_string())).collect();
+        let at = acts(&h).unwrap_or_else(|| panic!("the Acts as drop-down is there: {found:?}"));
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.rect().center() == at).unwrap().click();
+        h.run_steps(3);
+        h.get_all_by_label("Check box").last().unwrap().click();
+        h.run_steps(4);
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.check.is_some() && o.dial.is_none(), "now a check box");
+        let at = acts(&h).expect("still there");
+        h.query_all_by_role(egui::accesskit::Role::ComboBox).find(|c| c.rect().center() == at).unwrap().click();
+        h.run_steps(3);
+        h.get_all_by_label("Dial").last().unwrap().click();
+        h.run_steps(4);
+        let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
+        assert!(o.dial.is_some() && o.check.is_none(), "now a dial, no longer a check box");
     }
 
     #[test]

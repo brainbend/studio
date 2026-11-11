@@ -64,13 +64,8 @@ pub fn slider_editor(ui: &mut egui::Ui, sl: &mut Slider, vars: &[(String, String
 }
 
 /// Make an object turn like a dial that sets a number variable.
-pub fn dial_editor(ui: &mut egui::Ui, dial: &mut Option<Dial>, vars: &[(String, String)]) -> bool {
+fn dial_editor(ui: &mut egui::Ui, dial: &mut Option<Dial>, vars: &[(String, String)]) -> bool {
     let mut changed = false;
-    let mut on = dial.is_some();
-    if ui.checkbox(&mut on, "Turns like a dial").on_hover_text("The learner turns the object by dragging it; the turn sets a number variable.").changed() {
-        *dial = on.then(|| Dial { variable: vars.first().map(|(k, _)| k.clone()).unwrap_or_default(), min: 0.0, max: 10.0, step: 1.0, sweep: 180.0, pivot: (0.0, 0.0) });
-        changed = true;
-    }
     if let Some(d) = dial.as_mut() {
         changed |= variable_picker(ui, "dial-var", &mut d.variable, vars);
         changed |= range_fields(ui, &mut d.min, &mut d.max, &mut d.step);
@@ -82,21 +77,49 @@ pub fn dial_editor(ui: &mut egui::Ui, dial: &mut Option<Dial>, vars: &[(String, 
     changed
 }
 
-/// Make a text object a check box: the learner ticks the box beside its text.
-pub fn check_editor(ui: &mut egui::Ui, o: &mut Object) -> bool {
+/// What an object can be made to act as: nothing special, a check box (or radio button), or a dial.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Acts { Plain, Check, Dial }
+
+/// The "Make Interactive" bar: choose what the object acts as, then set that up. An object is one or the other.
+pub fn interactive_editor(ui: &mut egui::Ui, o: &mut Object, vars: &[(String, String)], can_check: bool, can_dial: bool) -> bool {
     let mut changed = false;
-    let mut on = o.check.is_some();
-    if ui.checkbox(&mut on, "Is a check box").on_hover_text("Clicking toggles the object between its Normal and Selected states. Triggers can watch the state.").changed() {
-        if on {
-            // Leave room for the box beside the text.
-            let size = (o.h * 0.5).clamp(12.0, 60.0);
-            o.check = Some(Check { size, ..Check::new() });
-            o.margins[0] = o.margins[0].max(size * 1.6);
-        } else {
-            o.check = None;
+    let now = if o.check.is_some() { Acts::Check } else if o.dial.is_some() { Acts::Dial } else { Acts::Plain };
+    let mut next = now;
+    crate::ribbon::format_panel::row(ui, "Acts as", |ui, w| {
+        let shown = match now { Acts::Plain => "Nothing special", Acts::Check => "Check box", Acts::Dial => "Dial" };
+        combo("acts-as").width(w - 8.0).selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(now == Acts::Plain, "Nothing special").clicked() { next = Acts::Plain; }
+            if can_check && ui.selectable_label(now == Acts::Check, "Check box").on_hover_text("Clicking toggles the object between its Normal and Selected states. Triggers can watch the state.").clicked() { next = Acts::Check; }
+            if can_dial && ui.selectable_label(now == Acts::Dial, "Dial").on_hover_text("The learner turns the object by dragging it; the turn sets a number variable.").clicked() { next = Acts::Dial; }
+        });
+    });
+    if next != now {
+        o.check = None;
+        o.dial = None;
+        match next {
+            Acts::Plain => {}
+            Acts::Check => {
+                // Leave room for the box beside the text.
+                let size = (o.h * 0.5).clamp(12.0, 60.0);
+                o.check = Some(Check { size, ..Check::new() });
+                o.margins[0] = o.margins[0].max(size * 1.6);
+            }
+            Acts::Dial => o.dial = Some(Dial { variable: vars.first().map(|(k, _)| k.clone()).unwrap_or_default(), min: 0.0, max: 10.0, step: 1.0, sweep: 180.0, pivot: (0.0, 0.0) }),
         }
         changed = true;
     }
+    match next {
+        Acts::Check => changed |= check_editor(ui, o),
+        Acts::Dial => changed |= dial_editor(ui, &mut o.dial, vars),
+        Acts::Plain => {}
+    }
+    changed
+}
+
+/// Make a text object a check box: the learner ticks the box beside its text.
+fn check_editor(ui: &mut egui::Ui, o: &mut Object) -> bool {
+    let mut changed = false;
     if let Some(ck) = o.check.as_mut() {
         let mut radio = ck.radio.is_some();
         if ui.checkbox(&mut radio, "Radio button").on_hover_text("A round button: choosing it clears the others in its group on this slide, and it cannot be unticked by clicking it").changed() {
