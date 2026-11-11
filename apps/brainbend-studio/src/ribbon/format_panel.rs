@@ -4,7 +4,6 @@ use super::*;
 
 const BAR_H: f32 = 24.0;
 const ROW_H: f32 = 22.0;
-const BLUE: egui::Color32 = egui::Color32::from_rgb(70, 150, 230);
 
 /// A group's bar. Click it to open the rows below; clicking the open one closes it. By default opening one closes the one that
 /// was open (the "Open one section at a time" option). Until something has been chosen, the first bar that asks to start open is the open one.

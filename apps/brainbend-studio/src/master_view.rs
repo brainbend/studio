@@ -112,7 +112,7 @@ impl App {
         self.layer = 0;
         self.selected = None;
         self.multi.clear();
-        self.ribbon_tab = 1;
+        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
     }
 
