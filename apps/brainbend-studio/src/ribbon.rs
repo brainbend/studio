@@ -53,6 +53,7 @@ pub const ARROW_COUNTER: char = '\u{e038}';
 pub const VIDEO: char = '\u{e4da}';
 pub const SPEAKER: char = '\u{e44a}';
 pub const STACK: char = '\u{e466}';
+pub const LAYOUT: char = '\u{e6d6}';
 pub const BUCKET: char = '\u{e392}';
 pub const DROP: char = '\u{e210}';
 pub const PLAY: char = '\u{e3d0}';

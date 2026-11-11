@@ -44,6 +44,12 @@ fn merge(p: &mut Project, entry: &Snap) {
     p.master = master;
 }
 
+impl MasterStash {
+    /// The real slides and scenes, as they were when the Layout Builder opened.
+    pub(super) fn entry_slides(&self) -> &[Slide] { &self.entry.slides }
+    pub(super) fn entry_scenes(&self) -> &[Scene] { &self.entry.meta.scenes }
+}
+
 impl App {
     pub(super) fn in_master_view(&self) -> bool {
         self.master_stash.is_some()

@@ -13019,6 +13019,35 @@ mod tests {
         assert!(!h.state().in_master_view());
     }
 
+    /// The Layout Builder is a tab after the slides' tabs while it is open: Story View and the slide tabs stay, and
+    /// clicking any of them (or the × on the Layout Builder tab) leaves it.
+    #[test]
+    fn the_layout_builder_is_a_tab_beside_story_view_and_the_slide_tabs() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.add_slide(SlideKind::Normal);
+        a.slide = 1;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("LAYOUT BUILDER").is_none(), "no Layout Builder tab until it is open");
+        h.state_mut().enter_master_view();
+        h.run_steps(4);
+        assert!(h.query_by_label("STORY VIEW").is_some() && h.query_by_label("LAYOUT BUILDER").is_some(), "Story View and the Layout Builder are both tabs");
+        assert!(h.query_by_label_contains("Slide 2").is_some(), "the open slides keep their tabs, named from the real slides");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("layout-builder-tab.png")).unwrap(); }
+        h.get_by_label("STORY VIEW").click();
+        h.run_steps(4);
+        assert!(!h.state().in_master_view() && h.state().scene_view, "Story View leaves the Layout Builder");
+        assert!(h.query_by_label("LAYOUT BUILDER").is_none());
+        h.state_mut().scene_view = false;
+        h.state_mut().enter_master_view();
+        h.run_steps(4);
+        h.get_by_label_contains("Slide 2").click();
+        h.run_steps(4);
+        assert!(!h.state().in_master_view() && !h.state().scene_view && h.state().slide == 1, "a slide's tab leaves it and shows that slide");
+    }
+
     /// The Brand group on the Theme tab has the theme's fonts as two stacked drop-downs: headings on top, body text below.
     #[test]
     fn the_brand_group_has_stacked_heading_and_body_font_drop_downs_that_set_the_theme_fonts() {

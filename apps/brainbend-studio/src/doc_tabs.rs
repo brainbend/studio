@@ -132,17 +132,30 @@ impl App {
     }
 
     pub(super) fn doc_tabs(&mut self, root: &mut egui::Ui) {
-        if self.project.is_none() || self.file_view || self.in_master_view() { return; }
+        if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
+        let master = self.in_master_view();
+        let mut leave_builder = false;
         let mut go_story = false;
         let mut go_slide: Option<String> = None;
         let mut close: Option<usize> = None;
         let mut close_others: Option<usize> = None;
         let mut close_all = false;
-        let labels: Vec<(String, String)> = self.tabs.iter().filter_map(|t| {
-            let i = self.project.as_ref()?.slides.iter().position(|s| s.id == t.slide_id)?;
-            Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name)))
-        }).collect();
+        let labels: Vec<(String, String)> = if let Some(st) = &self.master_stash {
+            // The Layout Builder swaps the project's slides for its own, so the open slides are named from the copy kept at entry.
+            self.tabs.iter().filter_map(|t| {
+                let (i, s) = st.entry_slides().iter().enumerate().find(|(_, s)| s.id == t.slide_id)?;
+                let scenes = st.entry_scenes();
+                let si = scenes.iter().position(|c| c.id == s.scene).unwrap_or(0);
+                let n = st.entry_slides().iter().filter(|x| x.scene == s.scene).position(|x| x.id == s.id).map(|k| k + 1).unwrap_or(i + 1);
+                Some((t.slide_id.clone(), format!("{}.{} {}", si + 1, n, s.name)))
+            }).collect()
+        } else {
+            self.tabs.iter().filter_map(|t| {
+                let i = self.project.as_ref()?.slides.iter().position(|s| s.id == t.slide_id)?;
+                Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name)))
+            }).collect()
+        };
         // One flat band that belongs to the ribbon, with a border line under it that the active tab sits on.
         let dark = root.visuals().dark_mode;
         let band = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
@@ -150,24 +163,41 @@ impl App {
         egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
-                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", self.scene_view, false, 138.0);
+                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", self.scene_view && !master, false, 138.0);
                 if story.clicked() { go_story = true; }
                 for (k, (id, label)) in labels.iter().enumerate() {
-                    let active = !self.scene_view && self.active_tab == Some(k);
+                    let active = !master && !self.scene_view && self.active_tab == Some(k);
                     // As wide as its name needs, so the strip is not mostly gaps.
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
                     let (r, closed) = tab_chip(ui, None, label, active, true, (tw + 58.0).clamp(96.0, 190.0));
+                    // Inside the Layout Builder the slide tabs are named too, since nothing else on screen repeats them.
+                    if master { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
                     if closed || r.middle_clicked() { close = Some(k); } else if r.clicked() { go_slide = Some(id.clone()); }
-                    r.context_menu(|ui| {
+                    if !master { r.context_menu(|ui| {
                         if ui.button("Close").clicked() { close = Some(k); ui.close(); }
                         if ui.add_enabled(labels.len() > 1, egui::Button::new("Close other tabs")).clicked() { close_others = Some(k); ui.close(); }
                         if ui.button("Close all tabs").clicked() { close_all = true; ui.close(); }
-                    });
+                    }); }
+                }
+                // While the Layout Builder is open it is a tab of its own, after the slides; its × goes back to the slides.
+                if master {
+                    let (_, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", true, true, 176.0);
+                    if closed { leave_builder = true; }
                 }
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
         });
+        if master {
+            // Leaving writes the layouts back first, so the slide indexes below are the real ones.
+            if leave_builder { self.leave_master_view(); }
+            else if go_story { self.leave_master_view(); self.scene_view = true; }
+            else if let Some(id) = go_slide {
+                self.leave_master_view();
+                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.slide = i; self.scene_view = false; }
+            }
+            return;
+        }
         if close_all {
             self.tabs.clear();
             self.active_tab = None;
@@ -266,5 +296,7 @@ fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bo
         ui.painter().text(x.center(), egui::Align2::CENTER_CENTER, "\u{00d7}", egui::FontId::proportional(15.0), if active || xr.hovered() { if active { egui::Color32::WHITE } else { text } } else { ink });
         closed = xr.clicked();
     }
+    // Slide tabs share their words with the slide list, so only the tabs with an icon are named for screen readers here.
+    if icon.is_some() { resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); }
     (resp.on_hover_text(label), closed)
 }
