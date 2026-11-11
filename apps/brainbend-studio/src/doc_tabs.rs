@@ -135,7 +135,8 @@ impl App {
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
         let master = self.in_master_view();
-        let mut leave_builder = false;
+        let mut close_builder = false;
+        let mut open_builder = false;
         let mut go_story = false;
         let mut go_slide: Option<String> = None;
         let mut close: Option<usize> = None;
@@ -179,10 +180,12 @@ impl App {
                         if ui.button("Close all tabs").clicked() { close_all = true; ui.close(); }
                     }); }
                 }
-                // While the Layout Builder is open it is a tab of its own, after the slides; its × goes back to the slides.
-                if master {
-                    let (_, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", true, true, 176.0);
-                    if closed { leave_builder = true; }
+                // The Layout Builder is a tab of its own, after the slides. It stays when another tab is chosen (the layouts
+                // are saved on the way out) and opens again when clicked; its × closes it.
+                if master || self.layout_tab {
+                    let (r, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", master, true, 176.0);
+                    if closed { close_builder = true; }
+                    else if r.clicked() && !master { open_builder = true; }
                 }
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
@@ -190,7 +193,7 @@ impl App {
         });
         if master {
             // Leaving writes the layouts back first, so the slide indexes below are the real ones.
-            if leave_builder { self.leave_master_view(); }
+            if close_builder { self.layout_tab = false; self.leave_master_view(); }
             else if go_story { self.leave_master_view(); self.scene_view = true; }
             else if let Some(id) = go_slide {
                 self.leave_master_view();
@@ -198,6 +201,8 @@ impl App {
             }
             return;
         }
+        if close_builder { self.layout_tab = false; }
+        else if open_builder { self.enter_master_view(); return; }
         if close_all {
             self.tabs.clear();
             self.active_tab = None;

@@ -81,6 +81,7 @@ impl App {
         p.scenes = vec![Scene { id: MASTER_SCENE.into(), name: "Master".into(), bank: None }];
         let stash = MasterStash { entry, slide: self.slide, undo: std::mem::take(&mut self.undo), redo: std::mem::take(&mut self.redo), rename: None };
         self.master_stash = Some(stash);
+        self.layout_tab = true;
         self.slide = 0;
         self.layer = 0;
         self.selected = None;

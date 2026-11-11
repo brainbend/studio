@@ -323,6 +323,8 @@ struct App {
     table_opts: brainbend_doc::tables::StyleOptions,
     /// Set while the Layout Builder view is open.
     master_stash: Option<master_view::MasterStash>,
+    /// The Layout Builder's tab is in the tab strip (it stays after another tab is chosen, until its × is pressed).
+    layout_tab: bool,
 }
 
 /// Changes to a table's grid.
@@ -506,7 +508,7 @@ impl Default for App {
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
             guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
-            last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None,
+            last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
 }
@@ -1123,6 +1125,7 @@ impl App {
                 self.scene_view = self.open_to_story_view;
                 self.tabs.clear();
                 self.active_tab = None;
+                self.layout_tab = false;
                 self.project = Some(p);
                 self.file_view = false;
                 self.file_page = backstage::FilePage::Info;
@@ -1418,6 +1421,7 @@ impl App {
 
     fn new_project(&mut self) {
         self.leave_master_view();
+        self.layout_tab = false;
         let mut p = Project::new("Untitled");
         p.slides.push(Slide {
             id: self.new_id("slide"),
@@ -13080,7 +13084,7 @@ mod tests {
     }
 
     /// The Layout Builder is a tab after the slides' tabs while it is open: Story View and the slide tabs stay, and
-    /// clicking any of them (or the × on the Layout Builder tab) leaves it.
+    /// clicking any of them leaves it, saving the layouts, and its own tab stays until its × is pressed.
     #[test]
     fn the_layout_builder_is_a_tab_beside_story_view_and_the_slide_tabs() {
         use egui_kittest::kittest::Queryable;
@@ -13099,13 +13103,21 @@ mod tests {
         h.get_by_label("STORY VIEW").click();
         h.run_steps(4);
         assert!(!h.state().in_master_view() && h.state().scene_view, "Story View leaves the Layout Builder");
-        assert!(h.query_by_label("LAYOUT BUILDER").is_none());
-        h.state_mut().scene_view = false;
-        h.state_mut().enter_master_view();
+        assert!(h.query_by_label("LAYOUT BUILDER").is_some(), "its tab stays, so it can be opened again");
+        h.get_by_label("LAYOUT BUILDER").click();
         h.run_steps(4);
+        assert!(h.state().in_master_view() && !h.state().scene_view, "clicking its tab opens it again");
         h.get_by_label_contains("Slide 2").click();
         h.run_steps(4);
         assert!(!h.state().in_master_view() && !h.state().scene_view && h.state().slide == 1, "a slide's tab leaves it and shows that slide");
+        assert!(h.query_by_label("LAYOUT BUILDER").is_some(), "and its tab is still there");
+        h.get_by_label("LAYOUT BUILDER").click();
+        h.run_steps(4);
+        assert!(h.state().in_master_view());
+        h.state_mut().leave_master_view();
+        h.state_mut().layout_tab = false;
+        h.run_steps(3);
+        assert!(h.query_by_label("LAYOUT BUILDER").is_none(), "its × closes the tab");
     }
 
     /// The Brand group on the Theme tab has the theme's fonts as two stacked drop-downs: headings on top, body text below.
