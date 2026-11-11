@@ -129,7 +129,7 @@ pub(crate) fn row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
 }
 
 /// A bar of the color, as wide as the row; it opens the same color choices as the ribbon.
-fn color_field(ui: &mut egui::Ui, w: f32, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
+pub(crate) fn color_field(ui: &mut egui::Ui, w: f32, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
     match cur {
         Some(c) => {

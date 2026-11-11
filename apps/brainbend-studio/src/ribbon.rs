@@ -248,11 +248,24 @@ fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
 /// In the Properties panel the big ribbon buttons are one row tall: the icon, the name and a caret beside each other.
 fn panel_compact(ui: &egui::Ui) -> bool { ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("panel-compact"))).unwrap_or(false) }
 
+/// The next compact button in the Properties panel is this wide (a row's whole control, or half of it).
+fn fill_next(ui: &egui::Ui, w: f32) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("compact-fill"), w)); }
+
+/// A control in the Properties panel gets a row: its name on the left and the control filling the rest. On the ribbon
+/// it is just the control. `f` is given the width of the control.
+fn pr(ui: &mut egui::Ui, label: &str, f: impl FnOnce(&mut egui::Ui, f32)) {
+    if panel_mode(ui) { format_panel::row(ui, label, |ui, w| { fill_next(ui, w); f(ui, w) }); } else { f(ui, 0.0); }
+}
+
+/// The controls of a ribbon group sit side by side; in the Properties panel they stack as rows.
+fn hwrap(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) { if panel_mode(ui) { ui.vertical(f); } else { ui.horizontal(f); } }
+
 fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
     let plain = label.replace('\n', " ");
     let font = egui::FontId::proportional(12.0);
     let tw = ui.fonts_mut(|f| f.layout_no_wrap(plain.clone(), font.clone(), egui::Color32::WHITE).size().x);
-    let w = 8.0 + 18.0 + tw + if caret { 16.0 } else { 6.0 };
+    let natural = 8.0 + 18.0 + tw + if caret { 16.0 } else { 6.0 };
+    let w = ui.ctx().data_mut(|d| d.remove_temp::<f32>(egui::Id::new("compact-fill"))).map(|f| f.max(natural.min(60.0))).unwrap_or(natural);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), plain.clone()));
     if ui.is_rect_visible(rect) {
@@ -2115,18 +2128,18 @@ impl App {
         let mut split = false;
         let mut choose: Option<((u16, u16), (u16, u16))> = None;
         group(ui, "Rows & Columns", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, TABLE, "Add", "Add a row or column next to the chosen cell", |ui| {
+            hwrap(ui, |ui| {
+                pr(ui, "Add", |ui, _| { big_menu(ui, TABLE, "Add", "Add a row or column next to the chosen cell", |ui| {
                     for (icon, label, o) in [(ARROW_UP, "Row above", TableOp::RowAbove), (ARROW_DOWN, "Row below", TableOp::RowBelow), (AL_LEFT, "Column left", TableOp::ColLeft), (AL_RIGHT, "Column right", TableOp::ColRight)] {
                         if menu_item(ui, icon, label).clicked() { op = Some(o); }
                     }
-                });
-                big_menu(ui, TRASH, "Delete", "Delete the chosen cell's row or column", |ui| {
+                }); });
+                pr(ui, "Delete", |ui, _| { big_menu(ui, TRASH, "Delete", "Delete the chosen cell's row or column", |ui| {
                     for (label, o) in [("Delete row", TableOp::DeleteRow), ("Delete column", TableOp::DeleteCol)] {
                         if menu_item(ui, TRASH, label).clicked() { op = Some(o); }
                     }
-                });
-                big_menu(ui, SQUARE_BORDER, "Cells", "Merge, split or choose cells. Click a cell, then shift-click another to choose a block", |ui| {
+                }); });
+                pr(ui, "Cells", |ui, _| { big_menu(ui, SQUARE_BORDER, "Cells", "Merge, split or choose cells. Click a cell, then shift-click another to choose a block", |ui| {
                     ui.add_enabled_ui(can_merge, |ui| { if menu_item(ui, SQUARE_BORDER, "Merge cells").clicked() { merge = true; } });
                     ui.add_enabled_ui(can_split, |ui| { if menu_item(ui, SQUARE_BORDER, "Split cell").clicked() { split = true; } });
                     ui.separator();
@@ -2136,20 +2149,26 @@ impl App {
                         if menu_item(ui, AL_CENTER_V, "Choose column").clicked() { choose = Some(((0, c0), (dims.0.saturating_sub(1), c1))); }
                         if menu_item(ui, TABLE, "Choose all cells").clicked() { choose = Some(((0, 0), (dims.0.saturating_sub(1), dims.1.saturating_sub(1)))); }
                     });
-                });
+                }); });
             });
         });
         // Borders for the chosen cells.
         let mut borders: Option<(t::BorderSet, Option<Stroke>)> = None;
         group(ui, "Borders", |ui| {
             ui.vertical(|ui| {
+                if panel_mode(ui) {
+                    let mut c = Some(self.border_color);
+                    format_panel::row(ui, "Color", |ui, w| { if format_panel::color_field(ui, w, &mut c, None) { if let Some(c) = c { self.border_color = c; } } });
+                    format_panel::row(ui, "Thickness", |ui, w| { ui.add_sized([w, 22.0], egui::DragValue::new(&mut self.border_width).range(0.5..=24.0).speed(0.25).suffix(" px")); });
+                } else {
                 ui.horizontal(|ui| {
                     let mut c = Some(self.border_color);
                     if color_menu(ui, PEN, "Border color", &mut c, None) { if let Some(c) = c { self.border_color = c; } }
                     framed(ui, |ui| { ui.add(egui::DragValue::new(&mut self.border_width).range(0.5..=24.0).speed(0.25).suffix(" px")); });
                 });
+                }
                 let line = Some(Stroke { color: self.border_color, width: self.border_width });
-                let menu = caret_button(ui, "Borders");
+                let menu = if panel_mode(ui) { let mut r = None; format_panel::row(ui, "Apply to", |ui, w| { fill_next(ui, w); r = Some(compact_widget(ui, SQUARE_BORDER, "Borders", true, false)); }); r.unwrap() } else { caret_button(ui, "Borders") };
                 egui::Popup::from_toggle_button_response(&menu).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
                     use t::BorderSet::*;
                     for (label, set, ln) in [("All", All, line), ("Outside", Outside, line), ("Inside", Inside, line), ("Top", Top, line), ("Bottom", Bottom, line), ("Left", Left, line), ("Right", Right, line), ("No borders", All, None)] {
@@ -2240,17 +2259,22 @@ impl App {
     /// Crop, shape and ratio for a single picture. Shared by the selection groups on Home.
     fn picture_group(&mut self, ui: &mut egui::Ui, crop_info: &Option<(String, bool)>) {
         group(ui, "Picture", |ui| {
-            ui.horizontal(|ui| {
+            hwrap(ui, |ui| {
                 ui.add_enabled_ui(crop_info.is_some(), |ui| {
                     let on = crop_info.as_ref().is_some_and(|(id, _)| self.crop_mode.as_deref() == Some(id.as_str()));
-                    if big_toggle(ui, CROP, "Crop", "Crop the picture: drag its edges, or drag inside it to move the picture (Esc or Enter to finish)", on).clicked() {
-                        self.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
-                    }
-                    ui.add_enabled_ui(crop_info.as_ref().is_some_and(|c| c.1), |ui| {
-                        if big_button(ui, ARROW_COUNTER, "Reset", "Remove the crop and show the whole picture").clicked() { self.reset_crop(); }
+                    pr(ui, "Crop", |ui, w| {
+                        let half = if w > 0.0 { (w - ui.spacing().item_spacing.x) / 2.0 } else { 0.0 };
+                        if half > 0.0 { fill_next(ui, half); }
+                        if big_toggle(ui, CROP, "Crop", "Crop the picture: drag its edges, or drag inside it to move the picture (Esc or Enter to finish)", on).clicked() {
+                            self.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
+                        }
+                        ui.add_enabled_ui(crop_info.as_ref().is_some_and(|c| c.1), |ui| {
+                            if half > 0.0 { fill_next(ui, half); }
+                            if big_button(ui, ARROW_COUNTER, "Reset", "Remove the crop and show the whole picture").clicked() { self.reset_crop(); }
+                        });
                     });
                     // Crop to a shape: only the part of the picture inside the shape shows.
-                    ui.add_enabled_ui(crop_info.is_some(), |ui| {
+                    pr(ui, "Shape", |ui, _| {
                         let cur = self.selected_object().and_then(|o| o.mask);
                         big_menu(ui, CIRCLE, "Shape", "Crop the picture to a shape: oval, rounded, diamond, star ...", |ui| {
                             if ui.selectable_label(cur.is_none(), "None").clicked() { self.set_picture_shape(None); ui.close(); }
@@ -2260,19 +2284,21 @@ impl App {
                         });
                     });
                     // The shape of the crop frame: pick one and the frame closes in to it and keeps it while dragged.
-                    ui.add_enabled_ui(crop_info.is_some() && self.crop_mode.is_some(), |ui| {
-                        big_menu(ui, FRAME, "Ratio", "Hold the crop to a shape of frame: 1:1, 4:3, 16:9 ...", |ui| {
-                            let native = crop_info.as_ref().and_then(|(id, _)| self.picture_ratio(id));
-                            let cur = self.crop_aspect;
-                            let pick = |ui: &mut egui::Ui, app: &mut Self, label: &str, r: Option<f32>| {
-                                let on = match (cur, r) { (None, None) => true, (Some(a), Some(b)) => (a - b).abs() < 0.001, _ => false };
-                                if ui.selectable_label(on, label).clicked() { app.set_crop_aspect(r); ui.close(); }
-                            };
-                            pick(ui, self, "Free", None);
-                            if let Some(n) = native { pick(ui, self, "Original", Some(n)); }
-                            for (label, w, h) in [("1:1  square", 1.0, 1.0), ("4:3", 4.0, 3.0), ("3:2", 3.0, 2.0), ("16:9", 16.0, 9.0), ("21:9", 21.0, 9.0), ("3:4  portrait", 3.0, 4.0), ("2:3  portrait", 2.0, 3.0), ("9:16  portrait", 9.0, 16.0)] {
-                                pick(ui, self, label, Some(w / h));
-                            }
+                    ui.add_enabled_ui(self.crop_mode.is_some(), |ui| {
+                        pr(ui, "Ratio", |ui, _| {
+                            big_menu(ui, FRAME, "Ratio", "Hold the crop to a shape of frame: 1:1, 4:3, 16:9 ...", |ui| {
+                                let native = crop_info.as_ref().and_then(|(id, _)| self.picture_ratio(id));
+                                let cur = self.crop_aspect;
+                                let pick = |ui: &mut egui::Ui, app: &mut Self, label: &str, r: Option<f32>| {
+                                    let on = match (cur, r) { (None, None) => true, (Some(a), Some(b)) => (a - b).abs() < 0.001, _ => false };
+                                    if ui.selectable_label(on, label).clicked() { app.set_crop_aspect(r); ui.close(); }
+                                };
+                                pick(ui, self, "Free", None);
+                                if let Some(n) = native { pick(ui, self, "Original", Some(n)); }
+                                for (label, w, h) in [("1:1  square", 1.0, 1.0), ("4:3", 4.0, 3.0), ("3:2", 3.0, 2.0), ("16:9", 16.0, 9.0), ("21:9", 21.0, 9.0), ("3:4  portrait", 3.0, 4.0), ("2:3  portrait", 2.0, 3.0), ("9:16  portrait", 9.0, 16.0)] {
+                                    pick(ui, self, label, Some(w / h));
+                                }
+                            });
                         });
                     });
                 });
@@ -2283,19 +2309,21 @@ impl App {
     /// Outline editing for a single hotspot. Shared by the selection groups on Home.
     fn hotspot_group(&mut self, ui: &mut egui::Ui, obj: &Object, enabled: bool, n_sel: usize) {
         group(ui, "Hotspot", |ui| {
-            ui.horizontal(|ui| {
+            hwrap(ui, |ui| {
                 // Only a single hotspot has an outline to edit: (its id, whether it has an outline that is not just its box).
                 let spot = (enabled && n_sel == 1 && matches!(obj.kind, Kind::Hotspot)).then(|| (obj.id.clone(), obj.hit_area.as_ref().is_some_and(|a| !outline::is_box(a)), obj.hit_area.is_some()));
                 ui.add_enabled_ui(spot.is_some(), |ui| {
                     let on = spot.as_ref().is_some_and(|(id, _, _)| self.outline_mode.as_deref() == Some(id.as_str()));
-                    if big_toggle(ui, NODES, "Outline", "Edit the hotspot's outline: drag a corner, click an edge to add one, Delete removes the chosen corner (Esc or Enter to finish)", on).clicked() {
-                        if on { self.end_outline(); } else { self.begin_outline(); }
-                    }
+                    pr(ui, "Outline", |ui, _| {
+                        if big_toggle(ui, NODES, "Outline", "Edit the hotspot's outline: drag a corner, click an edge to add one, Delete removes the chosen corner (Esc or Enter to finish)", on).clicked() {
+                            if on { self.end_outline(); } else { self.begin_outline(); }
+                        }
+                    });
                     ui.add_enabled_ui(spot.as_ref().is_some_and(|s| s.1), |ui| {
-                        if big_button(ui, FRAME, "Fit", "Shrink the hotspot's frame to its outline").clicked() { self.fit_outline(); }
+                        pr(ui, "Frame", |ui, _| { if big_button(ui, FRAME, "Fit", "Shrink the hotspot's frame to its outline").clicked() { self.fit_outline(); } });
                     });
                     ui.add_enabled_ui(spot.as_ref().is_some_and(|s| s.2), |ui| {
-                        if big_button(ui, ARROW_COUNTER, "Box", "Remove the outline: the whole frame is clickable again").clicked() { self.reset_outline(); }
+                        pr(ui, "Shape", |ui, _| { if big_button(ui, ARROW_COUNTER, "Box", "Remove the outline: the whole frame is clickable again").clicked() { self.reset_outline(); } });
                     });
                 });
             });
