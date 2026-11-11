@@ -441,7 +441,15 @@ fn icon_button(ui: &mut egui::Ui, icon: char, on: bool, tip: &str) -> egui::Resp
     // Small and tight: a 22px square holding a 15px glyph, with no padding of its own.
     let resp = ui.scope(|ui| {
         ui.spacing_mut().button_padding = egui::vec2(1.0, 1.0);
-        ui.add(egui::Button::new(icon_text(icon, 15.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+        if icon == THUMBTACK {
+            // The pin is painted by hand, 1px left of the box centre, so its drawing looks centred.
+            let r = ui.add(egui::Button::new("").selected(on).min_size(egui::vec2(22.0, 22.0)));
+            let col = ui.style().interact_selectable(&r, on).fg_stroke.color;
+            ui.painter().text(r.rect.center() + egui::vec2(-1.0, 0.0), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(15.0, icons()), col);
+            r
+        } else {
+            ui.add(egui::Button::new(icon_text(icon, 15.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+        }
     }).inner;
     // An icon has no words of its own: the tip names it for screen readers and for tests.
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
