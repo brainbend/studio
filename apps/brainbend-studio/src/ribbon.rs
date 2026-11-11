@@ -2194,8 +2194,10 @@ impl App {
         if obj.has_button_states() {
             group(ui, "Button Styles", |ui| {
                 let corners = &mut self.button_corners;
-                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colors in four looks, with square, rounded or pill corners", |ui| {
-                    if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
+                pr(ui, "Look", |ui, _| {
+                    big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colors in four looks, with square, rounded or pill corners", |ui| {
+                        if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
+                    });
                 });
             });
         }
