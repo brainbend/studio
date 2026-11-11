@@ -2406,21 +2406,33 @@ impl App {
         }
         let Some(before) = self.selected_object().cloned() else { return };
         if before.id == src || ctx.input(|i| i.pointer.any_down()) { return; }
-        let mut after = before.clone();
-        after.style = proto.style.clone();
-        after.fill = proto.fill;
-        after.gradient = proto.gradient.clone();
-        after.stroke = proto.stroke;
-        after.dash = proto.dash;
-        after.shadow = proto.shadow;
-        after.glow = proto.glow;
-        after.soft_edge = proto.soft_edge;
-        after.reflection = proto.reflection;
-        after.radius = proto.radius;
-        after.line_spacing = proto.line_spacing;
+        let after = styled_like(&before, &proto);
         self.apply_object_edit(ctx, &before, &after);
+        self.clear_word_styles();
         self.painter = None;
         self.status = "Format Painter: applied.".into();
+    }
+
+    /// After a style is given to the selected objects, their words lose any bold, italic, size or color of their own (a link stays),
+    /// so the style shows all the way through.
+    fn clear_word_styles(&mut self) {
+        let targets = self.format_targets();
+        let Some(p) = self.project.as_mut() else { return };
+        for (li, oi) in targets {
+            if let Some(o) = p.slides[self.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+                if o.rich.is_some() { o.format_range(0, usize::MAX, &brainbend_doc::richtext::Attr::Clear); }
+            }
+        }
+    }
+
+    /// Paste Style: the style copied with Copy Style goes onto whatever is selected (and can be pasted again and again).
+    pub(crate) fn paste_style(&mut self, ctx: &egui::Context) {
+        let Some(proto) = self.style_clip.clone() else { return };
+        let Some(before) = self.selected_object().cloned() else { return };
+        let after = styled_like(&before, &proto);
+        self.apply_object_edit(ctx, &before, &after);
+        self.clear_word_styles();
+        self.status = "Paste Style: applied.".into();
     }
 
     /// The Symbol button of the Text group: a grid of common symbols; clicking one puts it into the selected text.
@@ -3341,4 +3353,31 @@ fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
             });
         }
     }); });
+}
+
+/// The object with the look of `proto` (text style, fill, line, effects, corners, line spacing) and everything else its own.
+fn styled_like(before: &Object, proto: &Object) -> Object {
+    let mut after = before.clone();
+    // Bold, italic and the like may sit on the words rather than on the object: take what the first word has.
+    let mut style = proto.style.clone();
+    if let Some((_, f)) = proto.char_fmts().first() {
+        style.bold = f.bold.unwrap_or(style.bold);
+        style.italic = f.italic.unwrap_or(style.italic);
+        style.underline = f.underline.unwrap_or(style.underline);
+        if let Some(c) = f.color { style.color = c; }
+        if let Some(z) = f.size { style.size = z; }
+        if let Some(n) = &f.font_family { style.font_family = n.clone(); }
+    }
+    after.style = style;
+    after.fill = proto.fill;
+    after.gradient = proto.gradient.clone();
+    after.stroke = proto.stroke;
+    after.dash = proto.dash;
+    after.shadow = proto.shadow;
+    after.glow = proto.glow;
+    after.soft_edge = proto.soft_edge;
+    after.reflection = proto.reflection;
+    after.radius = proto.radius;
+    after.line_spacing = proto.line_spacing;
+    after
 }

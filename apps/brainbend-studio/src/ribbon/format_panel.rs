@@ -80,6 +80,14 @@ pub(crate) fn section(ui: &mut egui::Ui, id: &str, title: &str, default_open: bo
     }
 }
 
+/// Copy Style and Paste Style for the heading row (in a right-to-left layout, after the expand buttons). Returns (copy, paste).
+pub(crate) fn style_buttons(ui: &mut egui::Ui, can_paste: bool) -> (bool, bool) {
+    // Right-to-left: Paste is added first, so Copy ends up on its left.
+    let paste = ui.add_enabled_ui(can_paste, |ui| icon_button(ui, '\u{e196}', false, "Paste Style")).inner.clicked();
+    let copy = icon_button(ui, PAINTER, false, "Copy Style").clicked();
+    (copy, paste)
+}
+
 /// A small square button holding a solid triangle, pointing down or up.
 fn triangle_button(ui: &mut egui::Ui, down: bool, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
