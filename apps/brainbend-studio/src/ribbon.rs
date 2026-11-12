@@ -61,7 +61,6 @@ pub const EXPORT: char = '\u{eaf0}';
 pub const EYE_OFF: char = '\u{e224}';
 pub const TIMER: char = '\u{e492}';
 pub const CHECK: char = '\u{e186}';
-pub const X: char = '\u{e4f6}';
 pub const QUESTION: char = '\u{e3e8}';
 pub const FRONT: char = '\u{e462}';
 pub const BACK: char = '\u{e468}';
@@ -286,17 +285,6 @@ fn shade(c: egui::Color32, t: f32) -> egui::Color32 {
     egui::Color32::from_rgb((c.r() as f32 * k).round() as u8, (c.g() as f32 * k).round() as u8, (c.b() as f32 * k).round() as u8)
 }
 
-/// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
-fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
-    let lines = label_lines(ui, label);
-    let font = egui::FontId::proportional(11.5);
-    let widest = lines.iter().enumerate().map(|(i, l)| {
-        let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
-        if caret && i + 1 == lines.len() { w + 14.0 } else { w }
-    }).fold(0.0f32, f32::max);
-    (widest + 6.0).max(36.0)
-}
-
 /// Large flat button (icon above a short label).
 fn big_button(ui: &mut egui::Ui, icon: char, label: &str, tip: &str) -> egui::Response {
     big_widget(ui, icon, label, false, false).on_hover_text(tip)
@@ -443,7 +431,7 @@ fn icon_button(ui: &mut egui::Ui, icon: char, on: bool, tip: &str) -> egui::Resp
     let resp = ui.scope(|ui| {
         ui.spacing_mut().button_padding = egui::vec2(1.0, 1.0);
         if icon == THUMBTACK {
-            // The pin is painted by hand, 1px left of the box centre, so its drawing looks centred.
+            // The pin is painted by hand, 1px left of the box center, so its drawing looks centered.
             let r = ui.add(egui::Button::new("").selected(on).min_size(egui::vec2(22.0, 22.0)));
             let col = ui.style().interact_selectable(&r, on).fg_stroke.color;
             ui.painter().text(r.rect.center() + egui::vec2(-1.0, 0.0), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(15.0, icons()), col);
@@ -604,57 +592,6 @@ fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
     let line = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
     ui.painter().line_segment([r.center_top() + egui::vec2(0.0, 6.0), r.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, line));
     ui.add_space(1.0);
-}
-
-/// Extra width an outlined button gets, so its label does not touch the border.
-
-/// For a main-action button drawn as an outline: its text and icon take the main-action color, and the button's
-/// own hover fill is left off (the outline shape paints the states).
-fn outlined_look(ui: &mut egui::Ui) {
-    let p = primary(ui);
-    let v = ui.visuals_mut();
-    v.override_text_color = Some(p);
-    for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
-}
-
-/// The outline and inside of a main-action button: a border in the main-action color, with an opaque tint inside
-/// and a darker border when the pointer is over it (`hot`), and more of both while pressed (`down`).
-fn outline_shape(ui: &egui::Ui, rect: egui::Rect, hot: bool, down: bool) -> egui::Shape {
-    let p = primary(ui);
-    let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-    let mix = |t: f32| { let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8; egui::Color32::from_rgb(m(card.r(), p.r()), m(card.g(), p.g()), m(card.b(), p.b())) };
-    let (fill, line) = if down { (mix(0.30), shade(p, 0.24)) } else if hot { (mix(0.15), shade(p, 0.12)) } else { (egui::Color32::TRANSPARENT, p) };
-    egui::Shape::Vec(vec![
-        egui::Shape::rect_filled(rect, RIBBON_RADIUS, fill),
-        egui::Shape::rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(2.0, line), egui::StrokeKind::Inside),
-    ])
-}
-
-/// How wide the leading "way out" button of a mode is, divider included.
-fn lead_width(ui: &egui::Ui, label: &str, caption: &str) -> f32 { big_width(ui, label, false).max(caption_width(ui, caption)) + 12.0 }
-
-/// How wide a group's small caption is.
-fn caption_width(ui: &egui::Ui, caption: &str) -> f32 {
-    ui.fonts_mut(|f| f.layout_no_wrap(caption.to_string(), egui::FontId::proportional(10.5), egui::Color32::WHITE).size().x)
-}
-
-/// The button that leaves a mode, at the very start of the ribbon in the main-action color (so it is never
-/// scrolled away or missed), with a divider after it. True when clicked.
-fn lead_button(ui: &mut egui::Ui, at: egui::Rect, icon: char, label: &str, caption: &str, tip: &str) -> bool {
-    let mut clicked = false;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
-        let cw = caption_width(ui, caption).max(big_width(ui, label, false));
-        group(ui, caption, |ui| {
-            // The group is exactly as wide as its caption or button, whichever is wider, with the button centred over it.
-            ui.allocate_ui_with_layout(egui::vec2(cw, BIG_H), egui::Layout::top_down(egui::Align::Center), |ui| {
-            let backing = ui.painter().add(egui::Shape::Noop);
-            let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, icon, label, false, false, cw).on_hover_text(tip) }).inner;
-            ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), resp.is_pointer_button_down_on()));
-            clicked = resp.clicked();
-            });
-        });
-    });
-    clicked
 }
 
 pub(super) fn color_menu(ui: &mut egui::Ui, icon: char, tip: &str, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
@@ -1153,7 +1090,6 @@ impl App {
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
-        if self.pano.edit.is_some() { self.pano_chrome(root, ctx); return; }
         let bg = root.visuals().panel_fill;
         let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
         // The ribbon is for adding things and for the project as a whole. It stays closed until a tab is clicked (or rested
@@ -1165,8 +1101,9 @@ impl App {
         let strip = egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                let master = self.in_master_view();
-                // The Layout Builder offers File, Project and Objects: layouts are made from the same objects as slides.
+                let master = self.in_master_view() || self.pano.edit.is_some();
+                // The Layout Builder and the 360° editing mode offer File, Project and Objects: what goes on a layout or a picture
+                // is added from the same tab.
                 let order: Vec<usize> = if master { vec![0, PROJECT_TAB, OBJECTS_TAB] } else { (0..TABS.len()).collect() };
                 if !order.contains(&self.ribbon_tab) { self.ribbon_tab = OBJECTS_TAB; }
                 for i in order {
@@ -1200,7 +1137,7 @@ impl App {
                     }
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
                     if resp.clicked() {
-                        if i == 0 { self.leave_master_view(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { clicked_tab = Some(i); }
+                        if i == 0 { self.leave_master_view(); self.close_pano_edit(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { clicked_tab = Some(i); }
                     } else if self.ribbon_hover && i != 0 && resp.hovered() && !ui.input(|i| i.pointer.any_down()) {
                         hovered_tab = Some(i);
                     }
@@ -1289,6 +1226,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 3.0;
                         ui.add_enabled_ui(!self.try_mode, |ui| {
                             match self.ribbon_tab {
+                                OBJECTS_TAB if self.pano.edit.is_some() => self.pano_insert_group(ui),
                                 OBJECTS_TAB => self.insert_tab(ui, normal),
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
                                 PROJECT_TAB => { self.design_tab(ui, ctx); self.review_tab(ui, ctx); self.course_group(ui, ctx); }
@@ -1331,115 +1269,18 @@ impl App {
         }
     }
 
-    /// The ribbon of the 360° editing mode: one tab with everything for markers and hotspots.
-    fn pano_chrome(&mut self, root: &mut egui::Ui, _ctx: &egui::Context) {
-        let bg = root.visuals().panel_fill;
-        let mut leave = false;
-        egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                if ui.add(egui::Label::new(egui::RichText::new("FILE").size(14.0)).sense(egui::Sense::click())).clicked() { leave = true; self.file_view = true; self.file_page = backstage::FilePage::Info; }
-                let resp = ui.add(egui::Label::new(egui::RichText::new("360° IMAGE").size(14.0).strong()).sense(egui::Sense::click()));
-                let r = resp.rect;
-                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, primary(ui)));
-            });
-            ui.add_space(2.0);
-        });
-        egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 2, bottom: 6 })).show_separator_line(false).show(root, |ui| {
-            let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-            egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
-                flat(ui);
-                // Close leads the ribbon and stays put; the groups scroll beside it.
-                let full = ui.available_rect_before_wrap();
-                let h = BIG_H + CAP_H + 8.0;
-                let lead_w = lead_width(ui, "Close", "360° Image");
-                if lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "360° Image", "Go back to the slide. Your changes are kept") { self.pano_cmd(panos::Cmd::Close); }
-                let rest = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w).max(80.0), h));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
-                    egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                        ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
-                    });
-                });
-                ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
-            });
-        });
-        self.pano_tabs(root);
-        if leave { self.close_pano_edit(); }
-    }
-
-    fn pano_ribbon(&mut self, ui: &mut egui::Ui) {
+    /// What the Objects tab offers while a 360° image is being edited: the things that go on the picture. Everything about
+    /// the chosen one is in the Properties panel.
+    fn pano_insert_group(&mut self, ui: &mut egui::Ui) {
         use panos::Cmd;
-        let Some(p) = self.edited_pano() else { return };
-        let sel = self.pano.edit.as_ref().and_then(|e| e.selected).and_then(|i| p.pins.get(i).cloned());
         let drawing = self.pano.edit.as_ref().is_some_and(|e| matches!(e.tool, panos::Tool::Draw(_)));
         let mut cmd: Option<Cmd> = None;
-        let mut set = p.clone();
-        group(ui, "Insert", |ui| {
+        group(ui, "360° Image", |ui| {
             ui.horizontal(|ui| {
                 if big_button(ui, PIN, "Marker", "A round button on the picture").clicked() { cmd = Some(Cmd::AddMarker); }
                 if big_toggle(ui, NODES, "Hotspot", "Draw a shaded area on the picture, corner by corner", drawing).clicked() { cmd = Some(Cmd::StartHotspot); }
             });
         });
-        group(ui, "Selected", |ui| {
-            ui.horizontal(|ui| {
-                let is_marker = sel.as_ref().is_some_and(|s| s.kind == panos::PinKind::Marker);
-                ui.add_enabled_ui(is_marker, |ui| {
-                    big_menu(ui, SHAPES, "Icon", "The picture on the marker", |ui| {
-                        ui.set_min_width(250.0);
-                        egui::Grid::new("pano-icons").spacing([4.0, 4.0]).show(ui, |ui| {
-                            for (k, name) in panos::MARKER_ICONS.iter().enumerate() {
-                                let Some(icon) = crate::icons::all().iter().find(|i| i.names.contains(name)) else { continue };
-                                let on = sel.as_ref().is_some_and(|s| s.icon == *name);
-                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
-                                if on || resp.hovered() { ui.painter().rect_filled(rect, 4.0, ui.visuals().selection.bg_fill.gamma_multiply(if on { 0.5 } else { 0.25 })); }
-                                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon.ch.to_string(), egui::FontId::new(22.0, icons()), text_col(ui));
-                                if resp.on_hover_text(icon.title()).clicked() { cmd = Some(Cmd::SetIcon(Some(icon))); }
-                                if (k + 1) % 6 == 0 { ui.end_row(); }
-                            }
-                        });
-                        ui.separator();
-                        if ui.button("No icon").clicked() { cmd = Some(Cmd::SetIcon(None)); }
-                    });
-                });
-                ui.add_enabled_ui(sel.is_some(), |ui| {
-                    ui.vertical(|ui| {
-                        rows(ui);
-                        let mut c = sel.as_ref().map(|s| s.color());
-                        if color_menu(ui, BUCKET, "The color of the selected marker or hotspot", &mut c, None) { cmd = Some(Cmd::SetColor(c)); }
-                        ui.label(egui::RichText::new("Color").size(11.5));
-                    });
-                    if big_button(ui, BOLT, "Trigger", "Run something when the learner presses the selected marker or hotspot").clicked() { cmd = Some(Cmd::AddTrigger); }
-                    if big_button(ui, ARROW_COUNTER, "Switch\nType", "Turn a marker into a hotspot, or the other way round").clicked() { cmd = Some(Cmd::SwitchType); }
-                    if big_button(ui, TRASH, "Delete", "Remove the selected marker or hotspot").clicked() { cmd = Some(Cmd::Delete); }
-                });
-            });
-        });
-        group(ui, "Cards", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, if set.dark { MOON } else { SUN }, "Theme", "Dark or light cards", |ui| {
-                    if ui.selectable_label(!set.dark, "Light").clicked() { set.dark = false; }
-                    if ui.selectable_label(set.dark, "Dark").clicked() { set.dark = true; }
-                });
-                big_menu(ui, SQUARE_BORDER, "Corners", "Square or rounded cards", |ui| {
-                    if ui.selectable_label(!set.rounded, "Square").clicked() { set.rounded = false; }
-                    if ui.selectable_label(set.rounded, "Rounded").clicked() { set.rounded = true; }
-                    ui.separator();
-                    let mut hide = !set.connector;
-                    if ui.checkbox(&mut hide, "Hide connector").clicked() { set.connector = !hide; }
-                });
-            });
-        });
-        group(ui, "Effects", |ui| {
-            ui.vertical(|ui| {
-                rows(ui);
-                ui.checkbox(&mut set.pulse, "Pulse items if unvisited");
-                ui.checkbox(&mut set.reveal, "Reveal hotspots").on_hover_text("Hotspots are shaded all the time. Off: they show only under the pointer, and a guided tour gives a hint");
-            });
-        });
-        group(ui, "View", |ui| {
-            if big_button(ui, FRAME, "Initial\nView", "The learner starts by looking at what is on the canvas now").clicked() { cmd = Some(Cmd::SetInitialView); }
-        });
-        if set != p { self.pano_set(set); }
         if let Some(c) = cmd { self.pano_cmd(c); }
     }
 

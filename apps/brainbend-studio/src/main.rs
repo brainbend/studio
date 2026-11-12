@@ -10048,31 +10048,44 @@ mod tests {
         assert!(!p.pins[0].icon_path.is_empty());
         assert_eq!(h.state().pano.edit.as_ref().unwrap().selected, Some(0), "the new marker is selected");
         // Switch it into a hotspot and back.
-        h.get_by_label("Switch Type").click();
+        h.get_by_label("Make it a hotspot").click();
         h.run_steps(2);
         let p = pano(&h);
         assert_eq!(p.pins[0].kind, PinKind::Hotspot);
         assert_eq!(p.pins[0].points.len(), 4);
         assert!((p.pins[0].yaw - 90.0).abs() < 1.0, "the hotspot is round where the marker was");
-        h.get_by_label("Switch Type").click();
+        h.get_by_label("Make it a marker").click();
         h.run_steps(2);
         assert_eq!(pano(&h).pins[0].kind, PinKind::Marker);
-        // A trigger on the selected marker is its own event.
-        h.get_by_label("Trigger").click();
+        // A trigger on the selected marker is its own event; its bar is in the panel.
+        h.get_by_label("Triggers").click();
+        h.run_steps(3);
+        h.get_by_label("+ Add trigger").click();
         h.run_steps(2);
         let ev = h.state().project.as_ref().unwrap().slides[0].triggers.last().map(|t| t.event.clone());
         let obj = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[at.1].id.clone();
         assert!(matches!(&ev, Some(Event::PanoPin(o, q)) if *o == obj && *q == pano(&h).pins[0].id), "{ev:?}");
         // Title it, take this view as the initial one, and close.
         h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[at.1].kind = Kind::Pano({ let mut p = pano(&h); p.pins[0].title = "Fume hood".into(); p });
-        h.get_by_label("Initial View").click();
+        h.get_by_label("View").click();
+        h.run_steps(3);
+        h.get_by_label("Set initial view").click();
         h.run_steps(2);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("pano-edit.png")).unwrap();
         }
-        h.get_by_label("Close").click();
+        // The editing mode is a tab: another tab leaves it, and its own tab stays and opens it again.
+        h.get_by_label("STORY VIEW").click();
         h.run_steps(3);
-        assert!(h.state().pano.edit.is_none(), "the mode closes");
+        assert!(h.state().pano.edit.is_none(), "another tab leaves the mode");
+        assert!(h.state().pano.tab.is_some() && h.query_by_label("360° image").is_some(), "its tab stays");
+        h.get_by_label("360° image").click();
+        h.run_steps(3);
+        assert!(h.state().pano.edit.is_some(), "its tab opens it again");
+        assert!(h.query_by_label("Project").is_some() && h.query_by_label("Objects").is_some() && h.query_by_label("Slides").is_none() && h.query_by_label("Publish").is_none(), "the ribbon offers File, Project and Objects");
+        h.get_by_label("STORY VIEW").click();
+        h.run_steps(3);
+        assert!(h.state().pano.edit.is_none());
         let p = pano(&h);
         assert_eq!((p.yaw, p.pitch, p.fov), (90.0, 10.0, 70.0), "initial view set from the canvas");
         assert_eq!(p.pins[0].title, "Fume hood");
@@ -13118,6 +13131,29 @@ mod tests {
         h.state_mut().layout_tab = false;
         h.run_steps(3);
         assert!(h.query_by_label("LAYOUT BUILDER").is_none(), "its × closes the tab");
+    }
+
+    /// Opening the Layout Builder from the 360° editing mode keeps the 360° image's tab, beside the Layout Builder's.
+    #[test]
+    fn the_360_tab_stays_visible_when_the_layout_builder_is_opened() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().assets.insert("pano".into(), Asset { name: "lab.png".into(), mime: "image/png".into(), bytes: test_panorama(), file: None });
+        a.add_pano("pano".into(), "lab.png", 512.0, 256.0);
+        let at = a.selected.unwrap();
+        a.open_pano_dialog(at);
+        let name = a.pano_tab_name().expect("named");
+        let mut h = harness(a);
+        h.run_steps(3);
+        assert!(h.query_by_label(&name).is_some());
+        h.state_mut().enter_master_view();
+        h.run_steps(4);
+        assert!(h.state().in_master_view() && h.state().pano.edit.is_none());
+        assert!(h.query_by_label("LAYOUT BUILDER").is_some() && h.query_by_label(&name).is_some(), "both tabs show");
+        h.get_by_label(&name).click();
+        h.run_steps(4);
+        assert!(!h.state().in_master_view() && h.state().pano.edit.is_some(), "its tab opens the 360° image again");
     }
 
     /// The Brand group on the Theme tab has the theme's fonts as two stacked drop-downs: headings on top, body text below.

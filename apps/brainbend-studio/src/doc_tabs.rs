@@ -104,37 +104,17 @@ impl App {
         }
     }
 
-    /// The tab strip under the ribbon: STORY VIEW, then one tab per open slide.
-    /// The strip in the 360° editing mode: the slide's tab, then the 360° image's own, which closes the mode.
-    pub(super) fn pano_tabs(&mut self, root: &mut egui::Ui) {
-        let Some(slide) = self.pano.edit.as_ref().map(|e| e.slide) else { return };
-        let label = self.project.as_ref().and_then(|p| p.slides.get(slide)).map(|s| format!("{} {}", self.slide_number(slide), s.name)).unwrap_or_default();
-        let name = self.pano_object_name();
-        let dark = root.visuals().dark_mode;
-        let band = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-        let line = root.visuals().selection.bg_fill;
-        let mut leave = false;
-        egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            let row = ui.horizontal(|ui| {
-                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", false, false, 138.0);
-                if story.clicked() { leave = true; self.scene_view = true; }
-                let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
-                let (r, _) = tab_chip(ui, None, &label, false, false, (tw + 58.0).clamp(96.0, 190.0));
-                if r.clicked() { leave = true; }
-                let (_, closed) = tab_chip(ui, None, &name, true, true, 150.0);
-                if closed { leave = true; }
-            });
-            let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
-            ui.painter().rect_filled(full, 0.0, line);
-        });
-        if leave { self.close_pano_edit(); }
-    }
-
+    /// The tab strip under the ribbon: STORY VIEW, one tab per open slide, then the tabs of the Layout Builder and of a 360° image.
     pub(super) fn doc_tabs(&mut self, root: &mut egui::Ui) {
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
         let master = self.in_master_view();
+        let pano_open = self.pano.edit.is_some();
+        // In the Layout Builder or the 360° editing mode, the tab of that mode is the active one and no slide's is.
+        let in_mode = master || pano_open;
+        let pano_name = self.pano_tab_name();
+        let mut close_pano = false;
+        let mut open_pano = false;
         let mut close_builder = false;
         let mut open_builder = false;
         let mut go_story = false;
@@ -164,17 +144,17 @@ impl App {
         egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
-                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", self.scene_view && !master, false, 138.0);
+                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", self.scene_view && !in_mode, false, 138.0);
                 if story.clicked() { go_story = true; }
                 for (k, (id, label)) in labels.iter().enumerate() {
-                    let active = !master && !self.scene_view && self.active_tab == Some(k);
+                    let active = !in_mode && !self.scene_view && self.active_tab == Some(k);
                     // As wide as its name needs, so the strip is not mostly gaps.
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
                     let (r, closed) = tab_chip(ui, None, label, active, true, (tw + 58.0).clamp(96.0, 190.0));
                     // Inside the Layout Builder the slide tabs are named too, since nothing else on screen repeats them.
-                    if master { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
+                    if in_mode { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
                     if closed || r.middle_clicked() { close = Some(k); } else if r.clicked() { go_slide = Some(id.clone()); }
-                    if !master { r.context_menu(|ui| {
+                    if !in_mode { r.context_menu(|ui| {
                         if ui.button("Close").clicked() { close = Some(k); ui.close(); }
                         if ui.add_enabled(labels.len() > 1, egui::Button::new("Close other tabs")).clicked() { close_others = Some(k); ui.close(); }
                         if ui.button("Close all tabs").clicked() { close_all = true; ui.close(); }
@@ -187,10 +167,21 @@ impl App {
                     if closed { close_builder = true; }
                     else if r.clicked() && !master { open_builder = true; }
                 }
+                // A 360° image's tab works the same way: it stays until its × is pressed and opens the editing mode when clicked.
+                if let Some(name) = &pano_name {
+                    let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
+                    let (r, closed) = tab_chip(ui, Some(ribbon::PANORAMA), name, pano_open, true, (tw + 82.0).clamp(130.0, 230.0));
+                    if closed { close_pano = true; }
+                    else if r.clicked() && !pano_open { open_pano = true; }
+                }
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
         });
+        // Leaving the 360° editing mode, by any other tab or by its own ×, ends it first.
+        if pano_open && (go_story || go_slide.is_some() || close_pano || open_builder || close_builder || close.is_some() || close_others.is_some() || close_all) { self.close_pano_edit(); }
+        if close_pano { self.pano.tab = None; }
+        else if open_pano { self.reopen_pano_tab(); return; }
         if master {
             // Leaving writes the layouts back first, so the slide indexes below are the real ones.
             if close_builder { self.layout_tab = false; self.leave_master_view(); }

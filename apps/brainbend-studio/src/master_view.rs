@@ -57,6 +57,7 @@ impl App {
 
     pub(super) fn enter_master_view(&mut self) {
         if self.master_stash.is_some() { return; }
+        self.close_pano_edit();
         let Some(p) = self.project.as_mut() else { return };
         let entry = Snap::of(p);
         let (w, h) = (p.slides[0].width, p.slides[0].height);

@@ -67,8 +67,17 @@ impl Source {
 #[derive(Default)]
 pub struct State {
     pub edit: Option<Edit>,
+    /// The 360° image whose tab is in the tab strip. It stays after another tab is chosen, until its × is pressed.
+    pub tab: Option<Tab>,
     sources: HashMap<String, Option<Arc<Source>>>,
     pub(super) views: HashMap<String, ((i32, i32, i32, usize, usize), egui::TextureHandle)>,
+}
+
+/// The 360° image behind a tab: the slide and the object, by id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tab {
+    pub slide_id: String,
+    pub obj_id: String,
 }
 
 /// What the pointer is doing on the picture.
@@ -105,11 +114,9 @@ pub enum Cmd {
     StartHotspot,
     SetIcon(Option<&'static crate::icons::Icon>),
     SetColor(Option<Rgba>),
-    AddTrigger,
     SwitchType,
     Delete,
     SetInitialView,
-    Close,
 }
 
 /// Names of the icons a marker can wear (all in the bundled icon font).
@@ -277,9 +284,36 @@ impl App {
         let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (Kind::Pano(p), Some(key)) = (&o.kind, o.asset.clone()) else { return };
         let view = (p.yaw, p.pitch, p.fov);
+        let tab = self.project.as_ref().map(|pr| Tab { slide_id: pr.slides[self.slide].id.clone(), obj_id: o.id.clone() });
         self.snapshot();
         self.pano.edit = Some(Edit { target: (li, oi), slide: self.slide, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false });
+        self.pano.tab = tab;
+        self.scene_view = false;
+        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.leave_master_view();
+    }
+
+    /// Open the editing mode again from its tab. The tab goes if the picture is no longer there.
+    pub(super) fn reopen_pano_tab(&mut self) {
+        let Some(t) = self.pano.tab.clone() else { return };
+        // Out of the Layout Builder first, so the real slides are searched and not its stand-ins.
+        self.leave_master_view();
+        let found = self.project.as_ref().and_then(|p| {
+            let si = p.slides.iter().position(|s| s.id == t.slide_id)?;
+            p.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == t.obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, (li, oi))))
+        });
+        let Some((si, at)) = found else { self.pano.tab = None; return };
+        self.slide = si;
+        self.open_pano_dialog(at);
+    }
+
+    /// The name on the 360° image's tab.
+    pub(super) fn pano_tab_name(&self) -> Option<String> {
+        let t = self.pano.tab.as_ref()?;
+        // The Layout Builder swaps the project's slides for stand-ins, so the name is read from the copy kept at entry.
+        let slides: &[_] = match &self.master_stash { Some(st) => st.entry_slides(), None => &self.project.as_ref()?.slides };
+        let s = slides.iter().find(|s| s.id == t.slide_id)?;
+        s.layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == t.obj_id).map(|o| o.name.clone())
     }
 
     /// Close the editing mode; a visit that changed nothing leaves no undo step.
@@ -293,14 +327,6 @@ impl App {
         let (slide, (li, oi)) = { let e = self.pano.edit.as_ref()?; (e.slide, e.target) };
         self.project.as_mut()?.slides.get_mut(slide)?.layers.get_mut(li)?.objects.get_mut(oi)
     }
-
-    /// The name of the 360° image being edited, for its tab.
-    pub(super) fn pano_object_name(&mut self) -> String {
-        self.edited_object().map(|o| o.name.clone()).unwrap_or_default()
-    }
-
-    /// Replace the settings of the 360° image being edited (from the ribbon).
-    pub(super) fn pano_set(&mut self, p: Pano) { self.set_edited_pano(p); }
 
     /// The settings of the 360° image being edited (a copy).
     pub(super) fn edited_pano(&mut self) -> Option<Pano> {
@@ -317,32 +343,41 @@ impl App {
     /// Run a command from the ribbon.
     pub(super) fn pano_cmd(&mut self, cmd: Cmd) {
         let Some(mut p) = self.edited_pano() else { return };
-        let Some((view, selected)) = self.pano.edit.as_ref().map(|e| (e.view, e.selected)) else { return };
+        let Some((view, selected, slide)) = self.pano.edit.as_ref().map(|e| (e.view, e.selected, e.slide)) else { return };
+        if matches!(cmd, Cmd::StartHotspot) {
+            if let Some(e) = self.pano.edit.as_mut() { e.tool = Tool::Draw(vec![]); }
+            self.status = "Click each corner of the hotspot; double-click or press Enter to finish, Esc to cancel.".into();
+            return;
+        }
+        let obj = self.edited_object().map(|o| o.id.clone()).unwrap_or_default();
         let mut select = selected;
+        let changed = self.pano_apply(cmd, &mut p, view, &mut select, &obj, slide);
+        if let Some(e) = self.pano.edit.as_mut() { e.selected = select; }
+        if changed { self.set_edited_pano(p); }
+    }
+
+    /// Apply a command to the settings `p` of the 360° image `obj` on slide `slide`. `view` is where the picture is looking and
+    /// `select` the chosen marker or hotspot. True when `p` changed.
+    pub(super) fn pano_apply(&mut self, cmd: Cmd, p: &mut Pano, view: (f32, f32, f32), select: &mut Option<usize>, obj: &str, slide: usize) -> bool {
         match cmd {
-            Cmd::Close => { self.close_pano_edit(); return; }
+            Cmd::StartHotspot => return false,
             Cmd::AddMarker => {
                 let id = p.new_pin_id();
                 let mut m = PanoPin::marker(id, view.0, view.1);
                 if let Some(plus) = crate::icons::all().iter().find(|i| i.names.contains(&"plus")) { m.icon = "plus".into(); m.icon_path = icon_in_box(plus, 0.5); }
                 p.pins.push(m);
-                select = Some(p.pins.len() - 1);
-            }
-            Cmd::StartHotspot => {
-                if let Some(e) = self.pano.edit.as_mut() { e.tool = Tool::Draw(vec![]); }
-                self.status = "Click each corner of the hotspot; double-click or press Enter to finish, Esc to cancel.".into();
-                return;
+                *select = Some(p.pins.len() - 1);
             }
             Cmd::SetIcon(icon) => {
-                let Some(it) = select.and_then(|i| p.pins.get_mut(i)).filter(|it| it.kind == PinKind::Marker) else { return };
+                let Some(it) = select.and_then(|i| p.pins.get_mut(i)).filter(|it| it.kind == PinKind::Marker) else { return false };
                 match icon {
                     Some(ic) => { it.icon = ic.names[0].to_string(); it.icon_path = icon_in_box(ic, 0.5); }
                     None => { it.icon.clear(); it.icon_path.clear(); }
                 }
             }
-            Cmd::SetColor(c) => { let Some(it) = select.and_then(|i| p.pins.get_mut(i)) else { return }; it.color = c; }
+            Cmd::SetColor(c) => { let Some(it) = select.and_then(|i| p.pins.get_mut(i)) else { return false }; it.color = c; }
             Cmd::SwitchType => {
-                let Some(it) = select.and_then(|i| p.pins.get_mut(i)) else { return };
+                let Some(it) = select.and_then(|i| p.pins.get_mut(i)) else { return false };
                 match it.kind {
                     PinKind::Marker => {
                         // A hotspot the size of the marker, round the marker's place.
@@ -360,32 +395,18 @@ impl App {
                 }
             }
             Cmd::Delete => {
-                let Some(i) = select.filter(|i| *i < p.pins.len()) else { return };
-                let (obj, pin) = (self.edited_object().map(|o| o.id.clone()).unwrap_or_default(), p.pins[i].id.clone());
+                let Some(i) = select.filter(|i| *i < p.pins.len()) else { return false };
+                let pin = p.pins[i].id.clone();
                 p.pins.remove(i);
-                select = None;
+                *select = None;
                 // Triggers that watched it go with it.
-                if let Some(s) = self.project.as_mut().and_then(|pr| pr.slides.get_mut(self.slide)) {
-                    s.triggers.retain(|t| !matches!(&t.event, Event::PanoPin(o, q) if *o == obj && *q == pin));
-                }
-            }
-            Cmd::AddTrigger => {
-                let Some(pin) = select.and_then(|i| p.pins.get(i)).map(|it| it.id.clone()) else { self.status = "Select a marker or hotspot first.".into(); return };
-                let obj = self.edited_object().map(|o| o.id.clone()).unwrap_or_default();
-                let id = self.new_id("trig");
-                let slide = self.slide;
                 if let Some(s) = self.project.as_mut().and_then(|pr| pr.slides.get_mut(slide)) {
-                    let layer = s.layers.get(1).or(s.layers.first()).map(|l| l.id.clone()).unwrap_or_default();
-                    s.triggers.push(Trigger { id, owner: Owner::Object(obj.clone()), event: Event::PanoPin(obj, pin), action: Action::ShowLayer(layer), conditions: vec![] });
+                    s.triggers.retain(|t| !matches!(&t.event, Event::PanoPin(o, q) if o == obj && *q == pin));
                 }
-                if let Some(e) = self.pano.edit.as_mut() { e.changed = true; }
-                self.dirty = true;
-                return;
             }
             Cmd::SetInitialView => { (p.yaw, p.pitch, p.fov) = view; self.status = "The learner will start looking here.".into(); }
         }
-        if let Some(e) = self.pano.edit.as_mut() { e.selected = select; }
-        self.set_edited_pano(p);
+        true
     }
 
     /// The editing mode's panels and canvas. Call after the ribbon; returns true while the mode is open.
@@ -446,27 +467,96 @@ impl App {
             e.changed = true;
         }
 
-        // Right: the triggers of this 360° image.
+        // Right: everything about the chosen marker or hotspot and about the 360° image, in bars like the other Properties.
         let mut trig_changed = false;
+        let mut cmd: Option<Cmd> = None;
         egui::Panel::right("pano-triggers").default_size(326.0).show(root, |ui| {
+            use ribbon::format_panel::{row, section, color_field, expand_buttons};
             ui.add_space(8.0);
-            ui.strong("Triggers");
-            ui.weak("Pressing a marker or a hotspot can run these.");
-            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.strong("360° IMAGE");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| expand_buttons(ui));
+            });
+            ui.add_space(2.0);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 3u8));
+            let sel_pin = select.and_then(|i| pano.pins.get(i)).cloned();
             let mut ctr = self.id_counter;
             let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
             let mut gen = || { ctr += 1; format!("trig-{t0:x}-{ctr}") };
-            if let Some(proj) = self.project.as_mut() {
-                let vars = proj.variables.clone();
-                let slide_list: Vec<(String, String)> = proj.slides.iter().map(|s| (s.id.clone(), s.name.clone())).collect();
-                let new_event = select.and_then(|i| pano.pins.get(i)).map(|it| Event::PanoPin(obj_id.clone(), it.id.clone()));
-                egui::ScrollArea::vertical().id_salt("pano-trig-scroll").show(ui, |ui| {
-                    if let Some(s) = proj.slides.get_mut(e.slide) {
-                        trig_changed = triggers_ui(ui, s, &slide_list, &vars, &Owner::Object(obj_id.clone()), new_event, &mut gen);
+            egui::ScrollArea::vertical().id_salt("pano-panel-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                section(ui, "pano-item", "Selected item", true, |ui| {
+                    let Some(it) = &sel_pin else {
+                        ui.weak("Click a marker or hotspot on the picture, or add one from the Objects tab.");
+                        return;
+                    };
+                    if it.kind == PinKind::Marker {
+                        row(ui, "Icon", |ui, _| {
+                            let glyph = icon_char(&it.icon).unwrap_or(ribbon::CIRCLE);
+                            ui.menu_button(egui::RichText::new(glyph.to_string()).font(egui::FontId::new(16.0, ribbon::icons())), |ui| {
+                                ui.set_min_width(250.0);
+                                egui::Grid::new("pano-icons").spacing([4.0, 4.0]).show(ui, |ui| {
+                                    for (k, name) in MARKER_ICONS.iter().enumerate() {
+                                        let Some(icon) = crate::icons::all().iter().find(|i| i.names.contains(name)) else { continue };
+                                        let on = it.icon == *name;
+                                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
+                                        if on || resp.hovered() { ui.painter().rect_filled(rect, 4.0, ui.visuals().selection.bg_fill.gamma_multiply(if on { 0.5 } else { 0.25 })); }
+                                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon.ch.to_string(), egui::FontId::new(22.0, ribbon::icons()), ui.visuals().text_color());
+                                        if resp.on_hover_text(icon.title()).clicked() { cmd = Some(Cmd::SetIcon(Some(icon))); ui.close(); }
+                                        if (k + 1) % 6 == 0 { ui.end_row(); }
+                                    }
+                                });
+                                ui.separator();
+                                if ui.button("No icon").clicked() { cmd = Some(Cmd::SetIcon(None)); ui.close(); }
+                            });
+                        });
+                    }
+                    row(ui, "Color", |ui, w| {
+                        let mut c = Some(it.color());
+                        if color_field(ui, w, &mut c, None) { cmd = Some(Cmd::SetColor(c)); }
+                    });
+                    row(ui, "Kind", |ui, _| {
+                        let label = if it.kind == PinKind::Marker { "Make it a hotspot" } else { "Make it a marker" };
+                        if ui.button(label).on_hover_text("Turn a marker into a hotspot, or the other way round").clicked() { cmd = Some(Cmd::SwitchType); }
+                    });
+                    if ui.button("Delete").on_hover_text("Remove the selected marker or hotspot").clicked() { cmd = Some(Cmd::Delete); }
+                });
+                section(ui, "pano-cards", "Cards", false, |ui| {
+                    row(ui, "Theme", |ui, _| {
+                        ui.selectable_value(&mut pano.dark, false, "Light");
+                        ui.selectable_value(&mut pano.dark, true, "Dark");
+                    });
+                    row(ui, "Corners", |ui, _| {
+                        ui.selectable_value(&mut pano.rounded, false, "Square");
+                        ui.selectable_value(&mut pano.rounded, true, "Rounded");
+                    });
+                    let mut hide = !pano.connector;
+                    if ui.checkbox(&mut hide, "Hide connector").changed() { pano.connector = !hide; }
+                });
+                section(ui, "pano-effects", "Effects", false, |ui| {
+                    ui.checkbox(&mut pano.pulse, "Pulse items if unvisited");
+                    ui.checkbox(&mut pano.reveal, "Reveal hotspots").on_hover_text("Hotspots are shaded all the time. Off: they show only under the pointer, and a guided tour gives a hint");
+                });
+                section(ui, "pano-view", "View", false, |ui| {
+                    if ui.button("Set initial view").on_hover_text("The learner starts by looking at what is on the canvas now").clicked() { cmd = Some(Cmd::SetInitialView); }
+                });
+                section(ui, "pano-triggers", "Triggers", false, |ui| {
+                    ui.weak("Pressing a marker or a hotspot can run these.");
+                    ui.add_space(4.0);
+                    if let Some(proj) = self.project.as_mut() {
+                        let vars = proj.variables.clone();
+                        let slide_list: Vec<(String, String)> = proj.slides.iter().map(|s| (s.id.clone(), s.name.clone())).collect();
+                        let new_event = select.and_then(|i| pano.pins.get(i)).map(|it| Event::PanoPin(obj_id.clone(), it.id.clone()));
+                        if let Some(s) = proj.slides.get_mut(e.slide) {
+                            trig_changed = triggers_ui(ui, s, &slide_list, &vars, &Owner::Object(obj_id.clone()), new_event, &mut gen);
+                        }
                     }
                 });
-            }
+            });
             self.id_counter = ctr;
+            if let Some(c) = cmd.take() {
+                let (view, slide) = (e.view, e.slide);
+                if self.pano_apply(c, &mut pano, view, &mut select, &obj_id, slide) { e.changed = true; }
+            }
         });
         if trig_changed { e.changed = true; self.dirty = true; }
 
