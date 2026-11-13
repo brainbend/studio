@@ -123,7 +123,6 @@ struct App {
     pan: egui::Vec2,
     fit_scale: f32,
     theme_colors_open: bool,
-    background_open: bool,
     /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
     /// The issue count in the status bar, when it was counted and what it was.
@@ -506,7 +505,7 @@ impl Default for App {
             project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, background_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
             guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
@@ -6051,7 +6050,6 @@ impl App {
         self.focus_order_window(ctx);
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
-        self.background_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
         // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
@@ -6509,6 +6507,7 @@ impl App {
                 let before = proj.slides.clone();
                 let mut changed = false;
                 let mut want_asset: Option<AssetWant> = None;
+                let mut want_bg_picture = false;
                 let number_vars: Vec<(String, String)> = proj.variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
                 let mut delete_layer = None;
                 let mut show_master_set: Option<(String, bool)> = None;
@@ -6536,6 +6535,12 @@ impl App {
                 }
                 });
                 let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
+                // The slide's (or layout's) background, in the Layout Builder too.
+                let picture_name = match &proj.slides[slide_idx].background { Some(Background::Image { asset }) => proj.assets.get(asset).map(|a| a.name.clone()), _ => None };
+                ribbon::format_panel::section(ui, "slide-background", "Background", false, |ui| {
+                    let theme = proj.theme.clone();
+                    changed |= ribbon::background_controls(ui, &mut proj.slides[slide_idx].background, &theme, (slide_w, slide_h), slide_idx > 0, picture_name, &mut want_bg_picture);
+                });
                 match &mut proj.slides[slide_idx].kind {
                     SlideKind::Question(q) => {
                         ribbon::format_panel::section(ui, "question", "Question", true, |ui| {
@@ -6690,6 +6695,13 @@ impl App {
                     self.dirty = true;
                 }
                 if let Some(l) = delete_layer { self.delete_layer(l); }
+                if want_bg_picture {
+                    if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
+                        self.snapshot();
+                        if let Some(sl) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)) { sl.background = Some(Background::Image { asset: key }); }
+                        self.dirty = true;
+                    }
+                }
                 if let Some(w) = want_asset {
                     let key = match w {
                         AssetWant::Image => self.load_image_asset().map(|(k, _, _, _)| k),
@@ -12319,7 +12331,7 @@ mod tests {
             if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, w, hh)); }
             p.slides[0].background = Some(g);
         }
-        h.state_mut().background_open = true;
+        { use egui_kittest::kittest::Queryable; h.get_by_label("Background").click(); }
         h.run_steps(4);
         let line = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[0].background {
             Some(Background::Gradient { geom, .. }) => geom.line.unwrap(),
@@ -12405,7 +12417,7 @@ mod tests {
         h.state_mut().undo();
         assert!(!h.state().project.as_ref().unwrap().slides[0].hide_backdrop);
         // Background: a window with a kind, a live preview and a gradient you build.
-        h.state_mut().background_open = true;
+        h.get_by_label("Background").click();
         h.run_steps(3);
         h.get_by_label("Gradient").click();
         h.run_steps(3);
@@ -12443,8 +12455,6 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("background-color.png")).unwrap();
         }
-        h.state_mut().background_open = false;
-        h.run_steps(2);
     }
 
     #[test]
@@ -13039,10 +13049,10 @@ mod tests {
         for gone in ["Home", "Theme", "Review", "Animations", "Layout Builder"] { assert!(h.query_by_label(gone).is_none(), "{gone} is not a tab"); }
         h.state_mut().ribbon_tab = ribbon::PROJECT_TAB;
         h.run_steps(3);
-        for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Background", "Spelling", "Focus Order", "Variables"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Project"); }
+        for name in ["Headings", "Body", "Layout Builder", "Layout", "Slide Size", "Spelling", "Focus Order", "Variables"] { assert!(h.query_all_by_label(name).next().is_some(), "{name} is on Project"); }
         for name in ["Colors", "Player", "Accessibility", "Pass mark"] { assert!(h.query_all_by_label_contains(name).next().is_some(), "{name} is on Project"); }
-        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Background", "Colors", "Headings"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
-        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Background, Colors, then the font drop-downs): {gx:?}");
+        let gx: Vec<f64> = ["Layout Builder", "Layout", "Slide Size", "Colors", "Headings"].iter().map(|n| x(&h, n).unwrap_or_else(|| panic!("{n}"))).collect();
+        assert!(gx.windows(2).all(|w| w[0] < w[1]), "Master (Layout Builder, Layout, Slide Size) comes before Brand (Colors, then the font drop-downs): {gx:?}");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tab-project.png")).unwrap(); }
         // Variables and Pass mark moved here from the slides.
         h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;

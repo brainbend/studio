@@ -1312,85 +1312,15 @@ impl App {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-project-colors"))).unwrap_or(false) { self.theme_colors_open = true; }
     }
 
-    /// The background of the current slide (or layout): none, a color, a gradient you build, or a picture. A window rather
-    /// than a menu, because a picker opened inside a menu closes the menu.
-    pub(super) fn background_window(&mut self, ctx: &egui::Context) {
-        if !self.background_open { return; }
-        let cur = self.slide;
-        let Some(key) = self.project.as_ref().filter(|p| cur < p.slides.len()).map(|p| match &p.slides[cur].background { Some(Background::Image { asset }) => asset.clone(), _ => String::new() }) else { self.background_open = false; return };
-        let Some(proj) = self.project.as_mut() else { return };
-        let picture_name = proj.assets.get(&key).map(|a| a.name.clone());
-        let before = Snap::of(proj);
-        let theme = proj.theme.clone();
-        let inherits = cur > 0;
-        let mut open = true;
-        let mut changed = false;
-        let mut want_picture = false;
-        let slide_size = (proj.slides[cur].width, proj.slides[cur].height);
-        let bg = &mut proj.slides[cur].background;
-        crate::tool_window_at(ctx, "background", "Background", [352.0, 420.0], true, &mut open, |ui| {
-            // The picker takes the width the window has, so there is no empty strip beside it.
-            let w = ui.available_width().clamp(240.0, 720.0);
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
-            // What kind of background. A slide with none uses its layout's (or plain white on the master).
-            let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
-            let mut pick = kind;
-            ui.columns(3, |cols| {
-                for (i, label) in ["Color", "Gradient", "Picture"].into_iter().enumerate() {
-                    if cols[i].add_sized([cols[i].available_width(), 24.0], egui::Button::selectable(kind == i + 1, label)).clicked() { pick = i + 1; }
-                }
-            });
-            if pick != kind {
-                match pick {
-                    1 => { *bg = Some(Background::Solid(bg.as_ref().map(|b| b.base_color()).unwrap_or(Rgba(255, 255, 255, 255)))); changed = true; }
-                    2 => {
-                        let mut g = Background::gradient(135.0, theme.color(4), theme.color(5));
-                        if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, slide_size.0, slide_size.1)); }
-                        *bg = Some(g);
-                        changed = true;
-                    }
-                    _ => want_picture = true,
-                }
-            }
-            ui.add_space(8.0);
-            match bg {
-                None => {
-                    // Nothing set yet: offer the color picker on white. The slide changes once a color is chosen.
-                    let mut cur_c = Some(Rgba(255, 255, 255, 255));
-                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *bg = Some(Background::Solid(n)); changed = true; } }
-                }
-                Some(Background::Solid(c)) => {
-                    let mut cur_c = Some(*c);
-                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *c = n; changed = true; } }
-                }
-                Some(Background::Gradient { angle, stops, kind, geom }) => changed |= gradient_editor(ui, angle, stops, kind, geom, slide_size),
-                Some(Background::Image { .. }) => {
-                    ui.label(picture_name.as_deref().unwrap_or("Picture"));
-                    ui.weak("The picture fills the slide.");
-                    ui.add_space(4.0);
-                    if ui.button("Choose another picture…").clicked() { want_picture = true; }
-                }
-            }
-            if inherits && bg.is_some() {
-                ui.add_space(8.0);
-                if ui.button("Use the layout's background").clicked() { *bg = None; changed = true; }
-            }
-        });
-        ctx.data_mut(|d| d.remove_temp::<f32>(egui::Id::new("color-entry-width")));
-        if changed { self.commit_project_edit(ctx, before); }
-        if want_picture {
-            if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
-                let before = Snap::of(self.project.as_ref().unwrap());
-                self.project.as_mut().unwrap().slides[cur].background = Some(Background::Image { asset: key });
-                self.commit_project_edit(ctx, before);
-            }
-        }
-        if !open { self.background_open = false; }
+    /// While the Background bar of the Properties panel is open (it says so each time it is drawn), a gradient's dots show on the slide.
+    fn background_bar_open(ctx: &egui::Context) -> bool {
+        let seen: u64 = ctx.data(|d| d.get_temp(egui::Id::new("background-bar-seen"))).unwrap_or(0);
+        seen != 0 && ctx.cumulative_pass_nr().saturating_sub(seen) <= 2
     }
 
     /// While the Background window shows a gradient, dots on the slide set where it starts, ends and centres: drag them.
     pub(super) fn background_handles(&mut self, ui: &mut egui::Ui, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide_idx: usize) {
-        if !self.background_open || slide_idx != self.slide { return; }
+        if !Self::background_bar_open(ui.ctx()) || slide_idx != self.slide { return; }
         let Some(proj) = self.project.as_ref() else { return };
         let Some(sl) = proj.slides.get(slide_idx) else { return };
         let (w, h) = (sl.width, sl.height);
@@ -2428,7 +2358,6 @@ impl App {
         let mut open_master = false;
         let mut layout_pick: Option<Option<String>> = None;
         let mut open_theme_colors = false;
-        let mut toggle_background = false;
         group(ui, "Master", |ui| {
             ui.horizontal(|ui| {
                 if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
@@ -2453,7 +2382,6 @@ impl App {
         });
         group(ui, "Brand", |ui| {
             ui.horizontal(|ui| {
-                if big_button(ui, BUCKET, "Background", "Color, gradient or picture behind this slide").clicked() { toggle_background = true; }
                 if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
                 // The theme's fonts, stacked: headings on top, body text below.
                 ui.vertical(|ui| {
@@ -2473,7 +2401,6 @@ impl App {
         });
         if changed { self.commit_project_edit(ctx, before); }
         if open_master { self.enter_master_view(); }
-        if toggle_background { self.background_open = !self.background_open; }
         if open_theme_colors { self.theme_colors_open = true; }
         if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
     }
@@ -2799,4 +2726,56 @@ fn styled_like(before: &Object, proto: &Object) -> Object {
     after.radius = proto.radius;
     after.line_spacing = proto.line_spacing;
     after
+}
+
+/// The controls of a slide's (or layout's) background: none, a color, a gradient you build, or a picture. They are the body of the
+/// Background bar in the Properties panel. Returns whether something changed; `want_picture` asks the caller to choose a picture.
+pub(crate) fn background_controls(ui: &mut egui::Ui, bg: &mut Option<Background>, theme: &brainbend_doc::Theme, slide_size: (f32, f32), inherits: bool, picture_name: Option<String>, want_picture: &mut bool) -> bool {
+    let mut changed = false;
+    // The picker takes the width the panel has, so there is no empty strip beside it.
+    let w = ui.available_width().clamp(200.0, 720.0);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
+    // What kind of background. A slide with none uses its layout's (or plain white on the master).
+    let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
+    let mut pick = kind;
+    ui.columns(3, |cols| {
+        for (i, label) in ["Color", "Gradient", "Picture"].into_iter().enumerate() {
+            if cols[i].add_sized([cols[i].available_width(), 24.0], egui::Button::selectable(kind == i + 1, label)).clicked() { pick = i + 1; }
+        }
+    });
+    if pick != kind {
+        match pick {
+            1 => { *bg = Some(Background::Solid(bg.as_ref().map(|b| b.base_color()).unwrap_or(Rgba(255, 255, 255, 255)))); changed = true; }
+            2 => {
+                let mut g = Background::gradient(135.0, theme.color(4), theme.color(5));
+                if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, slide_size.0, slide_size.1)); }
+                *bg = Some(g);
+                changed = true;
+            }
+            _ => *want_picture = true,
+        }
+    }
+    ui.add_space(4.0);
+    match bg {
+        None => {
+            // Nothing set yet: offer the color picker on white. The slide changes once a color is chosen.
+            let mut cur_c = Some(Rgba(255, 255, 255, 255));
+            if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *bg = Some(Background::Solid(n)); changed = true; } }
+        }
+        Some(Background::Solid(c)) => {
+            let mut cur_c = Some(*c);
+            if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *c = n; changed = true; } }
+        }
+        Some(Background::Gradient { angle, stops, kind, geom }) => changed |= gradient_editor(ui, angle, stops, kind, geom, slide_size),
+        Some(Background::Image { .. }) => {
+            ui.label(picture_name.as_deref().unwrap_or("Picture"));
+            ui.weak("The picture fills the slide.");
+            if ui.button("Choose another picture…").clicked() { *want_picture = true; }
+        }
+    }
+    if inherits && bg.is_some() && ui.button("Use the layout's background").clicked() { *bg = None; changed = true; }
+    ui.ctx().data_mut(|d| d.remove_temp::<f32>(egui::Id::new("color-entry-width")));
+    let pass = ui.ctx().cumulative_pass_nr().max(1);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("background-bar-seen"), pass));
+    changed
 }
