@@ -1229,7 +1229,7 @@ impl App {
                                 OBJECTS_TAB if self.pano.edit.is_some() => self.pano_insert_group(ui),
                                 OBJECTS_TAB => self.insert_tab(ui, normal),
                                 SLIDES_TAB => self.slides_tab(ui, ctx),
-                                PROJECT_TAB => { self.design_tab(ui, ctx); self.review_tab(ui, ctx); self.course_group(ui, ctx); }
+                                PROJECT_TAB => { self.design_tab(ui, ctx); self.review_tab(ui, ctx); self.course_group(ui, ctx); self.studio_group(ui); }
                                 HELP_TAB => self.help_tab(ui),
                                 _ => self.design_tab(ui, ctx),
                             }
@@ -1531,6 +1531,54 @@ impl App {
         });
     }
 
+    /// The app's own settings, which follow the person and not the project.
+    fn studio_group(&mut self, ui: &mut egui::Ui) {
+        group(ui, "Studio", |ui| {
+            if big_button(ui, GEAR, "Studio\nSettings", "How Studio looks and behaves for you: windows, panels and what shows").clicked() { self.settings_open = !self.settings_open; }
+        });
+    }
+
+    /// The Studio Settings window: every app-wide setting in one place.
+    pub(super) fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_open { return; }
+        let mut open = true;
+        let mut one = self.one_section;
+        let mut hover = self.ribbon_hover;
+        let mut inside = self.windows_inside;
+        let mut panels = self.panels;
+        crate::tool_window_at(ctx, "studio-settings", "Studio Settings", [360.0, 420.0], false, &mut open, |ui| {
+            ui.label(egui::RichText::new("Windows and panels").strong());
+            ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
+            ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
+            ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.");
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new("What shows").strong());
+            ui.weak("Hide what you do not use. The Properties panel always shows.");
+            ui.add_space(2.0);
+            ui.label("Bottom panel");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut panels.timeline, "Timeline").on_hover_text("When things appear and move");
+                ui.checkbox(&mut panels.notes, "Slide Notes");
+                ui.checkbox(&mut panels.states, "States").on_hover_text("The looks of a button or object in each state");
+            });
+            ui.label("Side panel");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut panels.triggers, "Triggers");
+                ui.checkbox(&mut panels.ai, "AI");
+            });
+            ui.label("Slide");
+            ui.checkbox(&mut panels.layers, "Slide Layers");
+        });
+        if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
+        if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
+        if inside != self.windows_inside { self.windows_inside = inside; crate::prefs::set_bool("tool_windows_inside", inside); }
+        for (key, was, now) in [("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers)] {
+            if was != now { crate::prefs::set_bool(key, now); }
+        }
+        self.panels = panels;
+        if !open { self.settings_open = false; }
+    }
+
     /// Help: documentation, reporting problems, the community, and checking for a newer version.
     fn help_tab(&mut self, ui: &mut egui::Ui) {
         group(ui, "Help", |ui| {
@@ -1543,26 +1591,7 @@ impl App {
             if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
         });
         group(ui, "AI", |ui| {
-            if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
-        });
-        group(ui, "Studio Options", |ui| {
-            ui.vertical(|ui| {
-            let mut one = self.one_section;
-            if ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.").changed() {
-                self.one_section = one;
-                crate::prefs::set_bool("one_section_open", one);
-            }
-            let mut hover = self.ribbon_hover;
-            if ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.").changed() {
-                self.ribbon_hover = hover;
-                crate::prefs::set_bool("ribbon_hover", hover);
-            }
-            let mut inside = self.windows_inside;
-            if ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Settings, spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.").changed() {
-                self.windows_inside = inside;
-                crate::prefs::set_bool("tool_windows_inside", inside);
-            }
-            });
+            if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.panels.ai = true; crate::prefs::set_bool("show_ai", true); self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
         });
         group(ui, "Updates", |ui| {
             ui.horizontal(|ui| {

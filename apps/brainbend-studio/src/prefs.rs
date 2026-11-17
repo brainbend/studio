@@ -41,6 +41,22 @@ fn is_tiling_name(desktop: &str) -> bool {
 /// in the app wins; with none made, a tiling window manager gets them inside, where it cannot tile them.
 pub fn tool_windows_inside() -> bool { get_bool("tool_windows_inside").unwrap_or_else(tiling_session) }
 
+/// Which panels of the editor show. Each person decides (it follows them, not the project): someone who never uses animations
+/// hides the timeline, someone who never uses AI hides its tab. The Properties panel always shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Panels { pub timeline: bool, pub notes: bool, pub states: bool, pub triggers: bool, pub ai: bool, pub layers: bool }
+
+impl Panels {
+    pub fn load() -> Panels {
+        let on = |k: &str| get_bool(k).unwrap_or(true);
+        Panels { timeline: on("show_timeline"), notes: on("show_notes"), states: on("show_states"), triggers: on("show_triggers"), ai: on("show_ai"), layers: on("show_layers") }
+    }
+    /// The first of the bottom panel's tabs (0 Timeline, 1 Slide Notes, 2 States) that shows, or `None` when all are hidden.
+    pub fn bottom_tabs(&self) -> Vec<usize> { [(0, self.timeline), (1, self.notes), (2, self.states)].into_iter().filter(|t| t.1).map(|t| t.0).collect() }
+    /// The side panel's tabs (0 Properties, 1 Triggers, 2 AI): Properties always shows.
+    pub fn side_tabs(&self) -> Vec<usize> { [(0, true), (1, self.triggers), (2, self.ai)].into_iter().filter(|t| t.1).map(|t| t.0).collect() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

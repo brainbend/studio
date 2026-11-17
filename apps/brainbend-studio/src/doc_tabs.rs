@@ -249,6 +249,12 @@ fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, cl
 /// document tabs: the active one is a blue block that meets a blue line under the row. Returns whether a tab
 /// other than the current one was clicked; `current` is updated to it.
 pub(super) fn panel_tabs(ui: &mut egui::Ui, labels: &[String], current: &mut usize) -> bool {
+    let tabs: Vec<(usize, String)> = labels.iter().cloned().enumerate().collect();
+    panel_tabs_of(ui, &tabs, current)
+}
+
+/// `panel_tabs` for tabs that carry their own number, so a panel can leave some out and keep the numbers of the rest.
+pub(super) fn panel_tabs_of(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut usize) -> bool {
     let mut changed = false;
     let before = ui.spacing().item_spacing.x;
     ui.spacing_mut().item_spacing.x = 0.0;
@@ -261,7 +267,7 @@ pub(super) fn panel_tabs(ui: &mut egui::Ui, labels: &[String], current: &mut usi
     let painter = ui.painter().with_clip_rect(full);
     painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), top), egui::pos2(full.right(), top + 30.0)), 0.0, band);
     let row = ui.horizontal(|ui| {
-        for (i, label) in labels.iter().enumerate() {
+        for (i, label) in tabs.iter().map(|(i, l)| (*i, l)) {
             let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(12.5), egui::Color32::WHITE).size().x);
             let (r, _) = tab_chip_sized(ui, None, label, *current == i, false, tw + 28.0, 12.5);
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *current == i, label));

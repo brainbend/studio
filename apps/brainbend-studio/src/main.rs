@@ -300,6 +300,9 @@ struct App {
     one_section: bool,
     /// The ribbon stays open under the tabs (a person's choice); otherwise it opens over the slide when a tab is clicked.
     ribbon_pinned: bool,
+    /// Which panels show (see `prefs::Panels`), chosen in the Studio Settings window.
+    panels: prefs::Panels,
+    settings_open: bool,
     ribbon_open: bool,
     /// Resting the pointer on a tab opens the ribbon too (a person's choice).
     ribbon_hover: bool,
@@ -507,7 +510,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -2390,8 +2393,8 @@ impl App {
             ui.add_enabled_ui(n > 1, |ui| { if ui.button("Group").clicked() { self.group_selected(); ui.close(); } });
             if ui.button("Ungroup").clicked() { self.ungroup_selected(); ui.close(); }
             ui.separator();
-            if self.selected_object().is_some_and(states_panel::supports_states) && ui.button("Edit states…").clicked() { self.bottom_tab = 2; ui.close(); }
-            if ui.button("Triggers…").on_hover_text("Show this object's triggers").clicked() { self.right_tab = 1; ui.close(); }
+            if self.panels.states && self.selected_object().is_some_and(states_panel::supports_states) && ui.button("Edit states…").clicked() { self.bottom_tab = 2; ui.close(); }
+            if self.panels.triggers && ui.button("Triggers…").on_hover_text("Show this object's triggers").clicked() { self.right_tab = 1; ui.close(); }
         });
         if !has_sel {
             // On empty canvas: put something on the slide.
@@ -6059,6 +6062,7 @@ impl App {
         self.focus_order_window(ctx);
         self.equation_window(ctx);
         self.theme_colors_window(ctx);
+        self.settings_window(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
         // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
@@ -6441,6 +6445,8 @@ impl App {
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
             // stays put.
+            // A tab that was hidden in the settings is not left showing.
+            if !self.panels.side_tabs().contains(&self.right_tab) { self.right_tab = 0; }
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
             // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
@@ -6449,7 +6455,7 @@ impl App {
             ui.add_enabled_ui(editable, |ui| {
             // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
             // tab away.
-            if !self.in_master_view() && self.right_tab != AI_TAB {
+            if !self.in_master_view() && self.right_tab != AI_TAB && self.panels.layers {
                 egui::Panel::bottom("layers-panel-with-formatting").resizable(true).default_size(150.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
@@ -6467,7 +6473,8 @@ impl App {
                     }).count()
                 };
                 let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
-                doc_tabs::panel_tabs(ui, &labels, &mut self.right_tab);
+                let tabs: Vec<(usize, String)> = self.panels.side_tabs().into_iter().map(|i| (i, labels[i].clone())).collect();
+                doc_tabs::panel_tabs_of(ui, &tabs, &mut self.right_tab);
             }
             if self.right_tab == AI_TAB {
                 self.ai_panel(ui);
@@ -7021,10 +7028,14 @@ impl App {
             }
         }
 
-        egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
+        let bottom = self.panels.bottom_tabs();
+        if !bottom.contains(&self.bottom_tab) { if let Some(&first) = bottom.first() { self.bottom_tab = first; } }
+        if !bottom.is_empty() { egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             ui.add_enabled_ui(editable, |ui| {
-            doc_tabs::panel_tabs(ui, &["Timeline".to_string(), "Slide Notes".to_string(), "States".to_string()], &mut self.bottom_tab);
+            let names = ["Timeline", "Slide Notes", "States"];
+            let tabs: Vec<(usize, String)> = bottom.iter().map(|&i| (i, names[i].to_string())).collect();
+            doc_tabs::panel_tabs_of(ui, &tabs, &mut self.bottom_tab);
             if self.bottom_tab == 0 {
                 self.timeline_panel(ui, slide_idx);
             } else if self.bottom_tab == 2 {
@@ -7033,7 +7044,7 @@ impl App {
                 self.notes_panel(ui, slide_idx);
             }
                     });
-        });
+        }); }
 
         egui::CentralPanel::default().show(root, |ui| {
             let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
@@ -11141,6 +11152,42 @@ mod tests {
         assert_eq!(a.tabs.len(), 4, "the new scene's slide opened a tab");
         assert!(!a.tabs[a.active_tab.unwrap()].preview);
         let _ = other;
+    }
+
+    /// The Studio Settings window, opened from the Project tab, holds the app-wide settings, and the switches in it hide
+    /// the panels the person does not use.
+    #[test]
+    fn studio_settings_hides_the_panels_a_person_does_not_use() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.ribbon_tab = ribbon::PROJECT_TAB;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Slide Notes").is_some(), "the bottom panel shows by default");
+        assert!(h.query_by_label("AI").is_some());
+        h.get_by_label_contains("Studio Settings").click();
+        h.run_steps(4);
+        assert!(h.state().settings_open);
+        assert!(h.query_by_label("Open one section at a time").is_some(), "the Help tab's options moved here");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("studio-settings.png")).unwrap(); }
+        // Someone who never uses AI or animations hides them.
+        h.state_mut().panels.ai = false;
+        h.state_mut().panels.timeline = false;
+        h.state_mut().right_tab = AI_TAB;
+        h.run_steps(4);
+        assert_eq!(h.state().right_tab, 0, "a tab that is hidden is not left showing");
+        assert_eq!(h.state().bottom_tab, 1, "the bottom panel moves to the next tab that shows");
+        // With every tab of the bottom panel hidden, the panel is gone.
+        h.state_mut().panels.notes = false;
+        h.state_mut().panels.states = false;
+        h.run_steps(4);
+        assert!(h.state().panels.bottom_tabs().is_empty());
+        // Properties always shows.
+        h.state_mut().panels.triggers = false;
+        assert_eq!(h.state().panels.side_tabs(), vec![0]);
+        h.run_steps(3);
+        assert_eq!(h.state().right_tab, 0);
     }
 
     #[test]
