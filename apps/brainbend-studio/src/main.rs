@@ -294,7 +294,6 @@ struct App {
     updater: update::Updater,
     /// Tool windows open inside the app rather than as windows of their own (see `prefs::tool_windows_inside`).
     windows_inside: bool,
-    /// Where the formatting controls are offered (an app setting).
     /// Opening a section of the Properties panel closes the one that was open (see `prefs`).
     one_section: bool,
     /// The ribbon stays open under the tabs (a person's choice); otherwise it opens over the slide when a tab is clicked.
@@ -6720,7 +6719,7 @@ impl App {
             let num_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
             let kind_title = self.format_title();
-            let (can_paste, panel_formatting) = (self.style_clip.is_some(), true);
+            let can_paste = self.style_clip.is_some();
             let proj = self.project.as_mut().unwrap();
             // Slides are small (assets live on the project), so a per-frame copy is cheap.
             let before = proj.slides.clone();
@@ -6731,19 +6730,17 @@ impl App {
             let group_role = proj.slides[slide_idx].group_role(li, oi);
             let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
             let mut changed = false;
-            // What is selected, in the main color, with the Format Painter beside it when formatting is in this panel.
+            // What is selected, in the main color, with the Format Painter beside it.
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 let title = kind_title.map(str::to_string).unwrap_or_else(|| kind_name(&obj.kind).to_uppercase());
                 ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
-                if panel_formatting {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ribbon::format_panel::expand_buttons(ui);
-                        let (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
-                        if copy { copy_look = true; }
-                        if paste { paste_look = true; }
-                    });
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ribbon::format_panel::expand_buttons(ui);
+                    let (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
+                    if copy { copy_look = true; }
+                    if paste { paste_look = true; }
+                });
             });
             ui.add_space(2.0);
             ribbon::format_panel::section(ui, "settings", "Settings", true, |ui| {
