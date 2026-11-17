@@ -17,6 +17,8 @@ pub struct SlideTab {
     bottom_tab: usize,
     visible: Vec<bool>,
     state_view: Option<(String, String)>,
+    /// The one tab that the next slide you choose replaces (shown in italics). A tab opened on purpose is not one.
+    pub preview: bool,
 }
 
 impl App {
@@ -39,6 +41,7 @@ impl App {
             bottom_tab: self.bottom_tab,
             visible: self.visible.clone(),
             state_view: self.state_view.clone(),
+            preview: self.active_tab.and_then(|k| self.tabs.get(k)).is_some_and(|t| t.slide_id == self.project.as_ref().map(|p| p.slides[slide_idx].id.clone()).unwrap_or_default() && t.preview),
         }
     }
 
@@ -50,12 +53,18 @@ impl App {
         let ids: Vec<String> = p.slides.iter().map(|s| s.id.clone()).collect();
         let active_id = self.active_tab.and_then(|k| self.tabs.get(k)).map(|t| t.slide_id.clone());
         self.tabs.retain(|t| ids.contains(&t.slide_id));
-        self.active_tab = active_id.and_then(|id| self.tabs.iter().position(|t| t.slide_id == id));
-        if self.scene_view { self.active_tab = None; return; }
+        self.active_tab = active_id.clone().and_then(|id| self.tabs.iter().position(|t| t.slide_id == id));
+        if self.scene_view { self.active_tab = None; self.new_tab_request = false; return; }
         let cur_idx = self.slide.min(ids.len() - 1);
         let cur = ids[cur_idx].clone();
-        if self.active_tab.is_some_and(|k| self.tabs[k].slide_id == cur) { return; }
+        // A tab opened on purpose (double-click, the menu, another scene) is kept; the one the next slide replaces is the preview.
+        let want_new = std::mem::take(&mut self.new_tab_request);
+        if self.active_tab.is_some_and(|k| self.tabs[k].slide_id == cur) {
+            if want_new { if let Some(k) = self.active_tab { self.tabs[k].preview = false; } }
+            return;
+        }
         if let Some(k) = self.tabs.iter().position(|t| t.slide_id == cur) {
+            if want_new { self.tabs[k].preview = false; }
             let t = self.tabs[k].clone();
             let layers = self.project.as_ref().unwrap().slides[cur_idx].layers.len();
             self.layer = t.layer.min(layers - 1);
@@ -67,9 +76,17 @@ impl App {
             if t.visible.len() == layers { self.visible = t.visible; } else { self.reset_visibility(); }
             self.active_tab = Some(k);
         } else {
-            let t = self.tab_for(cur_idx);
-            self.tabs.push(t);
-            self.active_tab = Some(self.tabs.len() - 1);
+            // Choosing a slide in another scene than the one that was showing opens a tab, as asking for one does.
+            let scene_of = |id: &str| self.project.as_ref().and_then(|p| p.slides.iter().find(|s| s.id == id).map(|s| s.scene.clone()));
+            let other_scene = active_id.as_deref().and_then(scene_of).zip(scene_of(&cur)).is_some_and(|(a, b)| a != b);
+            let keep = want_new || other_scene;
+            let mut t = self.tab_for(cur_idx);
+            t.preview = !keep;
+            let slot = if keep { None } else { self.tabs.iter().position(|x| x.preview) };
+            match slot {
+                Some(k) => { self.tabs[k] = t; self.active_tab = Some(k); }
+                None => { self.tabs.push(t); self.active_tab = Some(self.tabs.len() - 1); }
+            }
         }
     }
 
@@ -122,6 +139,7 @@ impl App {
         let mut close: Option<usize> = None;
         let mut close_others: Option<usize> = None;
         let mut close_all = false;
+        let mut keep_tab: Option<usize> = None;
         let labels: Vec<(String, String)> = if let Some(st) = &self.master_stash {
             // The Layout Builder swaps the project's slides for its own, so the open slides are named from the copy kept at entry.
             self.tabs.iter().filter_map(|t| {
@@ -150,7 +168,10 @@ impl App {
                     let active = !in_mode && !self.scene_view && self.active_tab == Some(k);
                     // As wide as its name needs, so the strip is not mostly gaps.
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
-                    let (r, closed) = tab_chip(ui, None, label, active, true, (tw + 58.0).clamp(96.0, 190.0));
+                    let preview = self.tabs.get(k).is_some_and(|t| t.preview);
+                    let (r, closed) = tab_chip_ex(ui, None, label, active, true, (tw + 58.0).clamp(96.0, 190.0), 12.5, preview);
+                    // Double-clicking the replaceable tab keeps it.
+                    if r.double_clicked() { keep_tab = Some(k); }
                     // Inside the Layout Builder the slide tabs are named too, since nothing else on screen repeats them.
                     if in_mode { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
                     if closed || r.middle_clicked() { close = Some(k); } else if r.clicked() { go_slide = Some(id.clone()); }
@@ -178,6 +199,7 @@ impl App {
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
         });
+        if let Some(t) = keep_tab.and_then(|k| self.tabs.get_mut(k)) { t.preview = false; }
         // Leaving the 360° editing mode, by any other tab or by its own ×, ends it first.
         if pano_open && (go_story || go_slide.is_some() || close_pano || open_builder || close_builder || close.is_some() || close_others.is_some() || close_all) { self.close_pano_edit(); }
         if close_pano { self.pano.tab = None; }
@@ -264,6 +286,12 @@ pub(super) fn tabbed_panel_frame(style: &egui::Style, nested: bool) -> egui::Fra
 }
 
 fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32) -> (egui::Response, bool) {
+    tab_chip_ex(ui, icon, label, active, closable, width, size, false)
+}
+
+/// A tab; `italic` marks the one tab that the next slide chosen replaces.
+#[allow(clippy::too_many_arguments)]
+fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, italic: bool) -> (egui::Response, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click());
     let dark = ui.visuals().dark_mode;
     let text = ui.visuals().text_color();
@@ -283,7 +311,13 @@ fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bo
     }
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max - egui::vec2(if closable { 28.0 } else { 8.0 }, 0.0));
     let font = egui::FontId::proportional(size);
-    ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
+    if italic {
+        let job = egui::text::LayoutJob::single_section(label.to_string(), egui::TextFormat { font_id: font, color: ink, italics: true, ..Default::default() });
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
+        ui.painter().with_clip_rect(text_rect).galley(egui::pos2(text_rect.left(), mid - galley.size().y / 2.0), galley, ink);
+    } else {
+        ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
+    }
     let mut closed = false;
     if closable && (active || resp.hovered()) {
         let x = egui::Rect::from_center_size(egui::pos2(rect.right() - 15.0, mid), egui::vec2(18.0, 18.0));

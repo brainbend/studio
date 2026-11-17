@@ -223,6 +223,8 @@ struct App {
     active_tab: Option<usize>,
     /// Open a project into the Scene View (the app turns this on; tests keep the slide view).
     open_to_scene_view: bool,
+    /// The slide about to be shown gets a tab of its own (double-click, the slide menu), not the single slide tab.
+    new_tab_request: bool,
     scene_rename: Option<usize>,
     /// The slide whose name is being edited in the slide list.
     slide_rename: Option<usize>,
@@ -505,7 +507,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -2010,7 +2012,7 @@ impl App {
                     self.slide = i;
                 }
                 resp.context_menu(|ui| self.slide_context_menu(ui));
-                if resp.double_clicked() { open = Some(i); }
+                if resp.double_clicked() || resp.middle_clicked() { open = Some(i); }
                 else if resp.clicked() {
                     let (cmd, shift) = ctx.input(|inp| (inp.modifiers.command, inp.modifiers.shift));
                     let id = self.project.as_ref().unwrap().slides[i].id.clone();
@@ -2158,7 +2160,7 @@ impl App {
         });
         if rename.is_some() { self.snapshot(); self.scene_rename = rename; }
         if let Some(i) = select { self.slide = i; self.layer = 0; self.selected = None; self.reset_visibility(); }
-        if let Some(i) = open { self.open_slide(i); }
+        if let Some(i) = open { self.new_tab_request = true; self.open_slide(i); }
         if let Some((si, down)) = mv { self.move_scene(si, down); }
         if let Some(si) = delete { self.delete_scene(si); }
     }
@@ -2459,6 +2461,14 @@ impl App {
                 if ui.button(nm).clicked() { self.move_selected_slides_to_scene(si); ui.close(); }
             }
         });
+        if ui.button("Open in new tab").clicked() {
+            self.new_tab_request = true;
+            self.scene_view = false;
+            self.layer = 0;
+            self.selected = None;
+            self.reset_visibility();
+            ui.close();
+        }
         ui.separator();
         if ui.button("Preview from here").clicked() { self.preview(PreviewScope::FromHere); ui.close(); }
         if many && ui.button("Preview selected slides").clicked() { self.preview(PreviewScope::Selected); ui.close(); }
@@ -11054,9 +11064,10 @@ mod tests {
         a.add_layer();
         a.layer = 1;
         a.save_active_tab();
+        a.new_tab_request = true;
         a.add_slide(SlideKind::Normal);
         a.sync_tabs();
-        assert_eq!((a.tabs.len(), a.active_tab), (2, Some(1)), "a second slide opens a second tab");
+        assert_eq!((a.tabs.len(), a.active_tab), (2, Some(1)), "a second slide, asked for in a tab of its own, opens a second tab");
         a.save_active_tab();
         // Back to the first slide: its layer comes back.
         a.slide = 0;
@@ -11080,12 +11091,56 @@ mod tests {
         a.scene_view = false;
         a.slide = 1;
         a.sync_tabs();
+        a.new_tab_request = true;
         a.slide = 0;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 2);
         a.delete_slide(1);
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 1, "the deleted slide's tab is gone");
+    }
+
+    /// Choosing slides shows them in one replaceable tab. A tab of its own comes from double-clicking, the slide's menu,
+    /// or a slide in another scene; the AI moves between slides the same way a person does.
+    #[test]
+    fn choosing_slides_uses_one_tab_and_a_new_tab_only_when_asked_for() {
+        let mut a = app();
+        for _ in 0..4 { a.add_slide(SlideKind::Normal); }
+        a.sync_tabs();
+        let n = a.project.as_ref().unwrap().slides.len();
+        assert!(n >= 5);
+        // Walking through the slides, one after another, keeps a single tab.
+        for i in 0..n { a.slide = i; a.sync_tabs(); }
+        assert_eq!(a.tabs.len(), 1, "every slide chosen replaced the same tab");
+        assert!(a.tabs[0].preview);
+        assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[n - 1].id);
+        // Asking for a tab keeps the one shown and opens the next in the single tab.
+        a.new_tab_request = true;
+        a.slide = 0;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 2, "a tab of its own, beside the replaceable one");
+        assert!(!a.tabs[a.active_tab.unwrap()].preview);
+        a.slide = 1;
+        a.sync_tabs();
+        a.slide = 2;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 2, "slides chosen after that still use the single tab");
+        assert_eq!(a.tabs.iter().filter(|t| t.preview).count(), 1);
+        // Asking for the slide that is already the replaceable tab keeps it.
+        a.new_tab_request = true;
+        a.sync_tabs();
+        assert!(a.tabs.iter().all(|t| !t.preview), "that tab stays");
+        a.slide = 3;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 3, "so the next slide chosen gets a new single tab");
+        // A slide in another scene opens a tab of its own.
+        a.add_scene();
+        a.scene_view = false;
+        a.sync_tabs();
+        let other = a.slide;
+        assert_eq!(a.tabs.len(), 4, "the new scene's slide opened a tab");
+        assert!(!a.tabs[a.active_tab.unwrap()].preview);
+        let _ = other;
     }
 
     #[test]
