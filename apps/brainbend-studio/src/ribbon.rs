@@ -1553,7 +1553,7 @@ impl App {
             ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("What shows").strong());
-            ui.weak("Hide what you do not use. The Properties panel always shows.");
+            ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
             ui.add_space(2.0);
             ui.label("Bottom panel");
             ui.horizontal(|ui| {
@@ -1563,6 +1563,7 @@ impl App {
             });
             ui.label("Side panel");
             ui.horizontal(|ui| {
+                ui.checkbox(&mut panels.properties, "Properties").on_hover_text("The settings of the slide or object you pick");
                 ui.checkbox(&mut panels.triggers, "Triggers");
                 ui.checkbox(&mut panels.ai, "AI");
             });
@@ -1572,7 +1573,7 @@ impl App {
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
         if inside != self.windows_inside { self.windows_inside = inside; crate::prefs::set_bool("tool_windows_inside", inside); }
-        for (key, was, now) in [("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers)] {
+        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers)] {
             if was != now { crate::prefs::set_bool(key, now); }
         }
         self.panels = panels;

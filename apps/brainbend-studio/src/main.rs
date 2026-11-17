@@ -6440,18 +6440,21 @@ impl App {
         let mut paste_look = false;
         // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
         let wide_panel = self.right_tab == AI_TAB && self.assistant.shows_terminal();
+        let show_side = !self.panels.side_tabs().is_empty() || (self.panels.layers && !self.in_master_view());
+        if show_side {
         egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
             // stays put.
             // A tab that was hidden in the settings is not left showing.
-            if !self.panels.side_tabs().contains(&self.right_tab) { self.right_tab = 0; }
+            let side = self.panels.side_tabs();
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
             // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
             if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
+            if !side.contains(&self.right_tab) { if let Some(&first) = side.first() { self.right_tab = first; } }
             ui.add_enabled_ui(editable, |ui| {
             // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
             // tab away.
@@ -6460,6 +6463,7 @@ impl App {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
             }
+            if side.is_empty() { return; }
             {
                 let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
                 let count = {
@@ -6977,6 +6981,7 @@ impl App {
             });
                     });
         });
+        }
 
         if copy_look {
             self.style_clip = self.selected_object().map(|o| Box::new(o.clone()));
@@ -11183,11 +11188,18 @@ mod tests {
         h.state_mut().panels.states = false;
         h.run_steps(4);
         assert!(h.state().panels.bottom_tabs().is_empty());
-        // Properties always shows.
+        // Hiding Properties too (the AI does the designing) leaves the side panel's layers, and then nothing.
         h.state_mut().panels.triggers = false;
         assert_eq!(h.state().panels.side_tabs(), vec![0]);
+        h.state_mut().panels.properties = false;
+        assert!(h.state().panels.side_tabs().is_empty());
+        h.state_mut().settings_open = false;
         h.run_steps(3);
-        assert_eq!(h.state().right_tab, 0);
+        assert!(h.query_by_label("Slide Layers").is_some(), "the layers stay while they are switched on");
+        assert!(h.query_by_label("Properties").is_none(), "no Properties tab");
+        h.state_mut().panels.layers = false;
+        h.run_steps(3);
+        assert!(h.query_by_label("Slide Layers").is_none(), "with the layers off too, the side panel is gone");
     }
 
     #[test]
