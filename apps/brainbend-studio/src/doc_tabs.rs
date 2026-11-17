@@ -92,6 +92,32 @@ impl App {
         }
     }
 
+    /// Move a slide's tab to another place among the slide tabs; the tab that is showing stays the one showing.
+    pub(super) fn move_tab(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to >= self.tabs.len() || from == to { return; }
+        let active = self.active_tab.and_then(|k| self.tabs.get(k)).map(|t| t.slide_id.clone());
+        let t = self.tabs.remove(from);
+        self.tabs.insert(to, t);
+        self.active_tab = active.and_then(|id| self.tabs.iter().position(|t| t.slide_id == id));
+        // The other tabs of the strip keep their places; the slide tabs fill the places the slides had, in their new order.
+        let mut ids = self.tabs.iter().map(|t| format!("s:{}", t.slide_id));
+        for k in self.strip_order.iter_mut().filter(|k| k.starts_with("s:")) {
+            if let Some(n) = ids.next() { *k = n; }
+        }
+    }
+
+    /// Move a tab of the strip (a slide, the Layout Builder or a 360° image) to another place; `from` and `to` are places in the strip.
+    pub(super) fn move_strip(&mut self, from: usize, to: usize) {
+        if from >= self.strip_order.len() || to >= self.strip_order.len() || from == to { return; }
+        let k = self.strip_order.remove(from);
+        self.strip_order.insert(to, k);
+        // The slide tabs follow the strip's order.
+        let active = self.active_tab.and_then(|k| self.tabs.get(k)).map(|t| t.slide_id.clone());
+        let order = self.strip_order.clone();
+        self.tabs.sort_by_key(|t| order.iter().position(|k| *k == format!("s:{}", t.slide_id)).unwrap_or(usize::MAX));
+        self.active_tab = active.and_then(|id| self.tabs.iter().position(|t| t.slide_id == id));
+    }
+
     pub(super) fn close_tab(&mut self, k: usize) {
         if k >= self.tabs.len() { return; }
         let was_active = self.active_tab == Some(k);
@@ -129,6 +155,7 @@ impl App {
         let mut close: Option<usize> = None;
         let mut close_others: Option<usize> = None;
         let mut close_all = false;
+        let mut moved_tab: Option<(usize, usize)> = None;
         let labels: Vec<(String, String)> = if let Some(st) = &self.master_stash {
             // The Layout Builder swaps the project's slides for its own, so the open slides are named from the copy kept at entry.
             self.tabs.iter().filter_map(|t| {
@@ -144,6 +171,14 @@ impl App {
                 Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name)))
             }).collect()
         };
+        // The strip's order: what was kept, then whatever is new. The tabs of the Layout Builder and of a 360° image can be
+        // dragged among the slide tabs like any other.
+        let mut present: Vec<String> = self.tabs.iter().map(|t| format!("s:{}", t.slide_id)).collect();
+        if master || self.layout_tab { present.push("layout".into()); }
+        if pano_name.is_some() { present.push("pano".into()); }
+        let mut order: Vec<String> = self.strip_order.iter().filter(|k| present.contains(k)).cloned().collect();
+        for k in present { if !order.contains(&k) { order.push(k); } }
+        self.strip_order = order.clone();
         // One flat band that belongs to the ribbon, with a border line under it that the active tab sits on.
         let dark = root.visuals().dark_mode;
         let band = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
@@ -153,7 +188,29 @@ impl App {
             let row = ui.horizontal(|ui| {
                 let (story, _) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", self.scene_view && !in_mode, false, 138.0);
                 if story.clicked() { go_story = true; }
-                for (k, (id, label)) in labels.iter().enumerate() {
+                let mut slide_chips: Vec<egui::Response> = vec![];
+                for key in &order {
+                    if key == "layout" {
+                        // The Layout Builder is a tab of its own. It stays when another tab is chosen (the layouts
+                        // are saved on the way out) and opens again when clicked; its × closes it.
+                        let (r, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", master, true, 176.0);
+                        if closed { close_builder = true; }
+                        else if r.clicked() && !master { open_builder = true; }
+                        slide_chips.push(r);
+                        continue;
+                    }
+                    if key == "pano" {
+                        // A 360° image's tab works the same way: it stays until its × is pressed and opens the editing mode when clicked.
+                        let Some(name) = &pano_name else { continue };
+                        let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
+                        let (r, closed) = tab_chip(ui, Some(ribbon::PANORAMA), name, pano_open, true, (tw + 82.0).clamp(130.0, 230.0));
+                        if closed { close_pano = true; }
+                        else if r.clicked() && !pano_open { open_pano = true; }
+                        slide_chips.push(r);
+                        continue;
+                    }
+                    let Some(k) = self.tabs.iter().position(|t| format!("s:{}", t.slide_id) == *key) else { continue };
+                    let Some((id, label)) = labels.iter().find(|(i, _)| format!("s:{i}") == *key) else { continue };
                     let active = !in_mode && !self.scene_view && self.active_tab == Some(k);
                     // As wide as its name needs, so the strip is not mostly gaps.
                     let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
@@ -161,30 +218,19 @@ impl App {
                     // Inside the Layout Builder the slide tabs are named too, since nothing else on screen repeats them.
                     if in_mode { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
                     if closed || r.middle_clicked() { close = Some(k); } else if r.clicked() { go_slide = Some(id.clone()); }
+                    slide_chips.push(r.clone());
                     if !in_mode { r.context_menu(|ui| {
                         if ui.button("Close").clicked() { close = Some(k); ui.close(); }
                         if ui.add_enabled(labels.len() > 1, egui::Button::new("Close other tabs")).clicked() { close_others = Some(k); ui.close(); }
                         if ui.button("Close all tabs").clicked() { close_all = true; ui.close(); }
                     }); }
                 }
-                // The Layout Builder is a tab of its own, after the slides. It stays when another tab is chosen (the layouts
-                // are saved on the way out) and opens again when clicked; its × closes it.
-                if master || self.layout_tab {
-                    let (r, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", master, true, 176.0);
-                    if closed { close_builder = true; }
-                    else if r.clicked() && !master { open_builder = true; }
-                }
-                // A 360° image's tab works the same way: it stays until its × is pressed and opens the editing mode when clicked.
-                if let Some(name) = &pano_name {
-                    let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.clone(), egui::FontId::proportional(13.0), egui::Color32::WHITE).size().x);
-                    let (r, closed) = tab_chip(ui, Some(ribbon::PANORAMA), name, pano_open, true, (tw + 82.0).clamp(130.0, 230.0));
-                    if closed { close_pano = true; }
-                    else if r.clicked() && !pano_open { open_pano = true; }
-                }
+                moved_tab = drag_reorder(ui, "strip", &slide_chips);
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
         });
+        if let Some((from, to)) = moved_tab { self.move_strip(from, to); }
         // Leaving the 360° editing mode, by any other tab or by its own ×, ends it first.
         if pano_open && (go_story || go_slide.is_some() || close_pano || open_builder || close_builder || close.is_some() || close_others.is_some() || close_all) { self.close_pano_edit(); }
         if close_pano { self.pano.tab = None; }
@@ -240,7 +286,17 @@ pub(super) fn panel_tabs(ui: &mut egui::Ui, labels: &[String], current: &mut usi
 
 /// `panel_tabs` for tabs that carry their own number, so a panel can leave some out and keep the numbers of the rest.
 pub(super) fn panel_tabs_of(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut usize) -> bool {
+    panel_tabs_inner(ui, tabs, current, None).0
+}
+
+/// `panel_tabs_of` with tabs that can be dragged to a new place. Also returns the move made, as (place it was, place it goes to).
+pub(super) fn panel_tabs_movable(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut usize, salt: &str) -> Option<(usize, usize)> {
+    panel_tabs_inner(ui, tabs, current, Some(salt)).1
+}
+
+fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut usize, salt: Option<&str>) -> (bool, Option<(usize, usize)>) {
     let mut changed = false;
+    let mut chips: Vec<egui::Response> = vec![];
     let before = ui.spacing().item_spacing.x;
     ui.spacing_mut().item_spacing.x = 0.0;
     // The same gap above as between the ribbon and the document tabs, and the same grey band behind the tabs,
@@ -257,13 +313,39 @@ pub(super) fn panel_tabs_of(ui: &mut egui::Ui, tabs: &[(usize, String)], current
             let (r, _) = tab_chip_sized(ui, None, label, *current == i, false, tw + 28.0, 12.5);
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *current == i, label));
             if r.clicked() && *current != i { *current = i; changed = true; }
+            chips.push(r);
         }
     });
+    let moved = salt.and_then(|s| drag_reorder(ui, s, &chips));
     let bottom = row.response.rect.bottom();
     painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), bottom - 2.0), egui::pos2(full.right(), bottom)), 0.0, ui.visuals().selection.bg_fill);
     ui.spacing_mut().item_spacing.x = before;
     ui.add_space(PANEL_TABS_GAP + 2.0);
-    changed
+    (changed, moved)
+}
+
+/// Dragging a tab to a new place: while it is dragged a line shows where it will go, and when it is let go the move is returned as
+/// (place it was, place it goes to). `chips` are the tabs in order.
+fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(usize, usize)> {
+    let key = egui::Id::new(("tab-drag", salt));
+    if let Some(k) = chips.iter().position(|r| r.drag_started()) { ui.ctx().data_mut(|d| d.insert_temp(key, k)); }
+    let from: usize = ui.ctx().data(|d| d.get_temp(key))?;
+    let Some(dragged) = chips.get(from) else { ui.ctx().data_mut(|d| d.remove_temp::<usize>(key)); return None };
+    let x = ui.ctx().pointer_latest_pos().map(|p| p.x).unwrap_or(dragged.rect.center().x);
+    // Where it would go: after every tab whose middle is to its left.
+    let slot = chips.iter().filter(|r| r.rect.center().x < x).count();
+    if dragged.dragged() {
+        let at = if slot == 0 { chips[0].rect.left() } else { chips[slot - 1].rect.right() };
+        let top = chips[0].rect.top();
+        ui.painter().line_segment([egui::pos2(at, top + 2.0), egui::pos2(at, top + 28.0)], egui::Stroke::new(2.0, ui.visuals().selection.bg_fill));
+        ui.ctx().request_repaint();
+    }
+    if dragged.drag_stopped() {
+        ui.ctx().data_mut(|d| d.remove_temp::<usize>(key));
+        let to = (if slot > from { slot - 1 } else { slot }).min(chips.len() - 1);
+        if to != from { return Some((from, to)); }
+    }
+    None
 }
 
 /// The space above a row of panel tabs, as between the ribbon and the document tabs. The space below the blue line is 2 more.
@@ -283,7 +365,7 @@ fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bo
 /// A tab; `italic` marks the one tab that the next slide chosen replaces.
 #[allow(clippy::too_many_arguments)]
 fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, italic: bool) -> (egui::Response, bool) {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click_and_drag());
     let dark = ui.visuals().dark_mode;
     let text = ui.visuals().text_color();
     let ink = if active { egui::Color32::WHITE } else { text.gamma_multiply(0.7) };

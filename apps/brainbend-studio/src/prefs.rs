@@ -16,6 +16,17 @@ fn read() -> serde_json::Map<String, serde_json::Value> {
 
 pub fn get_bool(key: &str) -> Option<bool> { read().get(key).and_then(|v| v.as_bool()) }
 
+pub fn get_str(key: &str) -> Option<String> { read().get(key).and_then(|v| v.as_str()).map(str::to_string) }
+
+/// Saves a text preference and keeps the others as they are.
+pub fn set_str(key: &str, value: &str) {
+    let Some(path) = path() else { return };
+    let mut all = read();
+    all.insert(key.into(), value.into());
+    if let Some(dir) = path.parent() { let _ = std::fs::create_dir_all(dir); }
+    let _ = std::fs::write(path, serde_json::Value::Object(all).to_string());
+}
+
 /// Saves one preference and keeps the others as they are.
 pub fn set_bool(key: &str, value: bool) {
     let Some(path) = path() else { return };

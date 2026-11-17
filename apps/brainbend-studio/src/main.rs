@@ -227,6 +227,8 @@ struct App {
     new_tab_request: bool,
     /// Every slide opens in a tab of its own (a setting of Studio Settings).
     new_tab_each: bool,
+    /// The order of the tab strip: "s:<slide id>" for slide tabs, "layout" and "pano" for the others. Kept for the session.
+    strip_order: Vec<String>,
     /// A slide right-clicked in the slide list, until its menu closes (see `with_menu_target`).
     menu_pick: Option<MenuPick>,
     scene_rename: Option<usize>,
@@ -307,6 +309,10 @@ struct App {
     settings_open: bool,
     /// The tool showing in the tool dock, and which tools were open last frame (the newest one is shown).
     docked: Vec<Tool>,
+    /// The order of the side panel's tabs, as the person arranged them (tab numbers; see `TOOL_TAB`). Tabs not listed follow.
+    side_order: Vec<usize>,
+    /// The order of the bottom panel's tabs (0 Timeline, 1 Slide Notes, 2 States), as the person arranged them.
+    bottom_order: Vec<usize>,
     tools_seen: Vec<Tool>,
     ribbon_open: bool,
     /// Resting the pointer on a tab opens the ribbon too (a person's choice).
@@ -515,7 +521,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, bottom_order: prefs::get_str("bottom_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), side_order: prefs::get_str("side_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -854,7 +860,39 @@ impl App {
     fn side_tab_ids(&self) -> Vec<usize> {
         let mut ids = self.panels.side_tabs();
         ids.extend(self.docked_open().iter().map(|t| TOOL_TAB + t.index()));
+        // In the order the person gave them; the ones they have not placed keep their usual order, after.
+        let rank = |id: &usize| self.side_order.iter().position(|o| o == id).unwrap_or(usize::MAX);
+        ids.sort_by_key(rank);
         ids
+    }
+
+    /// The bottom panel's tabs that show, in the order the person gave them.
+    fn bottom_tab_ids(&self) -> Vec<usize> {
+        let mut ids = self.panels.bottom_tabs();
+        ids.sort_by_key(|id| self.bottom_order.iter().position(|o| o == id).unwrap_or(usize::MAX));
+        ids
+    }
+
+    /// Dragging a bottom-panel tab: `from` and `to` are places among the tabs shown.
+    fn move_bottom_tab(&mut self, from: usize, to: usize) {
+        let mut ids = self.bottom_tab_ids();
+        if from >= ids.len() || to >= ids.len() { return; }
+        let id = ids.remove(from);
+        ids.insert(to, id);
+        let rest: Vec<usize> = self.bottom_order.iter().copied().filter(|o| !ids.contains(o)).collect();
+        self.bottom_order = ids.into_iter().chain(rest).collect();
+        crate::prefs::set_str("bottom_tab_order", &self.bottom_order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","));
+    }
+
+    /// Dragging a side-panel tab: `from` and `to` are places among the tabs shown.
+    fn move_side_tab(&mut self, from: usize, to: usize) {
+        let mut ids = self.side_tab_ids();
+        if from >= ids.len() || to >= ids.len() { return; }
+        let id = ids.remove(from);
+        ids.insert(to, id);
+        let rest: Vec<usize> = self.side_order.iter().copied().filter(|o| !ids.contains(o)).collect();
+        self.side_order = ids.into_iter().chain(rest).collect();
+        crate::prefs::set_str("side_tab_order", &self.side_order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","));
     }
 
     fn spelling_tool(&mut self, ui: &mut egui::Ui) {
@@ -6574,7 +6612,7 @@ impl App {
                 };
                 let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
                 let tabs: Vec<(usize, String)> = side.iter().map(|&i| (i, if i < TOOL_TAB { labels[i].clone() } else { TOOLS[i - TOOL_TAB].title().to_string() })).collect();
-                doc_tabs::panel_tabs_of(ui, &tabs, &mut self.right_tab);
+                if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.right_tab, "side") { self.move_side_tab(f, t); }
             }
             if self.right_tab >= TOOL_TAB {
                 if let Some(&t) = TOOLS.get(self.right_tab - TOOL_TAB) { self.show_tool(ctx, t, ui); }
@@ -7133,14 +7171,14 @@ impl App {
             }
         }
 
-        let bottom = self.panels.bottom_tabs();
+        let bottom = self.bottom_tab_ids();
         if !bottom.contains(&self.bottom_tab) { if let Some(&first) = bottom.first() { self.bottom_tab = first; } }
         if !bottom.is_empty() { egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
             ui.add_enabled_ui(editable, |ui| {
             let names = ["Timeline", "Slide Notes", "States"];
             let tabs: Vec<(usize, String)> = bottom.iter().map(|&i| (i, names[i].to_string())).collect();
-            doc_tabs::panel_tabs_of(ui, &tabs, &mut self.bottom_tab);
+            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.bottom_tab, "bottom") { self.move_bottom_tab(f, t); }
             if self.bottom_tab == 0 {
                 self.timeline_panel(ui, slide_idx);
             } else if self.bottom_tab == 2 {
@@ -11320,6 +11358,40 @@ mod tests {
         a.sync_tabs();
         assert_eq!((a.slide, a.tabs.len()), (1, 2));
         assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[0].id, "the first tab still shows slide 1");
+    }
+
+    /// Tabs can be moved: the slide tabs among themselves (the one showing stays showing), and the side panel's, in an order that
+    /// is kept.
+    #[test]
+    fn tabs_can_be_moved_and_the_side_panel_keeps_the_order() {
+        let mut a = app();
+        for _ in 0..2 { a.add_slide(SlideKind::Normal); }
+        a.slide = 0;
+        a.sync_tabs();
+        for i in 1..3 { a.new_tab_request = true; a.slide = i; a.sync_tabs(); }
+        let ids: Vec<String> = a.tabs.iter().map(|t| t.slide_id.clone()).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(a.active_tab, Some(2));
+        a.move_tab(2, 0);
+        assert_eq!(a.tabs.iter().map(|t| t.slide_id.clone()).collect::<Vec<_>>(), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
+        assert_eq!(a.active_tab, Some(0), "the tab that was showing still is");
+        // The side panel: Properties, Triggers, AI until the person moves them.
+        assert_eq!(a.side_tab_ids(), vec![0, 1, 2]);
+        a.move_side_tab(2, 0);
+        assert_eq!(a.side_tab_ids(), vec![2, 0, 1], "AI first");
+        a.variables_open = true;
+        a.docked.push(Tool::Variables);
+        assert_eq!(a.side_tab_ids(), vec![2, 0, 1, TOOL_TAB + Tool::Variables.index()], "a tab not placed yet follows the others");
+        a.move_side_tab(3, 1);
+        assert_eq!(a.side_tab_ids(), vec![2, TOOL_TAB + Tool::Variables.index(), 0, 1]);
+        // The bottom panel: Timeline, Slide Notes, States, until moved; a hidden tab is skipped and keeps its place.
+        assert_eq!(a.bottom_tab_ids(), vec![0, 1, 2]);
+        a.move_bottom_tab(0, 2);
+        assert_eq!(a.bottom_tab_ids(), vec![1, 2, 0], "Timeline last");
+        a.panels.notes = false;
+        assert_eq!(a.bottom_tab_ids(), vec![2, 0]);
+        a.panels.notes = true;
+        assert_eq!(a.bottom_tab_ids(), vec![1, 2, 0], "Slide Notes comes back where it was");
     }
 
     #[test]
