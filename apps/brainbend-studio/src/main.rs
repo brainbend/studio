@@ -79,7 +79,7 @@ fn main() -> eframe::Result {
             if app.updater.on_launch { app.updater.start(&cc.egui_ctx); }
             app.mcp = mcp::Mcp::load();
             app.assistant = assistant::Assistant::load();
-            app.open_to_story_view = true;
+            app.open_to_scene_view = true;
             if let Some(p) = arg {
                 app.open(&p);
             } else if recovery_path().is_some_and(|p| p.exists()) {
@@ -218,11 +218,11 @@ struct App {
     /// Painting a slide for a picture (a video), not for the editor: no play marks or placeholder names on media.
     paint_clean: bool,
     player_pane: usize,
-    /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Story View).
+    /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Scene View).
     tabs: Vec<doc_tabs::SlideTab>,
     active_tab: Option<usize>,
-    /// Open a project into the Story View (the app turns this on; tests keep the slide view).
-    open_to_story_view: bool,
+    /// Open a project into the Scene View (the app turns this on; tests keep the slide view).
+    open_to_scene_view: bool,
     scene_rename: Option<usize>,
     /// The slide whose name is being edited in the slide list.
     slide_rename: Option<usize>,
@@ -307,7 +307,7 @@ struct App {
     font_store: font_store::FontStore,
     last_autosave: std::time::Instant,
     recovery_offer: bool,
-    /// Slides to delete once the frame is drawn: the slide list and Story View are still walking the old list.
+    /// Slides to delete once the frame is drawn: the slide list and Scene View are still walking the old list.
     pending_delete: Option<Vec<usize>>,
     /// A hotspot area being drawn on a question preview: (start, current) as fractions of the picture.
     hot_drag: Option<((f32, f32), (f32, f32))>,
@@ -505,7 +505,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_story_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -1120,7 +1120,7 @@ impl App {
                 }
                 self.status = format!("Opened {} ({} slides, {} import notes)", file_label(&path), p.slides.len(), report.len());
                 self.import_report = report;
-                self.scene_view = self.open_to_story_view;
+                self.scene_view = self.open_to_scene_view;
                 self.tabs.clear();
                 self.active_tab = None;
                 self.layout_tab = false;
@@ -8977,7 +8977,7 @@ mod tests {
             shot(&mut h, "player-colors.png");
         }
         {
-            // Story View and slide tabs.
+            // Scene View and slide tabs.
             let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/SummarySlides.story");
             if p.exists() {
                 let mut a = App::default();
@@ -8996,7 +8996,7 @@ mod tests {
                 h.ctx.set_theme(egui::ThemePreference::Dark);
                 h.run_steps(2);
                 h.state_mut().scene_view = true;
-                shot(&mut h, "tabs-story-view.png");
+                shot(&mut h, "tabs-scene-view.png");
             }
         }
         {
@@ -10084,7 +10084,7 @@ mod tests {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("pano-edit.png")).unwrap();
         }
         // The editing mode is a tab: another tab leaves it, and its own tab stays and opens it again.
-        h.get_by_label("STORY VIEW").click();
+        h.get_by_label("SCENE VIEW").click();
         h.run_steps(3);
         assert!(h.state().pano.edit.is_none(), "another tab leaves the mode");
         assert!(h.state().pano.tab.is_some() && h.query_by_label("360° image").is_some(), "its tab stays");
@@ -10092,7 +10092,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().pano.edit.is_some(), "its tab opens it again");
         assert!(h.query_by_label("Project").is_some() && h.query_by_label("Objects").is_some() && h.query_by_label("Slides").is_none() && h.query_by_label("Publish").is_none(), "the ribbon offers File, Project and Objects");
-        h.get_by_label("STORY VIEW").click();
+        h.get_by_label("SCENE VIEW").click();
         h.run_steps(3);
         assert!(h.state().pano.edit.is_none());
         let p = pano(&h);
@@ -11063,11 +11063,11 @@ mod tests {
         a.layer = 0;
         a.sync_tabs();
         assert_eq!((a.active_tab, a.layer), (Some(0), 1), "the first tab remembers its layer");
-        // The Story View is no tab of a slide.
+        // The Scene View is no tab of a slide.
         a.scene_view = true;
         a.sync_tabs();
         assert_eq!((a.active_tab, a.tabs.len()), (None, 2));
-        // Closing the active tab goes to its neighbour; closing the last goes to the Story View.
+        // Closing the active tab goes to its neighbour; closing the last goes to the Scene View.
         a.scene_view = false;
         a.slide = 1;
         a.sync_tabs();
@@ -11075,7 +11075,7 @@ mod tests {
         a.sync_tabs();
         assert_eq!((a.tabs.len(), a.slide, a.scene_view), (1, 0, false), "closing the second tab lands on the first slide");
         a.close_tab(0);
-        assert!(a.scene_view && a.tabs.is_empty(), "closing the last tab shows the Story View");
+        assert!(a.scene_view && a.tabs.is_empty(), "closing the last tab shows the Scene View");
         // A deleted slide takes its tab with it.
         a.scene_view = false;
         a.slide = 1;
@@ -13103,10 +13103,10 @@ mod tests {
         assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len(), before + 1);
     }
 
-    /// The Layout Builder is a tab after the slides' tabs while it is open: Story View and the slide tabs stay, and
+    /// The Layout Builder is a tab after the slides' tabs while it is open: Scene View and the slide tabs stay, and
     /// clicking any of them leaves it, saving the layouts, and its own tab stays until its × is pressed.
     #[test]
-    fn the_layout_builder_is_a_tab_beside_story_view_and_the_slide_tabs() {
+    fn the_layout_builder_is_a_tab_beside_scene_view_and_the_slide_tabs() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
@@ -13117,12 +13117,12 @@ mod tests {
         assert!(h.query_by_label("LAYOUT BUILDER").is_none(), "no Layout Builder tab until it is open");
         h.state_mut().enter_master_view();
         h.run_steps(4);
-        assert!(h.query_by_label("STORY VIEW").is_some() && h.query_by_label("LAYOUT BUILDER").is_some(), "Story View and the Layout Builder are both tabs");
+        assert!(h.query_by_label("SCENE VIEW").is_some() && h.query_by_label("LAYOUT BUILDER").is_some(), "Scene View and the Layout Builder are both tabs");
         assert!(h.query_by_label_contains("Slide 2").is_some(), "the open slides keep their tabs, named from the real slides");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("layout-builder-tab.png")).unwrap(); }
-        h.get_by_label("STORY VIEW").click();
+        h.get_by_label("SCENE VIEW").click();
         h.run_steps(4);
-        assert!(!h.state().in_master_view() && h.state().scene_view, "Story View leaves the Layout Builder");
+        assert!(!h.state().in_master_view() && h.state().scene_view, "Scene View leaves the Layout Builder");
         assert!(h.query_by_label("LAYOUT BUILDER").is_some(), "its tab stays, so it can be opened again");
         h.get_by_label("LAYOUT BUILDER").click();
         h.run_steps(4);

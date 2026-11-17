@@ -1,4 +1,4 @@
-//! Story View and slide tabs: the Story View is always the first tab, and each slide opened from it
+//! Scene View and slide tabs: the Scene View is always the first tab, and each slide opened from it
 //! (or from the slide list) gets a tab of its own that remembers its layer, selection, zoom and bottom panel.
 //!
 //! The editor keeps working on "the current slide" (`App::slide`, `layer`, `selected`, ...). A tab holds the view state of
@@ -94,7 +94,7 @@ impl App {
             return;
         }
         self.active_tab = None;
-        // Go to the neighbour on the left (or right), else back to the Story View.
+        // Go to the neighbour on the left (or right), else back to the Scene View.
         let next = if k > 0 { Some(k - 1) } else if !self.tabs.is_empty() { Some(0) } else { None };
         match next.and_then(|n| self.tabs.get(n)).map(|t| t.slide_id.clone()) {
             Some(id) => {
@@ -104,7 +104,7 @@ impl App {
         }
     }
 
-    /// The tab strip under the ribbon: STORY VIEW, one tab per open slide, then the tabs of the Layout Builder and of a 360° image.
+    /// The tab strip under the ribbon: SCENE VIEW, one tab per open slide, then the tabs of the Layout Builder and of a 360° image.
     pub(super) fn doc_tabs(&mut self, root: &mut egui::Ui) {
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
@@ -144,7 +144,7 @@ impl App {
         egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
-                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "STORY VIEW", self.scene_view && !in_mode, false, 138.0);
+                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", self.scene_view && !in_mode, false, 138.0);
                 if story.clicked() { go_story = true; }
                 for (k, (id, label)) in labels.iter().enumerate() {
                     let active = !in_mode && !self.scene_view && self.active_tab == Some(k);
