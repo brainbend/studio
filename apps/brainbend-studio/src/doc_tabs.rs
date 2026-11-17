@@ -1,4 +1,4 @@
-//! Scene View and slide tabs: the Scene View is always the first tab, and each slide opened from it
+//! Scene View and slide tabs: the Scene View is the first tab (more can be opened with the "+"), and each slide opened from it
 //! (or from the slide list) gets a tab of its own that remembers its layer, selection, zoom and bottom panel.
 //!
 //! The editor keeps working on "the current slide" (`App::slide`, `layer`, `selected`, ...). A tab holds the view state of
@@ -58,6 +58,8 @@ impl App {
         // (a double-click, a middle-click or the slide's menu), when it is opened from the Scene View, or when the person has chosen
         // to open every slide in a new tab.
         let want_new = std::mem::take(&mut self.new_tab_request);
+        let from_scene = std::mem::take(&mut self.scene_to_slide);
+        if from_scene { self.scene_tab_becomes(&cur); }
         if self.active_tab.is_some_and(|k| self.tabs[k].slide_id == cur) { return; }
         if let Some(k) = self.tabs.iter().position(|t| t.slide_id == cur) {
             let t = self.tabs[k].clone();
@@ -72,7 +74,7 @@ impl App {
             self.active_tab = Some(k);
         } else {
             let t = self.tab_for(cur_idx);
-            let own = want_new || self.new_tab_each || self.tabs.is_empty();
+            let own = want_new || from_scene || self.new_tab_each || self.tabs.is_empty();
             match if own { None } else { Some(self.active_tab.unwrap_or(0)) } {
                 Some(k) => { self.tabs[k] = t; self.active_tab = Some(k); }
                 None => { self.tabs.push(t); self.active_tab = Some(self.tabs.len() - 1); }
@@ -90,6 +92,25 @@ impl App {
             let t = self.tab_for(self.slide.min(p.slides.len() - 1));
             self.tabs[k] = t;
         }
+    }
+
+    /// A new Scene View tab, at the right end of the strip, and the one showing.
+    pub(super) fn new_scene_tab(&mut self) {
+        let key = format!("scene:{}", self.scene_next);
+        self.scene_next += 1;
+        self.scene_tabs.get_or_insert_with(Vec::new).push(key.clone());
+        self.scene_active = key;
+    }
+
+    /// The Scene View tab that was showing turns into the tab of a slide: it gives up its place in the strip to it.
+    fn scene_tab_becomes(&mut self, slide_id: &str) {
+        let key = self.scene_active.clone();
+        let Some(tabs) = self.scene_tabs.as_mut() else { return };
+        let Some(n) = tabs.iter().position(|k| *k == key) else { return };
+        tabs.remove(n);
+        let slide_key = format!("s:{slide_id}");
+        if self.strip_order.contains(&slide_key) { self.strip_order.retain(|k| *k != key); }
+        else if let Some(p) = self.strip_order.iter().position(|k| *k == key) { self.strip_order[p] = slide_key; }
     }
 
     /// Move a slide's tab to another place among the slide tabs; the tab that is showing stays the one showing.
@@ -173,11 +194,22 @@ impl App {
         };
         // The strip's order: what was kept, then whatever is new. The tabs of the Layout Builder and of a 360° image can be
         // dragged among the slide tabs like any other.
-        let mut present: Vec<String> = self.tabs.iter().map(|t| format!("s:{}", t.slide_id)).collect();
+        if self.scene_tabs.is_none() { self.scene_tabs = Some(vec![]); self.new_scene_tab(); }
+        // The Scene View is showing, so one of its tabs has to be there.
+        if self.scene_view && !in_mode && self.scene_tabs.as_ref().is_some_and(|t| t.is_empty()) { self.new_scene_tab(); }
+        let scene_keys: Vec<String> = self.scene_tabs.clone().unwrap_or_default();
+        if !scene_keys.contains(&self.scene_active) { self.scene_active = scene_keys.first().cloned().unwrap_or_default(); }
+        let mut present: Vec<String> = scene_keys.clone();
+        present.extend(self.tabs.iter().map(|t| format!("s:{}", t.slide_id)));
         if master || self.layout_tab { present.push("layout".into()); }
         if pano_name.is_some() { present.push("pano".into()); }
+        let first_run = self.strip_order.is_empty();
         let mut order: Vec<String> = self.strip_order.iter().filter(|k| present.contains(k)).cloned().collect();
-        for k in present { if !order.contains(&k) { order.push(k); } }
+        for k in present { if !order.contains(&k) { if k.starts_with("scene:") && first_run { order.insert(0, k); } else { order.push(k); } } }
+        let first_slide = order.iter().find_map(|k| k.strip_prefix("s:").map(String::from));
+        let mut close_scene: Option<String> = None;
+        let mut open_scene = false;
+        let mut scene_pick: Option<String> = None;
         self.strip_order = order.clone();
         // One flat band that belongs to the ribbon, with a border line under it that the active tab sits on.
         let dark = root.visuals().dark_mode;
@@ -186,10 +218,17 @@ impl App {
         egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
-                let (story, _) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", self.scene_view && !in_mode, false, 138.0);
-                if story.clicked() { go_story = true; }
                 let mut slide_chips: Vec<egui::Response> = vec![];
                 for key in &order {
+                    if key.starts_with("scene:") {
+                        let shown = self.scene_view && !in_mode && *key == self.scene_active;
+                        // Closing it needs somewhere to go: another tab, unless it is not the one showing.
+                        let closable = order.len() > 1 && (!shown || !self.tabs.is_empty() || scene_keys.len() > 1);
+                        let (r, closed) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", shown, closable, 160.0);
+                        if closed { close_scene = Some(key.clone()); } else if r.clicked() { go_story = true; scene_pick = Some(key.clone()); }
+                        slide_chips.push(r);
+                        continue;
+                    }
                     if key == "layout" {
                         // The Layout Builder is a tab of its own. It stays when another tab is chosen (the layouts
                         // are saved on the way out) and opens again when clicked; its × closes it.
@@ -226,11 +265,28 @@ impl App {
                     }); }
                 }
                 moved_tab = drag_reorder(ui, "strip", &slide_chips);
+                // A "+" at the end opens the Scene View; if its tab was closed, the tab comes back at the right end.
+                let (plus, _) = tab_chip_sized(ui, None, "+", false, false, 34.0, 16.0);
+                plus.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Open Scene View"));
+                if plus.clicked() { open_scene = true; }
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
         });
         if let Some((from, to)) = moved_tab { self.move_strip(from, to); }
+        if open_scene { self.new_scene_tab(); go_story = true; }
+        else if let Some(k) = scene_pick { self.scene_active = k; }
+        if let Some(k) = close_scene {
+            let was_showing = self.scene_view && !in_mode && k == self.scene_active;
+            if let Some(t) = self.scene_tabs.as_mut() { t.retain(|x| *x != k); }
+            self.strip_order.retain(|x| *x != k);
+            if was_showing {
+                match first_slide {
+                    Some(id) => { go_slide = Some(id); go_story = false; }
+                    None => if let Some(n) = self.scene_tabs.as_ref().and_then(|t| t.first().cloned()) { self.scene_active = n; }
+                }
+            }
+        }
         // Leaving the 360° editing mode, by any other tab or by its own ×, ends it first.
         if pano_open && (go_story || go_slide.is_some() || close_pano || open_builder || close_builder || close.is_some() || close_others.is_some() || close_all) { self.close_pano_edit(); }
         if close_pano { self.pano.tab = None; }
@@ -373,7 +429,7 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
     let top_round = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
     if active {
         ui.painter().rect_filled(rect, top_round, ui.visuals().selection.bg_fill);
-    } else if resp.hovered() {
+    } else if ui.rect_contains_pointer(rect) {
         ui.painter().rect_filled(rect, top_round, if dark { egui::Color32::from_white_alpha(14) } else { egui::Color32::from_black_alpha(12) });
     }
     let mid = rect.center().y - 1.0;
@@ -392,7 +448,7 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
         ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
     }
     let mut closed = false;
-    if closable && (active || resp.hovered()) {
+    if closable && (active || ui.rect_contains_pointer(rect)) {
         let x = egui::Rect::from_center_size(egui::pos2(rect.right() - 15.0, mid), egui::vec2(18.0, 18.0));
         let xr = ui.interact(x, resp.id.with("close"), egui::Sense::click());
         if xr.hovered() { ui.painter().rect_filled(x, 9.0, if active { egui::Color32::from_white_alpha(45) } else if dark { egui::Color32::from_white_alpha(28) } else { egui::Color32::from_black_alpha(24) }); }
