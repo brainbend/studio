@@ -1384,7 +1384,7 @@ impl App {
 
     /// The author's brand colors: pick one to change it with the picker, add more, remove one, and drag them into order.
     /// Every color menu offers them first.
-    pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context) {
+    pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         if !self.theme_colors_open { return; }
         let Some(proj) = self.project.as_mut() else { self.theme_colors_open = false; return };
         let mut open = true;
@@ -1397,7 +1397,7 @@ impl App {
         let mut mv: Option<(usize, usize)> = None;
         let mut remove = false;
         let mut add = false;
-        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 260.0], true, &mut open, |ui| {
+        crate::dock_tool(ui, "Brand Colors", &mut open, |ui| {
             // The picker takes the width the window has, so there is no empty strip beside it.
             let w = ui.available_width().clamp(240.0, 720.0);
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
@@ -1539,18 +1539,18 @@ impl App {
     }
 
     /// The Studio Settings window: every app-wide setting in one place.
-    pub(super) fn settings_window(&mut self, ctx: &egui::Context) {
+    pub(super) fn settings_window(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         if !self.settings_open { return; }
         let mut open = true;
         let mut one = self.one_section;
         let mut hover = self.ribbon_hover;
-        let mut inside = self.windows_inside;
+        let mut each_tab = self.new_tab_each;
         let mut panels = self.panels;
-        crate::tool_window_at(ctx, "studio-settings", "Studio Settings", [360.0, 420.0], false, &mut open, |ui| {
+        crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
             ui.label(egui::RichText::new("Windows and panels").strong());
             ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
             ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
-            ui.checkbox(&mut inside, "Open tool windows inside the app").on_hover_text("Spelling, search and the other tool windows open as panels in the app instead of as windows of their own. Best with a tiling window manager.");
+            ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("What shows").strong());
             ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
@@ -1571,8 +1571,8 @@ impl App {
             ui.checkbox(&mut panels.layers, "Slide Layers");
         });
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
+        if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
-        if inside != self.windows_inside { self.windows_inside = inside; crate::prefs::set_bool("tool_windows_inside", inside); }
         for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers)] {
             if was != now { crate::prefs::set_bool(key, now); }
         }

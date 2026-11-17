@@ -25,22 +25,6 @@ pub fn set_bool(key: &str, value: bool) {
     let _ = std::fs::write(path, serde_json::Value::Object(all).to_string());
 }
 
-/// Whether the desktop is a tiling window manager (Hyprland, sway, i3 and the like), which would tile every window the app opens.
-pub fn tiling_session() -> bool {
-    if !cfg!(target_os = "linux") { return false; }
-    ["HYPRLAND_INSTANCE_SIGNATURE", "SWAYSOCK", "I3SOCK", "NIRI_SOCKET"].iter().any(|k| std::env::var_os(k).is_some())
-        || ["XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION"].iter().filter_map(|k| std::env::var(k).ok()).any(|d| is_tiling_name(&d))
-}
-
-fn is_tiling_name(desktop: &str) -> bool {
-    let d = desktop.to_ascii_lowercase();
-    ["hyprland", "sway", "i3", "niri", "river", "bspwm", "dwm", "awesome", "qtile", "xmonad", "herbstluftwm", "leftwm", "wayfire"].iter().any(|n| d.split([':', ' ']).any(|part| part == *n))
-}
-
-/// Tool windows (settings, spelling, search...) open inside the app instead of as windows of their own. The choice made
-/// in the app wins; with none made, a tiling window manager gets them inside, where it cannot tile them.
-pub fn tool_windows_inside() -> bool { get_bool("tool_windows_inside").unwrap_or_else(tiling_session) }
-
 /// Which panels of the editor show. Each person decides (it follows them, not the project): someone who never uses animations
 /// hides the timeline, someone who never uses AI hides its tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,14 +39,4 @@ impl Panels {
     pub fn bottom_tabs(&self) -> Vec<usize> { [(0, self.timeline), (1, self.notes), (2, self.states)].into_iter().filter(|t| t.1).map(|t| t.0).collect() }
     /// The side panel's tabs (0 Properties, 1 Triggers, 2 AI) that show.
     pub fn side_tabs(&self) -> Vec<usize> { [(0, self.properties), (1, self.triggers), (2, self.ai)].into_iter().filter(|t| t.1).map(|t| t.0).collect() }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn tiling_desktops_are_recognised_by_name() {
-        assert!(is_tiling_name("Hyprland") && is_tiling_name("sway") && is_tiling_name("ubuntu:i3"));
-        assert!(!is_tiling_name("GNOME") && !is_tiling_name("KDE") && !is_tiling_name("X-Cinnamon"));
-    }
 }

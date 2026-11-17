@@ -225,6 +225,10 @@ struct App {
     open_to_scene_view: bool,
     /// The slide about to be shown gets a tab of its own (double-click, the slide menu), not the single slide tab.
     new_tab_request: bool,
+    /// Every slide opens in a tab of its own (a setting of Studio Settings).
+    new_tab_each: bool,
+    /// A slide right-clicked in the slide list, until its menu closes (see `with_menu_target`).
+    menu_pick: Option<MenuPick>,
     scene_rename: Option<usize>,
     /// The slide whose name is being edited in the slide list.
     slide_rename: Option<usize>,
@@ -294,8 +298,6 @@ struct App {
     allow_close: bool,
     /// Checks GitHub for a newer release.
     updater: update::Updater,
-    /// Tool windows open inside the app rather than as windows of their own (see `prefs::tool_windows_inside`).
-    windows_inside: bool,
     /// Opening a section of the Properties panel closes the one that was open (see `prefs`).
     one_section: bool,
     /// The ribbon stays open under the tabs (a person's choice); otherwise it opens over the slide when a tab is clicked.
@@ -303,6 +305,9 @@ struct App {
     /// Which panels show (see `prefs::Panels`), chosen in the Studio Settings window.
     panels: prefs::Panels,
     settings_open: bool,
+    /// The tool showing in the tool dock, and which tools were open last frame (the newest one is shown).
+    docked: Vec<Tool>,
+    tools_seen: Vec<Tool>,
     ribbon_open: bool,
     /// Resting the pointer on a tab opens the ribbon too (a person's choice).
     ribbon_hover: bool,
@@ -510,7 +515,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), windows_inside: prefs::tool_windows_inside(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -712,84 +717,336 @@ fn gradient_at(stops: &[(f32, Rgba)], t: f32) -> egui::Color32 {
 }
 
 /// Where along a CSS-angle gradient over `rect` the point `p` lies (0..1).
-/// A window that changes how the slide looks (Background, Fonts, Brand Colors): it opens at the right of the slide area,
-/// beside the inspector, so most of the slide stays in view while it is used.
-pub(crate) fn side_window(ctx: &egui::Context, title: &str) -> egui::Window<'static> {
-    let mut keep_in = ctx.content_rect();
-    keep_in.min.y = (keep_in.min.y + 44.0).min(keep_in.max.y);
-    egui::Window::new(title.to_string())
-        .pivot(egui::Align2::RIGHT_TOP)
-        .default_pos(egui::pos2(keep_in.max.x - 326.0 - 24.0, keep_in.min.y + 190.0))
-        .constrain_to(keep_in)
-}
+/// The slide a right-click picked in the slide list, while its menu is open. The editor stays where it is; the menu works on this slide.
+#[derive(Clone, Debug)]
+struct MenuPick { picked: String, pass: u64 }
 
-thread_local! {
-    /// Which of the app's windows had the keyboard focus when they were last drawn, and which were drawn since the main one was.
-    static FOCUS: std::cell::RefCell<(std::collections::HashMap<egui::ViewportId, bool>, std::collections::HashSet<egui::ViewportId>)> = Default::default();
-}
-
-/// Record whether a window has the keyboard focus, and say whether any of the app's windows (the main one or a tool window) does:
-/// a tool window stays in front of the app while the app is in use and steps back when another program is.
-fn app_has_focus(me: egui::ViewportId, mine: bool) -> bool {
-    FOCUS.with(|f| {
-        let mut f = f.borrow_mut();
-        if me == egui::ViewportId::ROOT {
-            // A new round: forget the tool windows that were not drawn since the last one (they are closed).
-            let seen = std::mem::take(&mut f.1);
-            f.0.retain(|id, _| *id == egui::ViewportId::ROOT || seen.contains(id));
-        } else {
-            f.1.insert(me);
-        }
-        f.0.insert(me, mine);
-        f.0.values().any(|&b| b)
-    })
-}
-
-/// A tool window (settings, spelling, search, project check...). On a desktop it is its own window: it can be moved out of
-/// the app and onto another screen, and it stays in front of the app while the app is in use. Where windows cannot be
-/// separate, it is a window inside the app.
-pub(crate) fn tool_window(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
-    tool_window_at(ctx, id, title, size, false, open, content)
-}
-
-/// `tool_window`, optionally opening (inside the app) beside the inspector instead of in the middle: for windows that change
-/// how the slide looks, so the slide stays in view.
-pub(crate) fn tool_window_at(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], beside: bool, open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
-    if ctx.embed_viewports() {
-        (if beside { side_window(ctx, title) } else { dialog_window(ctx, title) }).id(egui::Id::new(id)).open(open).collapsible(false).resizable(true).default_size(size).show(ctx, content);
-        return;
+impl App {
+    /// Forget the picked slide once its menu has closed.
+    fn menu_pick_clear(&mut self, ctx: &egui::Context) {
+        let Some(mp) = &self.menu_pick else { return };
+        if !egui::Popup::is_any_open(ctx) && ctx.cumulative_pass_nr() > mp.pass + 2 { self.menu_pick = None; }
     }
-    let vid = egui::ViewportId::from_hash_of(id);
-    let builder = egui::ViewportBuilder::default()
-        .with_title(title)
-        .with_inner_size(size)
-        .with_min_inner_size([260.0, 160.0])
-        .with_window_level(egui::viewport::WindowLevel::AlwaysOnTop);
-    let mut content = Some(content);
-    ctx.show_viewport_immediate(vid, builder, |ui, _class| {
-        let level = if app_has_focus(vid, ui.input(|i| i.viewport().focused.unwrap_or(false))) { egui::viewport::WindowLevel::AlwaysOnTop } else { egui::viewport::WindowLevel::Normal };
-        let last: Option<bool> = ui.data(|d| d.get_temp(egui::Id::new(("tool-window-front", id))));
-        if last != Some(level == egui::viewport::WindowLevel::AlwaysOnTop) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
-            ui.data_mut(|d| d.insert_temp(egui::Id::new(("tool-window-front", id)), level == egui::viewport::WindowLevel::AlwaysOnTop));
+
+    /// Run `f` (the slide menu) as if the right-clicked slide were the current one, so each item acts on it, and then put the
+    /// view back where it was, unless the item moved it (a new slide, a tab of its own).
+    fn with_menu_target(&mut self, i: usize, f: impl FnOnce(&mut App)) {
+        let Some(p) = &self.project else { return };
+        let cur = self.slide.min(p.slides.len() - 1);
+        let (prev, picked) = (p.slides[cur].id.clone(), p.slides[i].id.clone());
+        let (layer, selected, multi) = (self.layer, self.selected, std::mem::take(&mut self.slide_multi));
+        self.slide = i;
+        self.layer = 0;
+        self.selected = None;
+        f(self);
+        let still_there = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).is_some_and(|s| s.id == picked);
+        if still_there && !self.new_tab_request {
+            if let Some(k) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == prev)) {
+                self.slide = k;
+                self.layer = layer;
+                self.selected = selected;
+                self.slide_multi = multi;
+            }
         }
-        if ui.input(|i| i.viewport().close_requested()) { *open = false; }
-        egui::CentralPanel::default().show(ui, |ui| {
-            let out = egui::ScrollArea::vertical().auto_shrink([false, beside]).show(ui, |ui| { if let Some(f) = content.take() { f(ui); } });
-            if beside {
-                // These windows are exactly as tall as what is in them (and follow it as it changes), with no empty strip below.
-                let margin = egui::Frame::central_panel(ui.style()).inner_margin;
-                let want = (out.content_size.y + margin.sum().y + 2.0).clamp(120.0, 900.0).round();
-                let key = egui::Id::new(("tool-window-height", id));
-                let last: Option<f32> = ui.data(|d| d.get_temp(key));
-                if last.is_none_or(|l| (l - want).abs() > 1.0) {
-                    let width = ui.ctx().input(|i| i.viewport().inner_rect.map(|r| r.width())).unwrap_or(size[0]);
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(width, want)));
-                    ui.data_mut(|d| d.insert_temp(key, want));
-                }
+    }
+}
+
+/// The tools that open as floating windows and can be docked as tabs of the side panel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Tool { Variables, FocusOrder, Spelling, Find, Check, Colors, Settings }
+
+const TOOLS: [Tool; 7] = [Tool::Variables, Tool::FocusOrder, Tool::Spelling, Tool::Find, Tool::Check, Tool::Colors, Tool::Settings];
+
+/// The side panel's tab numbers: 0 Properties, 1 Triggers, 2 AI, then a docked tool is `TOOL_TAB` plus its place in `TOOLS`.
+const TOOL_TAB: usize = 10;
+
+impl Tool {
+    fn title(self) -> &'static str {
+        match self { Tool::Variables => "Variables", Tool::FocusOrder => "Focus Order", Tool::Spelling => "Spelling", Tool::Find => "Find and Replace", Tool::Check => "Project check", Tool::Colors => "Brand Colors", Tool::Settings => "Studio Settings" }
+    }
+    fn index(self) -> usize { TOOLS.iter().position(|t| *t == self).unwrap_or(0) }
+    /// The setting that remembers where the tool was left.
+    fn key(self) -> &'static str {
+        match self { Tool::Variables => "dock_variables", Tool::FocusOrder => "dock_focus_order", Tool::Spelling => "dock_spelling", Tool::Find => "dock_find", Tool::Check => "dock_check", Tool::Colors => "dock_colors", Tool::Settings => "dock_settings" }
+    }
+    /// How big the tool's floating window starts.
+    fn size(self) -> [f32; 2] {
+        match self { Tool::Variables => [420.0, 360.0], Tool::FocusOrder => [340.0, 360.0], Tool::Spelling => [460.0, 440.0], Tool::Find => [420.0, 320.0], Tool::Check => [520.0, 440.0], Tool::Colors => [360.0, 300.0], Tool::Settings => [360.0, 420.0] }
+    }
+}
+
+/// The top of a tool's body, floating or docked: a button that docks it (or pops it out again) and one that closes it, then
+/// what it shows, which scrolls. The tool being drawn says where it is, and whether it can dock, through the context.
+pub(crate) fn dock_tool(ui: &mut egui::Ui, _title: &str, open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    let docked: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("tool-docked"))).unwrap_or(false);
+    let can_dock: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("tool-can-dock"))).unwrap_or(false);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("\u{00d7}").on_hover_text("Close").clicked() { *open = false; }
+            if can_dock || docked {
+                let (label, tip) = if docked { ("Pop out", "Show this in a window of its own") } else { ("Dock", "Show this as a tab of the side panel") };
+                if ui.small_button(label).on_hover_text(tip).clicked() { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-toggle-dock"), true)); }
             }
         });
     });
+    // Docked, it fills the panel. Floating, the window is as tall as what is in it, up to most of the app's height.
+    let tall = (ui.ctx().content_rect().height() * 0.75).max(240.0);
+    let area = egui::ScrollArea::vertical().auto_shrink([false, docked]);
+    (if docked { area } else { area.max_height(tall) }).show(ui, |ui| content(ui));
+}
+
+impl App {
+    fn tool_open(&self, t: Tool) -> bool {
+        match t {
+            Tool::Variables => self.variables_open,
+            Tool::FocusOrder => self.focus_open,
+            Tool::Spelling => self.spell.is_some(),
+            Tool::Find => self.find.is_some(),
+            Tool::Check => self.check_results.is_some(),
+            Tool::Colors => self.theme_colors_open,
+            Tool::Settings => self.settings_open,
+        }
+    }
+
+    /// Whether a tool shows as a tab of the side panel: where it was left, except in the 360° editor, whose panel is its own.
+    fn tool_docked(&self, t: Tool) -> bool { self.docked.contains(&t) && self.can_dock_here() }
+
+    /// Docking needs the side panel: the 360° editor and a web lesson have their own.
+    fn can_dock_here(&self) -> bool { self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web()) }
+
+    /// The tabs of the side panel for the tools that are docked and open, in the order they were docked.
+    fn docked_open(&self) -> Vec<Tool> { self.docked.iter().copied().filter(|t| self.tool_open(*t) && self.can_dock_here()).collect() }
+
+    fn show_tool(&mut self, ctx: &egui::Context, t: Tool, ui: &mut egui::Ui) {
+        ctx.data_mut(|d| { d.insert_temp(egui::Id::new("tool-docked"), self.tool_docked(t)); d.insert_temp(egui::Id::new("tool-can-dock"), self.can_dock_here()); d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock")); });
+        match t {
+            Tool::Variables => self.variables_window(ctx, ui),
+            Tool::FocusOrder => self.focus_order_window(ui),
+            Tool::Spelling => self.spelling_tool(ui),
+            Tool::Find => self.find_tool(ui),
+            Tool::Check => self.check_tool(ui),
+            Tool::Colors => self.theme_colors_window(ctx, ui),
+            Tool::Settings => self.settings_window(ctx, ui),
+        }
+        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock"))).unwrap_or(false) {
+            let now = !self.docked.contains(&t);
+            if now { self.docked.push(t); } else { self.docked.retain(|x| *x != t); }
+            crate::prefs::set_bool(t.key(), now);
+        }
+    }
+
+    /// The tools that are open and not docked, each in a window of its own inside the app. Also notices a tool being opened
+    /// or docked, so the side panel shows it.
+    fn tool_windows(&mut self, ctx: &egui::Context) {
+        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-variables"))).unwrap_or(false) { self.variables_open = true; }
+        if self.file_view || self.project.is_none() { self.tools_seen.clear(); return; }
+        // A docked tool that has just opened (or been docked) is the tab showing.
+        let docked = self.docked_open();
+        if let Some(new) = docked.iter().find(|t| !self.tools_seen.contains(t)) { self.right_tab = TOOL_TAB + new.index(); }
+        self.tools_seen = docked;
+        for t in TOOLS {
+            if !self.tool_open(t) || self.tool_docked(t) { continue; }
+            dialog_window(ctx, t.title()).id(egui::Id::new(("tool-window", t.index()))).collapsible(false).resizable(true).default_width(t.size()[0]).show(ctx, |ui| self.show_tool(ctx, t, ui));
+        }
+    }
+
+    /// The side panel's tab numbers: Properties, Triggers and AI as the person chose, then the docked tools.
+    fn side_tab_ids(&self) -> Vec<usize> {
+        let mut ids = self.panels.side_tabs();
+        ids.extend(self.docked_open().iter().map(|t| TOOL_TAB + t.index()));
+        ids
+    }
+
+    fn spelling_tool(&mut self, ui: &mut egui::Ui) {
+        // Spelling: misspelled words across the project, each with suggestions.
+        if self.spell.is_some() && self.project.is_some() {
+            let mut open = true;
+            let mut st = self.spell.take().unwrap();
+            let found = brainbend_spell::check_project(self.project.as_ref().unwrap(), &st.ignore);
+            let mut jump: Option<(usize, Option<(usize, usize)>, Option<usize>)> = None;
+            let web = self.project.as_ref().unwrap().is_web();
+            let mut change: Option<(brainbend_spell::Misspelling, String)> = None;
+            let mut add: Option<String> = None;
+            let mut ignore: Option<String> = None;
+            crate::dock_tool(ui, "Spelling", &mut open, |ui| {
+                if found.is_empty() {
+                    ui.label("No misspelled words found.");
+                } else {
+                    ui.label(format!("{} possible misspelling{}", found.len(), if found.len() == 1 { "" } else { "s" }));
+                }
+                ui.weak("English (US). Add names and terms you use to the dictionary, or ignore them.");
+                ui.separator();
+                egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    for m in &found {
+                        ui.group(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.strong(&m.word);
+                                ui.label(format!("{} {}: {}", if web { "Section" } else { "Slide" }, m.slide + 1, m.context));
+                            });
+                            let sugg = st.suggestions.entry(m.word.clone()).or_insert_with(|| brainbend_spell::suggest(&m.word)).clone();
+                            ui.horizontal_wrapped(|ui| {
+                                for s in &sugg { if ui.small_button(s).on_hover_text("Change this word here").clicked() { change = Some((m.clone(), s.clone())); } }
+                                if sugg.is_empty() { ui.weak("No suggestions"); }
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.small_button("Go to").clicked() {
+                                    jump = Some((m.slide, if let brainbend_doc::find::Place::Object(l, o) = m.place { Some((l, o)) } else { None }, if let brainbend_doc::find::Place::Block(b) = m.place { Some(b) } else { None }));
+                                }
+                                if ui.small_button("Ignore").clicked() { ignore = Some(m.word.to_lowercase()); }
+                                if ui.small_button("Add to dictionary").on_hover_text("Saved with the project").clicked() { add = Some(m.word.to_lowercase()); }
+                            });
+                        });
+                    }
+                });
+            });
+            if let Some((m, to)) = change {
+                self.snapshot();
+                let hit = brainbend_doc::find::Hit { slide: m.slide, place: m.place.clone(), count: 1, context: String::new() };
+                let opts = brainbend_doc::find::FindOpts { match_case: true, whole_word: true };
+                self.project.as_mut().unwrap().replace_text(&m.word, &to, opts, Some(&hit));
+            }
+            if let Some(w) = add {
+                self.snapshot();
+                let p = self.project.as_mut().unwrap();
+                if !p.custom_words.contains(&w) { p.custom_words.push(w); }
+            }
+            if let Some(w) = ignore { st.ignore.insert(w); }
+            if let Some((slide, object, block)) = jump {
+                if web {
+                    self.sec = slide;
+                    self.blk = block;
+                } else {
+                    self.slide = slide;
+                    self.layer = object.map(|o| o.0).unwrap_or(0);
+                    self.selected = object;
+                    self.reset_visibility();
+                }
+            }
+            if open { self.spell = Some(st); }
+        }
+    }
+
+    fn find_tool(&mut self, ui: &mut egui::Ui) {
+        // Find and Replace: matches across slide text, notes, names and question text.
+        if self.find.is_some() && self.project.is_some() {
+            let mut open = true;
+            let mut jump: Option<(usize, Option<(usize, usize)>, Option<usize>)> = None;
+            let mut replace: Option<Option<brainbend_doc::find::Hit>> = None; // Some(None) = all
+            let web = self.project.as_ref().unwrap().is_web();
+            let mut st = self.find.take().unwrap();
+            let hits = self.project.as_ref().unwrap().find_text(&st.query, st.opts);
+            crate::dock_tool(ui, "Find and Replace", &mut open, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Find     ");
+                    let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(f32::INFINITY));
+                    if st.focus { r.request_focus(); st.focus = false; }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Replace");
+                    ui.add(egui::TextEdit::singleline(&mut st.with).desired_width(f32::INFINITY));
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut st.opts.match_case, "Match case");
+                    ui.checkbox(&mut st.opts.whole_word, "Whole word");
+                });
+                let total: usize = hits.iter().map(|h| h.count).sum();
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(total > 0, |ui| { if ui.button("Replace all").clicked() { replace = Some(None); } });
+                    if !st.query.is_empty() { ui.label(format!("{total} match{} in {} place{}", if total == 1 { "" } else { "es" }, hits.len(), if hits.len() == 1 { "" } else { "s" })); }
+                });
+                if !st.message.is_empty() { ui.weak(&st.message); }
+                ui.separator();
+                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    for h in &hits {
+                        ui.horizontal_wrapped(|ui| {
+                            let what = match h.place {
+                                brainbend_doc::find::Place::Object(..) => "text",
+                                brainbend_doc::find::Place::SlideName => "slide name",
+                                brainbend_doc::find::Place::Notes => "notes",
+                                brainbend_doc::find::Place::Question => "question",
+                                brainbend_doc::find::Place::Section => "section title",
+                                brainbend_doc::find::Place::Block(_) => "block",
+                            };
+                            ui.label(format!("{} {} ({what}): {}", if web { "Section" } else { "Slide" }, h.slide + 1, h.context));
+                            if ui.small_button("Go to").clicked() {
+                                jump = Some((h.slide, if let brainbend_doc::find::Place::Object(l, o) = h.place { Some((l, o)) } else { None }, if let brainbend_doc::find::Place::Block(b) = h.place { Some(b) } else { None }));
+                            }
+                            if ui.small_button("Replace").clicked() { replace = Some(Some(h.clone())); }
+                        });
+                    }
+                });
+            });
+            if let Some(which) = replace {
+                self.snapshot();
+                let n = self.project.as_mut().unwrap().replace_text(&st.query, &st.with, st.opts, which.as_ref());
+                st.message = format!("Replaced {n}.");
+            }
+            if let Some((slide, object, block)) = jump {
+                if web {
+                    self.sec = slide;
+                    self.blk = block;
+                } else {
+                    self.slide = slide;
+                    self.layer = object.map(|o| o.0).unwrap_or(0);
+                    self.selected = object;
+                    self.reset_visibility();
+                }
+            }
+            if open { self.find = Some(st); }
+        }
+    }
+
+    fn check_tool(&mut self, ui: &mut egui::Ui) {
+        // Project check report: errors and warnings, each with a button that jumps to the problem.
+        if let Some(issues) = self.check_results.clone() {
+            let mut open = true;
+            let mut jump: Option<brainbend_doc::check::Location> = None;
+            let web_check = self.project.as_ref().is_some_and(|p| p.is_web());
+            crate::dock_tool(ui, "Project check", &mut open, |ui| {
+                if issues.is_empty() {
+                    ui.label("No problems found.");
+                } else {
+                    let errors = issues.iter().filter(|i| i.severity == brainbend_doc::check::Severity::Error).count();
+                    ui.label(format!("{} problem(s): {} error(s), {} warning(s)", issues.len(), errors, issues.len() - errors));
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                        for i in &issues {
+                            ui.horizontal_wrapped(|ui| {
+                                let (tag, col) = match i.severity {
+                                    brainbend_doc::check::Severity::Error => ("Error", egui::Color32::from_rgb(220, 70, 60)),
+                                    brainbend_doc::check::Severity::Warning => ("Warning", egui::Color32::from_rgb(220, 170, 40)),
+                                };
+                                ui.colored_label(col, tag);
+                                if web_check { ui.label(&i.message); } else { ui.label(format!("Slide {}: {}", i.at.slide + 1, i.message)); }
+                                if ui.small_button("Go to").clicked() { jump = Some(i.at.clone()); }
+                            });
+                        }
+                    });
+                }
+                if ui.button("Run again").clicked() {
+                    self.check_results = self.project.as_ref().map(|p| p.check());
+                }
+            });
+            if let Some(at) = jump {
+                if web_check {
+                    self.sec = at.slide;
+                    self.blk = at.object.map(|o| o.0);
+                } else {
+                    self.slide = at.slide;
+                    self.layer = at.object.map(|o| o.0).unwrap_or(0);
+                    self.selected = at.object;
+                    self.reset_visibility();
+                }
+            }
+            if !open { self.check_results = None; }
+        }
+    }
+
+}
+
+/// A floating tool window, inside the app (the wide ones: Player Properties, Google Fonts). Narrow tools open in the tool dock.
+pub(crate) fn tool_window(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    dialog_window(ctx, title).id(egui::Id::new(id)).open(open).collapsible(false).resizable(true).default_size(size).show(ctx, content);
 }
 
 /// A dialog window: it opens in the middle of the app (whatever its size), below the title bar and its window buttons,
@@ -2006,15 +2263,21 @@ impl App {
             let r = by_slide[&i];
             ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                let marked = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id);
+                let marked = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id) || self.menu_pick.as_ref().is_some_and(|mp| mp.picked == self.project.as_ref().unwrap().slides[i].id);
+                let in_selection = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id);
                 let resp = self.slide_thumbnail(ui, ctx, i, tw, marked);
-                if resp.secondary_clicked() && !marked {
-                    // Right-clicking a slide outside the selection selects just that slide.
+                if resp.secondary_clicked() && !in_selection && !self.scene_view {
+                    // Right-clicking a slide outside the selection picks just that slide for the menu. The editor stays where it is.
+                    self.menu_pick = Some(MenuPick { picked: self.project.as_ref().unwrap().slides[i].id.clone(), pass: ctx.cumulative_pass_nr() });
+                } else if resp.secondary_clicked() && !in_selection {
+                    // In the Scene View there is no tab, so the slide is simply selected.
                     self.slide_multi.clear();
                     select = Some(i);
                     self.slide = i;
                 }
-                resp.context_menu(|ui| self.slide_context_menu(ui));
+                resp.context_menu(|ui| {
+                    if !in_selection && !self.scene_view { self.with_menu_target(i, |a| a.slide_context_menu(ui)); } else { self.slide_context_menu(ui); }
+                });
                 if resp.double_clicked() || resp.middle_clicked() { open = Some(i); }
                 else if resp.clicked() {
                     let (cmd, shift) = ctx.input(|inp| (inp.modifiers.command, inp.modifiers.shift));
@@ -2464,7 +2727,9 @@ impl App {
                 if ui.button(nm).clicked() { self.move_selected_slides_to_scene(si); ui.close(); }
             }
         });
-        if ui.button("Open in new tab").clicked() {
+        // The slide that is showing in the tab already has it.
+        let open_here = !self.scene_view && self.active_tab.and_then(|k| self.tabs.get(k)).zip(self.project.as_ref().and_then(|p| p.slides.get(self.slide))).is_some_and(|(t, s)| t.slide_id == s.id);
+        if ui.add_enabled(!open_here, egui::Button::new("Open in new tab")).on_disabled_hover_text("This slide is open in the tab that is showing").clicked() {
             self.new_tab_request = true;
             self.scene_view = false;
             self.layer = 0;
@@ -3926,7 +4191,7 @@ impl App {
 
     /// The project's variables in a window of their own: they belong to the whole project, not to a slide.
     /// Focus Order: the order a keyboard (Tab) and a screen reader reach the objects of the current layer.
-    fn focus_order_window(&mut self, ctx: &egui::Context) {
+    fn focus_order_window(&mut self, ui: &mut egui::Ui) {
         if !self.focus_open { return; }
         let Some(p) = self.project.as_ref() else { self.focus_open = false; return };
         let (si, li) = (self.slide, self.layer);
@@ -3938,7 +4203,7 @@ impl App {
         let mut skip: Option<usize> = None;
         let mut pick: Option<usize> = None;
         let mut reset = false;
-        crate::tool_window(ctx, "focus-order", "Focus Order", [340.0, 360.0], &mut open, |ui| {
+        crate::dock_tool(ui, "Focus Order", &mut open, |ui| {
             ui.weak(format!("The order the Tab key and screen readers move through \"{title}\", first to last."));
             ui.add_space(4.0);
             let last = rows.len().saturating_sub(1);
@@ -3980,12 +4245,11 @@ impl App {
         }
     }
 
-    fn variables_window(&mut self, ctx: &egui::Context) {
-        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-variables"))).unwrap_or(false) { self.variables_open = true; }
+    fn variables_window(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         if !self.variables_open { return; }
         if self.project.is_none() { self.variables_open = false; return; }
         let mut open = true;
-        crate::tool_window(ctx, "project-variables", "Variables", [420.0, 360.0], &mut open, |ui| {
+        crate::dock_tool(ui, "Variables", &mut open, |ui| {
             ui.weak("Variables belong to the whole project. Triggers read and change them.");
             ui.add_space(4.0);
             self.variables_panel(ui, ctx);
@@ -5927,7 +6191,8 @@ fn sync_app_icon(ctx: &egui::Context) {
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         sync_app_icon(root.ctx());
-        if root.ctx().embed_viewports() != self.windows_inside { root.ctx().set_embed_viewports(self.windows_inside); }
+        // Windows are never separate operating-system windows: the same on every system and window manager.
+        if !root.ctx().embed_viewports() { root.ctx().set_embed_viewports(true); }
         self.show(root);
     }
 }
@@ -5964,11 +6229,11 @@ impl App {
     /// One frame. The States tab's viewed state is on its object for the length of it.
     fn show(&mut self, root: &mut egui::Ui) {
         root.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-one-open"), self.one_section));
-        app_has_focus(egui::ViewportId::ROOT, root.input(|i| i.viewport().focused.unwrap_or(false)));
         // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
         font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
         if self.try_mode { self.selected = None; self.multi.clear(); }
+        self.menu_pick_clear(root.ctx());
         self.sync_tabs();
         self.begin_state_swap();
         self.show_frame(root);
@@ -6058,11 +6323,8 @@ impl App {
         self.sync_master();
         self.chrome(root, ctx);
         self.player_window(ctx);
-        self.variables_window(ctx);
-        self.focus_order_window(ctx);
         self.equation_window(ctx);
-        self.theme_colors_window(ctx);
-        self.settings_window(ctx);
+        self.tool_windows(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
         if do_open { self.guard(Pending::Open); }
         // Files dropped onto the window: a project opens like File ▸ Open; a picture, video or audio file is added to the slide.
@@ -6082,182 +6344,6 @@ impl App {
             }
             if self.dirty && self.last_autosave.elapsed().as_secs() >= 30 { self.autosave(); }
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
-        }
-        // Spelling: misspelled words across the project, each with suggestions.
-        if self.spell.is_some() && self.project.is_some() {
-            let mut open = true;
-            let mut st = self.spell.take().unwrap();
-            let found = brainbend_spell::check_project(self.project.as_ref().unwrap(), &st.ignore);
-            let mut jump: Option<(usize, Option<(usize, usize)>, Option<usize>)> = None;
-            let web = self.project.as_ref().unwrap().is_web();
-            let mut change: Option<(brainbend_spell::Misspelling, String)> = None;
-            let mut add: Option<String> = None;
-            let mut ignore: Option<String> = None;
-            crate::tool_window(ctx, "spelling", "Spelling", [460.0, 440.0], &mut open, |ui| {
-                if found.is_empty() {
-                    ui.label("No misspelled words found.");
-                } else {
-                    ui.label(format!("{} possible misspelling{}", found.len(), if found.len() == 1 { "" } else { "s" }));
-                }
-                ui.weak("English (US). Add names and terms you use to the dictionary, or ignore them.");
-                ui.separator();
-                egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                    for m in &found {
-                        ui.group(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.strong(&m.word);
-                                ui.label(format!("{} {}: {}", if web { "Section" } else { "Slide" }, m.slide + 1, m.context));
-                            });
-                            let sugg = st.suggestions.entry(m.word.clone()).or_insert_with(|| brainbend_spell::suggest(&m.word)).clone();
-                            ui.horizontal_wrapped(|ui| {
-                                for s in &sugg { if ui.small_button(s).on_hover_text("Change this word here").clicked() { change = Some((m.clone(), s.clone())); } }
-                                if sugg.is_empty() { ui.weak("No suggestions"); }
-                            });
-                            ui.horizontal(|ui| {
-                                if ui.small_button("Go to").clicked() {
-                                    jump = Some((m.slide, if let brainbend_doc::find::Place::Object(l, o) = m.place { Some((l, o)) } else { None }, if let brainbend_doc::find::Place::Block(b) = m.place { Some(b) } else { None }));
-                                }
-                                if ui.small_button("Ignore").clicked() { ignore = Some(m.word.to_lowercase()); }
-                                if ui.small_button("Add to dictionary").on_hover_text("Saved with the project").clicked() { add = Some(m.word.to_lowercase()); }
-                            });
-                        });
-                    }
-                });
-            });
-            if let Some((m, to)) = change {
-                self.snapshot();
-                let hit = brainbend_doc::find::Hit { slide: m.slide, place: m.place.clone(), count: 1, context: String::new() };
-                let opts = brainbend_doc::find::FindOpts { match_case: true, whole_word: true };
-                self.project.as_mut().unwrap().replace_text(&m.word, &to, opts, Some(&hit));
-            }
-            if let Some(w) = add {
-                self.snapshot();
-                let p = self.project.as_mut().unwrap();
-                if !p.custom_words.contains(&w) { p.custom_words.push(w); }
-            }
-            if let Some(w) = ignore { st.ignore.insert(w); }
-            if let Some((slide, object, block)) = jump {
-                if web {
-                    self.sec = slide;
-                    self.blk = block;
-                } else {
-                    self.slide = slide;
-                    self.layer = object.map(|o| o.0).unwrap_or(0);
-                    self.selected = object;
-                    self.reset_visibility();
-                }
-            }
-            if open { self.spell = Some(st); }
-        }
-        // Find and Replace: matches across slide text, notes, names and question text.
-        if self.find.is_some() && self.project.is_some() {
-            let mut open = true;
-            let mut jump: Option<(usize, Option<(usize, usize)>, Option<usize>)> = None;
-            let mut replace: Option<Option<brainbend_doc::find::Hit>> = None; // Some(None) = all
-            let web = self.project.as_ref().unwrap().is_web();
-            let mut st = self.find.take().unwrap();
-            let hits = self.project.as_ref().unwrap().find_text(&st.query, st.opts);
-            crate::tool_window(ctx, "find-replace", "Find and Replace", [420.0, 320.0], &mut open, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Find     ");
-                    let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(f32::INFINITY));
-                    if st.focus { r.request_focus(); st.focus = false; }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Replace");
-                    ui.add(egui::TextEdit::singleline(&mut st.with).desired_width(f32::INFINITY));
-                });
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut st.opts.match_case, "Match case");
-                    ui.checkbox(&mut st.opts.whole_word, "Whole word");
-                });
-                let total: usize = hits.iter().map(|h| h.count).sum();
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(total > 0, |ui| { if ui.button("Replace all").clicked() { replace = Some(None); } });
-                    if !st.query.is_empty() { ui.label(format!("{total} match{} in {} place{}", if total == 1 { "" } else { "es" }, hits.len(), if hits.len() == 1 { "" } else { "s" })); }
-                });
-                if !st.message.is_empty() { ui.weak(&st.message); }
-                ui.separator();
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    for h in &hits {
-                        ui.horizontal_wrapped(|ui| {
-                            let what = match h.place {
-                                brainbend_doc::find::Place::Object(..) => "text",
-                                brainbend_doc::find::Place::SlideName => "slide name",
-                                brainbend_doc::find::Place::Notes => "notes",
-                                brainbend_doc::find::Place::Question => "question",
-                                brainbend_doc::find::Place::Section => "section title",
-                                brainbend_doc::find::Place::Block(_) => "block",
-                            };
-                            ui.label(format!("{} {} ({what}): {}", if web { "Section" } else { "Slide" }, h.slide + 1, h.context));
-                            if ui.small_button("Go to").clicked() {
-                                jump = Some((h.slide, if let brainbend_doc::find::Place::Object(l, o) = h.place { Some((l, o)) } else { None }, if let brainbend_doc::find::Place::Block(b) = h.place { Some(b) } else { None }));
-                            }
-                            if ui.small_button("Replace").clicked() { replace = Some(Some(h.clone())); }
-                        });
-                    }
-                });
-            });
-            if let Some(which) = replace {
-                self.snapshot();
-                let n = self.project.as_mut().unwrap().replace_text(&st.query, &st.with, st.opts, which.as_ref());
-                st.message = format!("Replaced {n}.");
-            }
-            if let Some((slide, object, block)) = jump {
-                if web {
-                    self.sec = slide;
-                    self.blk = block;
-                } else {
-                    self.slide = slide;
-                    self.layer = object.map(|o| o.0).unwrap_or(0);
-                    self.selected = object;
-                    self.reset_visibility();
-                }
-            }
-            if open { self.find = Some(st); }
-        }
-        // Project check report: errors and warnings, each with a button that jumps to the problem.
-        if let Some(issues) = self.check_results.clone() {
-            let mut open = true;
-            let mut jump: Option<brainbend_doc::check::Location> = None;
-            let web_check = self.project.as_ref().is_some_and(|p| p.is_web());
-            crate::tool_window(ctx, "project-check", "Project check", [520.0, 440.0], &mut open, |ui| {
-                if issues.is_empty() {
-                    ui.label("No problems found.");
-                } else {
-                    let errors = issues.iter().filter(|i| i.severity == brainbend_doc::check::Severity::Error).count();
-                    ui.label(format!("{} problem(s): {} error(s), {} warning(s)", issues.len(), errors, issues.len() - errors));
-                    ui.separator();
-                    egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                        for i in &issues {
-                            ui.horizontal_wrapped(|ui| {
-                                let (tag, col) = match i.severity {
-                                    brainbend_doc::check::Severity::Error => ("Error", egui::Color32::from_rgb(220, 70, 60)),
-                                    brainbend_doc::check::Severity::Warning => ("Warning", egui::Color32::from_rgb(220, 170, 40)),
-                                };
-                                ui.colored_label(col, tag);
-                                if web_check { ui.label(&i.message); } else { ui.label(format!("Slide {}: {}", i.at.slide + 1, i.message)); }
-                                if ui.small_button("Go to").clicked() { jump = Some(i.at.clone()); }
-                            });
-                        }
-                    });
-                }
-                if ui.button("Run again").clicked() {
-                    self.check_results = self.project.as_ref().map(|p| p.check());
-                }
-            });
-            if let Some(at) = jump {
-                if web_check {
-                    self.sec = at.slide;
-                    self.blk = at.object.map(|o| o.0);
-                } else {
-                    self.slide = at.slide;
-                    self.layer = at.object.map(|o| o.0).unwrap_or(0);
-                    self.selected = at.object;
-                    self.reset_visibility();
-                }
-            }
-            if !open { self.check_results = None; }
         }
         let mut chosen: Option<(bool, bool)> = None; // (save first?, proceed?)
         if let Some(action) = self.pending {
@@ -6333,6 +6419,16 @@ impl App {
 
         if self.pano_edit_ui(root, ctx) { return; }
         if self.scene_view {
+            // The Scene View has no Properties panel, so the side panel is only there for tools that are docked and open.
+            let docked = self.docked_open();
+            if !docked.is_empty() {
+                egui::Panel::right("inspector-tools").default_size(420.0).min_size(280.0).resizable(true).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
+                    if !docked.iter().any(|t| TOOL_TAB + t.index() == self.right_tab) { self.right_tab = TOOL_TAB + docked[0].index(); }
+                    let tabs: Vec<(usize, String)> = docked.iter().map(|t| (TOOL_TAB + t.index(), t.title().to_string())).collect();
+                    doc_tabs::panel_tabs_of(ui, &tabs, &mut self.right_tab);
+                    if let Some(&t) = TOOLS.get(self.right_tab - TOOL_TAB) { self.show_tool(ctx, t, ui); }
+                });
+            }
             egui::CentralPanel::default().show(root, |ui| self.scene_view_ui(ui, ctx));
             return;
         }
@@ -6439,8 +6535,8 @@ impl App {
         let mut copy_look = false;
         let mut paste_look = false;
         // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
-        let wide_panel = self.right_tab == AI_TAB && self.assistant.shows_terminal();
-        let show_side = !self.panels.side_tabs().is_empty() || (self.panels.layers && !self.in_master_view());
+        let wide_panel = (self.right_tab == AI_TAB && self.assistant.shows_terminal()) || self.right_tab >= TOOL_TAB;
+        let show_side = !self.side_tab_ids().is_empty() || (self.panels.layers && !self.in_master_view());
         if show_side {
         egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
@@ -6448,17 +6544,17 @@ impl App {
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
             // stays put.
             // A tab that was hidden in the settings is not left showing.
-            let side = self.panels.side_tabs();
+            let side = self.side_tab_ids();
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
             // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
-            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB { self.right_tab = 0; }
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB && self.right_tab < TOOL_TAB { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
             if !side.contains(&self.right_tab) { if let Some(&first) = side.first() { self.right_tab = first; } }
             ui.add_enabled_ui(editable, |ui| {
             // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
             // tab away.
-            if !self.in_master_view() && self.right_tab != AI_TAB && self.panels.layers {
+            if !self.in_master_view() && self.right_tab != AI_TAB && self.right_tab < TOOL_TAB && self.panels.layers {
                 egui::Panel::bottom("layers-panel-with-formatting").resizable(true).default_size(150.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
                     self.layers_panel(ui, ctx, slide_idx);
                 });
@@ -6477,8 +6573,12 @@ impl App {
                     }).count()
                 };
                 let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
-                let tabs: Vec<(usize, String)> = self.panels.side_tabs().into_iter().map(|i| (i, labels[i].clone())).collect();
+                let tabs: Vec<(usize, String)> = side.iter().map(|&i| (i, if i < TOOL_TAB { labels[i].clone() } else { TOOLS[i - TOOL_TAB].title().to_string() })).collect();
                 doc_tabs::panel_tabs_of(ui, &tabs, &mut self.right_tab);
+            }
+            if self.right_tab >= TOOL_TAB {
+                if let Some(&t) = TOOLS.get(self.right_tab - TOOL_TAB) { self.show_tool(ctx, t, ui); }
+                return;
             }
             if self.right_tab == AI_TAB {
                 self.ai_panel(ui);
@@ -11116,90 +11216,110 @@ mod tests {
         assert_eq!(a.tabs.len(), 1, "the deleted slide's tab is gone");
     }
 
-    /// Choosing slides shows them in one replaceable tab. A tab of its own comes from double-clicking, the slide's menu,
-    /// or a slide in another scene; the AI moves between slides the same way a person does.
+    /// Choosing a slide in the slide list shows it in the tab that is showing. A tab of its own comes from asking for one, from
+    /// opening a slide in the Scene View, or from the setting that opens every slide in a new tab.
     #[test]
-    fn choosing_slides_uses_one_tab_and_a_new_tab_only_when_asked_for() {
+    fn choosing_slides_replaces_the_slide_in_the_tab_and_a_new_tab_only_when_asked_for() {
         let mut a = app();
         for _ in 0..4 { a.add_slide(SlideKind::Normal); }
+        a.slide = 0;
         a.sync_tabs();
         let n = a.project.as_ref().unwrap().slides.len();
         assert!(n >= 5);
-        // Walking through the slides, one after another, keeps a single tab.
-        for i in 0..n { a.slide = i; a.sync_tabs(); }
-        assert_eq!(a.tabs.len(), 1, "every slide chosen replaced the same tab");
-        assert!(a.tabs[0].preview);
+        assert_eq!(a.tabs.len(), 1, "a project opens with the one slide tab");
+        // Clicking slide 2 shows it in that tab, and so does every other slide after it.
+        for i in 1..n { a.slide = i; a.sync_tabs(); assert_eq!(a.tabs.len(), 1, "slide {} replaced the slide in the tab", i + 1); }
         assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[n - 1].id);
-        // Asking for a tab keeps the one shown and opens the next in the single tab.
+        // Asking for a tab of its own opens a second one, and the slides chosen after that replace the slide in the one showing.
         a.new_tab_request = true;
         a.slide = 0;
         a.sync_tabs();
-        assert_eq!(a.tabs.len(), 2, "a tab of its own, beside the replaceable one");
-        assert!(!a.tabs[a.active_tab.unwrap()].preview);
+        assert_eq!(a.tabs.len(), 2);
         a.slide = 1;
         a.sync_tabs();
         a.slide = 2;
         a.sync_tabs();
-        assert_eq!(a.tabs.len(), 2, "slides chosen after that still use the single tab");
-        assert_eq!(a.tabs.iter().filter(|t| t.preview).count(), 1);
-        // Asking for the slide that is already the replaceable tab keeps it.
-        a.new_tab_request = true;
-        a.sync_tabs();
-        assert!(a.tabs.iter().all(|t| !t.preview), "that tab stays");
-        a.slide = 3;
-        a.sync_tabs();
-        assert_eq!(a.tabs.len(), 3, "so the next slide chosen gets a new single tab");
-        // A slide in another scene opens a tab of its own.
+        assert_eq!(a.tabs.len(), 2, "still two tabs");
+        assert_eq!(a.tabs[a.active_tab.unwrap()].slide_id, a.project.as_ref().unwrap().slides[2].id);
+        // A slide in another scene replaces the slide in the tab too.
         a.add_scene();
         a.scene_view = false;
         a.sync_tabs();
-        let other = a.slide;
-        assert_eq!(a.tabs.len(), 4, "the new scene's slide opened a tab");
-        assert!(!a.tabs[a.active_tab.unwrap()].preview);
-        let _ = other;
+        assert_eq!(a.tabs.len(), 2);
+        // Opened from the Scene View, it gets a tab of its own.
+        a.scene_view = true;
+        a.sync_tabs();
+        a.new_tab_request = true;
+        a.slide = 3;
+        a.scene_view = false;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 3);
+        // The setting: every slide chosen gets a tab.
+        a.new_tab_each = true;
+        a.slide = 1;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 4, "with the setting on, a slide chosen in the list opens in a new tab");
     }
 
-    /// The Studio Settings window, opened from the Project tab, holds the app-wide settings, and the switches in it hide
-    /// the panels the person does not use.
+    /// Tools open in windows of their own, can be docked as tabs of the side panel (in every view), and open again where they
+    /// were left.
     #[test]
-    fn studio_settings_hides_the_panels_a_person_does_not_use() {
+    fn tools_float_and_can_be_docked_as_tabs_of_the_side_panel() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
-        a.ribbon_tab = ribbon::PROJECT_TAB;
+        a.scene_view = true;
         let mut h = harness(a);
-        h.run_steps(4);
-        assert!(h.query_by_label("Slide Notes").is_some(), "the bottom panel shows by default");
-        assert!(h.query_by_label("AI").is_some());
-        h.get_by_label_contains("Studio Settings").click();
-        h.run_steps(4);
-        assert!(h.state().settings_open);
-        assert!(h.query_by_label("Open one section at a time").is_some(), "the Help tab's options moved here");
-        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("studio-settings.png")).unwrap(); }
-        // Someone who never uses AI or animations hides them.
-        h.state_mut().panels.ai = false;
-        h.state_mut().panels.timeline = false;
-        h.state_mut().right_tab = AI_TAB;
-        h.run_steps(4);
-        assert_eq!(h.state().right_tab, 0, "a tab that is hidden is not left showing");
-        assert_eq!(h.state().bottom_tab, 1, "the bottom panel moves to the next tab that shows");
-        // With every tab of the bottom panel hidden, the panel is gone.
-        h.state_mut().panels.notes = false;
-        h.state_mut().panels.states = false;
-        h.run_steps(4);
-        assert!(h.state().panels.bottom_tabs().is_empty());
-        // Hiding Properties too (the AI does the designing) leaves the side panel's layers, and then nothing.
-        h.state_mut().panels.triggers = false;
-        assert_eq!(h.state().panels.side_tabs(), vec![0]);
-        h.state_mut().panels.properties = false;
-        assert!(h.state().panels.side_tabs().is_empty());
-        h.state_mut().settings_open = false;
         h.run_steps(3);
-        assert!(h.query_by_label("Slide Layers").is_some(), "the layers stay while they are switched on");
-        assert!(h.query_by_label("Properties").is_none(), "no Properties tab");
-        h.state_mut().panels.layers = false;
+        h.state_mut().variables_open = true;
         h.run_steps(3);
-        assert!(h.query_by_label("Slide Layers").is_none(), "with the layers off too, the side panel is gone");
+        assert!(h.state().docked.is_empty() && h.state().docked_open().is_empty(), "a tool opens as a window");
+        h.get_by_label("Dock").click();
+        h.run_steps(4);
+        assert_eq!(h.state().docked, vec![Tool::Variables]);
+        assert_eq!(h.state().right_tab, TOOL_TAB + Tool::Variables.index(), "docked, it is the tab showing, in the Scene View too");
+        assert!(h.query_by_label("Pop out").is_some());
+        // A second tool opens as a window and docks after the first.
+        h.state_mut().focus_open = true;
+        h.run_steps(3);
+        h.get_by_label("Dock").click();
+        h.run_steps(4);
+        assert_eq!(h.state().docked, vec![Tool::Variables, Tool::FocusOrder]);
+        assert_eq!(h.state().right_tab, TOOL_TAB + Tool::FocusOrder.index());
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tool-dock.png")).unwrap(); }
+        // Pop one out again, and close the other.
+        h.get_by_label("Pop out").click();
+        h.run_steps(4);
+        assert_eq!(h.state().docked, vec![Tool::Variables]);
+        assert!(h.query_by_label("Dock").is_some(), "back in a window");
+        h.get_by_label_contains("Pop out").click();
+        h.run_steps(4);
+        assert!(h.state().docked.is_empty(), "both are windows again");
+        h.state_mut().docked.push(Tool::Variables);
+        h.run_steps(3);
+        h.get_all_by_label("\u{00d7}").next().unwrap().click();
+        h.run_steps(3);
+        assert!(h.state().variables_open != h.state().focus_open, "× closed one tool and left the other");
+    }
+
+    /// Right-clicking a slide in the list leaves the editor where it is: the menu works on the right-clicked slide, and the view
+    /// goes back to the slide it was on unless the item moved it. Opening in a new tab works from any slide.
+    #[test]
+    fn right_clicking_a_slide_does_not_move_the_editor() {
+        let mut a = app();
+        a.add_slide(SlideKind::Normal);
+        a.slide = 0;
+        a.sync_tabs();
+        assert_eq!(a.tabs.len(), 1);
+        // An item that does nothing to the slide: the editor is still on slide 1 afterwards, with one tab.
+        a.with_menu_target(1, |a| assert_eq!(a.slide, 1, "the menu works on the right-clicked slide"));
+        a.sync_tabs();
+        assert_eq!((a.slide, a.tabs.len()), (0, 1));
+        // Open in new tab: the slide opens in a tab of its own, and the first tab keeps its slide.
+        a.with_menu_target(1, |a| { a.new_tab_request = true; a.scene_view = false; });
+        a.sync_tabs();
+        assert_eq!((a.slide, a.tabs.len()), (1, 2));
+        assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[0].id, "the first tab still shows slide 1");
     }
 
     #[test]
