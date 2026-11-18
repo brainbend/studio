@@ -1545,7 +1545,7 @@ impl App {
         let mut one = self.one_section;
         let mut hover = self.ribbon_hover;
         let mut each_tab = self.new_tab_each;
-        let mut reset = false;
+        let mut preset: Option<crate::dock::Preset> = None;
         let mut panels = self.panels;
         crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
             ui.label(egui::RichText::new("Windows and panels").strong());
@@ -1555,7 +1555,12 @@ impl App {
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Where things are").strong());
             ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, or out of the app for a window. Right-click a tab for the same moves from a menu.");
-            if ui.button("Reset layout").on_hover_text("Put every tab back where it started").clicked() { reset = true; }
+            ui.horizontal_wrapped(|ui| {
+                for pr in crate::dock::Preset::ALL {
+                    if ui.button(pr.name()).on_hover_text(pr.about()).clicked() { preset = Some(pr); }
+                }
+            });
+            ui.weak("Standard is how the app started. Tools go back to windows of their own.");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("What shows").strong());
             ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
@@ -1575,7 +1580,7 @@ impl App {
             ui.label("Slide");
             ui.checkbox(&mut panels.layers, "Slide Layers");
         });
-        if reset { self.reset_layout(); }
+        if let Some(pr) = preset { self.apply_preset(pr); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }

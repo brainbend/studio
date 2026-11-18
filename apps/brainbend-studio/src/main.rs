@@ -1005,13 +1005,17 @@ impl App {
     }
 
     /// Back to the layout the app starts with: the tabs where they began, and the tools in windows.
-    fn reset_layout(&mut self) {
+    fn reset_layout(&mut self) { self.apply_preset(dock::Preset::Standard); }
+
+    /// Lay the panels out the way a preset says, with every tool a window again.
+    fn apply_preset(&mut self, preset: dock::Preset) {
         for t in TOOLS { crate::prefs::set_bool(t.key(), false); }
-        self.dock = dock::Layout::default();
+        self.dock = dock::Layout::preset(preset);
         let all: Vec<usize> = TOOLS.iter().map(|t| TOOL_TAB + t.index()).collect();
         self.dock.include(&all, &HashMap::new());
         self.right_tab = 0;
         self.bottom_tab = P_TIMELINE;
+        self.sync_current_in();
         self.layout_changed();
     }
 
@@ -1246,7 +1250,9 @@ impl App {
                 // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
                 let wide = plan.iter().flat_map(|l| l.2.iter()).any(|g| (g.3 == AI_TAB && self.assistant.shows_terminal()) || Self::is_tool_id(g.3));
                 let id = format!("{}{}", if wide { "inspector-terminal" } else { "inspector" }, if n > 1 { format!("-{n}") } else { String::new() });
-                egui::Panel::right(id).default_size((if wide { 560.0 } else { 326.0 }) * n as f32).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                // Whatever the window, the slide keeps room: the slide list and at least 360 points of canvas stay, and the columns share the rest.
+                let max = (ctx.content_rect().width() - 248.0 - 360.0).max(280.0);
+                egui::Panel::right(id).default_size(((if wide { 560.0 } else { 326.0 }) * n as f32).min(max)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
             }
             dock::Edge::Bottom => {
                 let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
@@ -12039,6 +12045,38 @@ mod tests {
         h.key_press(egui::Key::Enter);
         h.run_steps(3);
         assert!(!h.state().scene_view, "Enter opens the slide");
+    }
+
+    #[test]
+    fn presets_place_every_panel_tab_once_and_draw() {
+        for pr in dock::Preset::ALL {
+            let mut a = app();
+            a.apply_preset(pr);
+            let mut all: Vec<usize> = a.side_tab_ids();
+            all.extend(a.bottom_tab_ids());
+            all.sort_unstable();
+            let mut want = vec![0, 1, 2, P_TIMELINE, P_NOTES, P_STATES, dock::LAYERS];
+            want.sort_unstable();
+            assert_eq!(all, want, "{}", pr.name());
+            let mut h = harness(a);
+            h.run_steps(5);
+            if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join(format!("preset-{}.png", pr.name().replace(' ', "-")))).unwrap(); }
+        }
+    }
+
+    #[test]
+    fn a_small_window_keeps_room_for_the_slide_even_with_two_side_columns() {
+        let mut a = app();
+        a.apply_preset(dock::Preset::Wide);
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1000.0, 640.0)).build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+        install_fonts(&h.ctx);
+        install_theme(&h.ctx);
+        h.run_steps(2);
+        *h.state_mut() = a;
+        h.run_steps(6);
+        let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+        let left = rects.iter().filter(|r| r.edge == dock::Edge::Right).map(|r| r.rect.left()).fold(f32::MAX, f32::min);
+        assert!(left >= 248.0 + 360.0 - 1.0, "the columns start at {left}, leaving 360 points for the slide");
     }
 
     #[test]

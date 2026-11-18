@@ -59,7 +59,57 @@ impl Default for Layout {
     }
 }
 
+/// A ready-made arrangement for a kind of screen.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Preset {
+    /// Properties at the right with Slide Layers under it, the Timeline at the bottom.
+    Standard,
+    /// For wide screens: two columns at the right (Properties and Slide Layers, then the Timeline over Slide Notes and States), nothing at the bottom.
+    Wide,
+    /// For tall screens: nothing at the right, and three columns at the bottom (Properties, the Timeline with Notes and States, Slide Layers).
+    Tall,
+}
+
+impl Preset {
+    pub const ALL: [Preset; 3] = [Preset::Standard, Preset::Wide, Preset::Tall];
+    pub fn name(self) -> &'static str { match self { Preset::Standard => "Standard", Preset::Wide => "Wide screen", Preset::Tall => "Tall screen" } }
+    pub fn about(self) -> &'static str {
+        match self {
+            Preset::Standard => "Properties at the right with Slide Layers under it, the Timeline at the bottom",
+            Preset::Wide => "Two columns at the right, so the slide keeps its height: Properties and Slide Layers, then the Timeline, Slide Notes and States",
+            Preset::Tall => "Everything in rows of columns at the bottom, so the slide keeps its width: Properties, the Timeline, Slide Layers",
+        }
+    }
+}
+
 impl Layout {
+    /// The layout of a preset (with no windows; the caller adds the tools back).
+    pub fn preset(p: Preset) -> Layout {
+        match p {
+            Preset::Standard => Layout::default(),
+            Preset::Wide => {
+                let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
+                let main = l.group(vec![0, 1, 2], 0.7);
+                let layers = l.group(vec![LAYERS], 0.3);
+                let first = l.lane(vec![main, layers]);
+                let time = l.group(vec![20], 0.5);
+                let low = l.group(vec![21, 22], 0.5);
+                let second = l.lane(vec![time, low]);
+                l.right = vec![first, second];
+                l
+            }
+            Preset::Tall => {
+                let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
+                let main = l.group(vec![0, 1, 2], 0.3);
+                let low = l.group(vec![20, 21, 22], 0.4);
+                let layers = l.group(vec![LAYERS], 0.3);
+                let lane = l.lane(vec![main, low, layers]);
+                l.bottom = vec![lane];
+                l
+            }
+        }
+    }
+
     fn id(&mut self) -> u32 { self.next += 1; self.next }
     fn group(&mut self, tabs: Vec<usize>, share: f32) -> Group { let current = tabs.first().copied().unwrap_or(0); Group { id: self.id(), tabs, current, share } }
     fn lane(&mut self, groups: Vec<Group>) -> Lane { Lane { id: self.id(), groups, share: 1.0 } }
