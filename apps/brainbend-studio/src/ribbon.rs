@@ -1141,6 +1141,7 @@ pub(crate) struct SettingsDraft {
     preset: Option<crate::dock::Preset>,
     menu_bar: bool,
     insert_bar: bool,
+    ribbon: bool,
     panels: crate::prefs::Panels,
 }
 
@@ -1150,7 +1151,8 @@ pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
         ui.checkbox(&mut d.one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
         ui.checkbox(&mut d.hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
         ui.checkbox(&mut d.each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
-        ui.checkbox(&mut d.insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
+        ui.checkbox(&mut d.ribbon, "Show the ribbon").on_hover_text("The tabs of File, Project, Slides, Objects and Help. Everything on it is also in the menus and the insert bar");
+    ui.checkbox(&mut d.insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
         ui.checkbox(&mut d.menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
         ui.add_space(10.0);
         ui.label(egui::RichText::new("Where things are").strong());
@@ -1240,6 +1242,8 @@ impl App {
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
+        // Without the ribbon the tab strip and the card are gone; Try It, Preview and Publish move up into the title bar.
+        if !self.ribbon_visible() { self.doc_tabs(root); return; }
         let bg = root.visuals().panel_fill;
         let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
         // The ribbon is for adding things and for the project as a whole. It stays closed until a tab is clicked (or rested
@@ -1393,13 +1397,16 @@ impl App {
 
     /// The right end of the tab strip, right to left: Publish, Preview and Try It. (The Layout Builder shows
     /// neither: those are for the finished lesson, and its ribbon cannot be closed.)
+    /// Whether the ribbon is on screen: when it is switched on, and always while a 360° image is edited (what goes on the picture is added from it).
+    pub(crate) fn ribbon_visible(&self) -> bool { self.show_ribbon || self.pano.edit.is_some() }
+
     fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
         if master { return; }
         ui.spacing_mut().item_spacing.x = 4.0;
         // Publish is the main action, so it is a solid button in the main-action color; it darkens while the
         // pointer is over it, and more while pressed or while the Publish window is open.
         let backing = ui.painter().add(egui::Shape::Noop);
-        let publishing = self.publish_open;
+        let publishing = self.file_view && self.file_page == backstage::FilePage::Publish;
         let on_primary = if ui.visuals().dark_mode { egui::Color32::from_gray(20) } else { egui::Color32::WHITE };
         let resp = ui.scope(|ui| {
             let v = ui.visuals_mut();
@@ -1407,7 +1414,7 @@ impl App {
             for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
             compact_widget_in(ui, EXPORT, "Publish", false, false, false)
         }).inner.on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
-        if resp.clicked() { self.publish_open = true; }
+        if resp.clicked() { self.open_file_page(backstage::FilePage::Publish); }
         let base = primary(ui);
         let fill = if publishing || resp.is_pointer_button_down_on() { shade(base, 0.28) } else if resp.hovered() { shade(base, 0.14) } else { base };
         ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
@@ -1662,6 +1669,12 @@ impl App {
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
                     }
+                    // Without the ribbon, Publish, Preview and Try It live here.
+                    if self.project.is_some() && !self.file_view && !self.ribbon_visible() && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+                        let master = self.in_master_view();
+                        ui.add_space(6.0);
+                        self.tab_actions(ui, master);
+                    }
                     // A newer release is out: a red button to the left of the theme toggle opens the update window.
                     if let Some(r) = self.updater.available().cloned() {
                         ui.add_space(4.0);
@@ -1684,30 +1697,21 @@ impl App {
     /// The app's own settings, which follow the person and not the project.
     fn studio_group(&mut self, ui: &mut egui::Ui) {
         group(ui, "Studio", |ui| {
-            if big_button(ui, GEAR, "Studio\nSettings", "How Studio looks and behaves for you: windows, panels and what shows").clicked() { self.settings_open = !self.settings_open; }
+            if big_button(ui, GEAR, "Studio\nSettings", "How Studio looks and behaves for you: windows, panels and what shows").clicked() { self.open_file_page(backstage::FilePage::Settings); }
         });
-    }
-
-    /// The Studio Settings window: every app-wide setting in one place.
-    pub(super) fn settings_window(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
-        if !self.settings_open { return; }
-        let mut open = true;
-        let mut d = self.settings_draft();
-        crate::dock_tool(ui, "Studio Settings", &mut open, |ui| settings_controls(ui, &mut d));
-        self.apply_settings(d);
-        if !open { self.settings_open = false; }
     }
 
     /// The settings as they are now, for the controls to change; `apply_settings` puts what they changed back.
     pub(crate) fn settings_draft(&self) -> SettingsDraft {
-        SettingsDraft { one: self.one_section, hover: self.ribbon_hover, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, panels: self.panels }
+        SettingsDraft { one: self.one_section, hover: self.ribbon_hover, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, ribbon: self.show_ribbon, panels: self.panels }
     }
 
     pub(crate) fn apply_settings(&mut self, d: SettingsDraft) {
-        let SettingsDraft { one, hover, each_tab, preset, menu_bar, insert_bar, panels } = d;
+        let SettingsDraft { one, hover, each_tab, preset, menu_bar, insert_bar, ribbon, panels } = d;
         if let Some(pr) = preset { self.apply_preset(pr); }
         if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
         if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
+        if ribbon != self.show_ribbon { self.run_cmd(crate::commands::Cmd::ShowRibbon); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
@@ -2632,7 +2636,7 @@ impl App {
     fn review_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         if self.project.is_none() { return; }
         group(ui, "Player", |ui| {
-            if big_button(ui, PLAY, "Player\nSettings", "Colors, font, sidebar, title, logo and controls of the published player").clicked() { self.player_open = true; }
+            if big_button(ui, PLAY, "Player\nSettings", "Colors, font, sidebar, title, logo and controls of the published player").clicked() { self.open_file_page(backstage::FilePage::Player); }
         });
                 group(ui, "Check", |ui| {
             ui.horizontal(|ui| {

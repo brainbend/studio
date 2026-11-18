@@ -19,22 +19,7 @@ fn color_row(ui: &mut egui::Ui, label: &str, c: &mut Rgba, enabled: bool) -> boo
 }
 
 impl App {
-    /// The Player Properties window (opened from Player Settings on the Review tab).
-    pub(super) fn player_window(&mut self, ctx: &egui::Context) {
-        if !self.player_open { return; }
-        let Some(proj) = self.project.as_mut() else { self.player_open = false; return };
-        let before = Snap::of(proj);
-        let mut ask = PlayerAsk::default();
-        let mut open = true;
-        let (logo_name, banner_name) = (proj.player.logo.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()), proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()));
-        let name = proj.name.clone();
-        let pane = &mut self.player_pane;
-        crate::tool_window(ctx, "player-properties", "Player Properties", [920.0, 600.0], &mut open, |ui| player_layout(ui, proj, pane, &name, &logo_name, &banner_name, &mut ask));
-        self.player_finish(ctx, before, ask);
-        if !open { self.player_open = false; }
-    }
-
-    /// The same settings as a page of the File view.
+    /// The Player Settings page of the File view.
     pub(crate) fn player_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let Some(proj) = self.project.as_mut() else { return };
         let before = Snap::of(proj);

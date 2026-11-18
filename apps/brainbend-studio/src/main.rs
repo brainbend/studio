@@ -199,9 +199,7 @@ struct App {
     /// Scene View (overview of all scenes) instead of the slide editor.
     scene_view: bool,
     /// The Player Properties window, and which pane of it is showing.
-    player_open: bool,
     /// The Publish dialog is open, which destination is showing, and the SCORM version chosen for Other LMS.
-    publish_open: bool,
     publish_page: publish_dialog::PublishPage,
     publish_lms: brainbend_publish_html::Lms,
     /// How the PDF handout is laid out (Publish > PDF).
@@ -331,9 +329,10 @@ struct App {
     one_section: bool,
     /// The ribbon stays open under the tabs (a person's choice); otherwise it opens over the slide when a tab is clicked.
     ribbon_pinned: bool,
+    /// The ribbon of tabs (it shows by itself while a 360° image is being edited, for what goes on the picture).
+    show_ribbon: bool,
     /// Which panels show (see `prefs::Panels`), chosen in the Studio Settings window.
     panels: prefs::Panels,
-    settings_open: bool,
     /// The tool showing in the tool dock, and which tools were open last frame (the newest one is shown).
     docked: Vec<Tool>,
     tools_seen: Vec<usize>,
@@ -544,7 +543,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(target_os = "macos", test))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -782,9 +781,9 @@ impl App {
 
 /// The tools that open as floating windows and can be docked as tabs of the side panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Tool { Variables, FocusOrder, Spelling, Find, Check, Colors, Settings }
+pub(crate) enum Tool { Variables, FocusOrder, Spelling, Find, Check, Colors }
 
-const TOOLS: [Tool; 7] = [Tool::Variables, Tool::FocusOrder, Tool::Spelling, Tool::Find, Tool::Check, Tool::Colors, Tool::Settings];
+const TOOLS: [Tool; 6] = [Tool::Variables, Tool::FocusOrder, Tool::Spelling, Tool::Find, Tool::Check, Tool::Colors];
 
 /// What the Properties tab asks the app to do once it has been drawn (it cannot, while it holds the project).
 #[derive(Default)]
@@ -835,16 +834,16 @@ impl Area {
 
 impl Tool {
     fn title(self) -> &'static str {
-        match self { Tool::Variables => "Variables", Tool::FocusOrder => "Focus Order", Tool::Spelling => "Spelling", Tool::Find => "Find and Replace", Tool::Check => "Project check", Tool::Colors => "Brand Colors", Tool::Settings => "Studio Settings" }
+        match self { Tool::Variables => "Variables", Tool::FocusOrder => "Focus Order", Tool::Spelling => "Spelling", Tool::Find => "Find and Replace", Tool::Check => "Project check", Tool::Colors => "Brand Colors" }
     }
     fn index(self) -> usize { TOOLS.iter().position(|t| *t == self).unwrap_or(0) }
     /// The setting that remembers where the tool was left.
     fn key(self) -> &'static str {
-        match self { Tool::Variables => "dock_variables", Tool::FocusOrder => "dock_focus_order", Tool::Spelling => "dock_spelling", Tool::Find => "dock_find", Tool::Check => "dock_check", Tool::Colors => "dock_colors", Tool::Settings => "dock_settings" }
+        match self { Tool::Variables => "dock_variables", Tool::FocusOrder => "dock_focus_order", Tool::Spelling => "dock_spelling", Tool::Find => "dock_find", Tool::Check => "dock_check", Tool::Colors => "dock_colors" }
     }
     /// How big the tool's floating window starts.
     fn size(self) -> [f32; 2] {
-        match self { Tool::Variables => [420.0, 360.0], Tool::FocusOrder => [340.0, 360.0], Tool::Spelling => [460.0, 440.0], Tool::Find => [420.0, 320.0], Tool::Check => [520.0, 440.0], Tool::Colors => [360.0, 300.0], Tool::Settings => [360.0, 420.0] }
+        match self { Tool::Variables => [420.0, 360.0], Tool::FocusOrder => [340.0, 360.0], Tool::Spelling => [460.0, 440.0], Tool::Find => [420.0, 320.0], Tool::Check => [520.0, 440.0], Tool::Colors => [360.0, 300.0] }
     }
 }
 
@@ -1231,7 +1230,6 @@ impl App {
             Tool::Find => self.find = None,
             Tool::Check => self.check_results = None,
             Tool::Colors => self.theme_colors_open = false,
-            Tool::Settings => self.settings_open = false,
         }
     }
 
@@ -1243,7 +1241,6 @@ impl App {
             Tool::Find => self.find.is_some(),
             Tool::Check => self.check_results.is_some(),
             Tool::Colors => self.theme_colors_open,
-            Tool::Settings => self.settings_open,
         }
     }
 
@@ -1269,7 +1266,6 @@ impl App {
             Tool::Find => self.find_tool(ui),
             Tool::Check => self.check_tool(ui),
             Tool::Colors => self.theme_colors_window(ctx, ui),
-            Tool::Settings => self.settings_window(ctx, ui),
         }
         // The Dock and Pop out buttons, and a tool window's tab let go over a panel.
         let g = TOOL_TAB + t.index();
@@ -7603,7 +7599,6 @@ impl App {
 
         self.sync_master();
         self.chrome(root, ctx);
-        self.player_window(ctx);
         self.equation_window(ctx);
         self.tool_windows(ctx);
         if std::mem::take(&mut self.open_requested) { do_open = true; }
@@ -7652,7 +7647,6 @@ impl App {
         self.mcp_frame(ctx);
         self.assistant_frame();
         self.ai_setup_window(ctx);
-        self.publish_window(ctx);
         self.word_export_frame(ctx);
         self.video_export_frame(ctx);
         self.fonts_window(ctx);
@@ -8970,7 +8964,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
-        a.player_open = true;
+        a.open_file_page(backstage::FilePage::Player);
         let mut h = harness(a);
         h.run_steps(4);
         for label in ["Play / Pause", "Seekbar", "Replay"] { assert!(h.query_by_label(label).is_some(), "{label} is listed with the player controls"); }
@@ -8985,7 +8979,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_project();
-        a.player_open = true;
+        a.open_file_page(backstage::FilePage::Player);
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("Banner photo").is_some(), "the setting is listed beside the logo");
@@ -9016,7 +9010,7 @@ mod tests {
     fn the_player_preview_shows_the_banner_in_the_sidebar_and_the_logo_by_the_title() {
         let mut a = App::default();
         a.new_project();
-        a.player_open = true;
+        a.open_file_page(backstage::FilePage::Player);
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(8, 4, image::Rgba([3, 83, 158, 255]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
         let asset = |name: &str, bytes: Vec<u8>| Asset { name: name.into(), mime: "image/png".into(), bytes, file: None };
@@ -9763,7 +9757,7 @@ mod tests {
                 p.player.background = Rgba(40, 55, 90, 255);
                 p.player.accent = Rgba(230, 120, 30, 255);
             }
-            a.player_open = true;
+            a.open_file_page(backstage::FilePage::Player);
             let mut h = harness(a);
             h.run_steps(3);
             shot(&mut h, "player-features.png");
@@ -12430,7 +12424,7 @@ mod tests {
         a.run_cmd(Cmd::Tool(Tool::Colors));
         assert!(a.theme_colors_open);
         a.run_cmd(Cmd::PlayerSettings);
-        assert!(a.player_open);
+        assert!(a.file_view && a.file_page == backstage::FilePage::Player, "Player Settings opens its File page");
         // Slide size: every slide, one undo step, and the current size is the one ticked.
         a.ctx_copy = Some(egui::Context::default());
         a.add_slide(SlideKind::Normal);
@@ -12448,7 +12442,7 @@ mod tests {
         // With no project open, the project's tools are off, and the app's own are on.
         let mut b = App::default();
         assert!(!b.cmd_enabled(Cmd::Tool(Tool::Variables)) && !b.cmd_enabled(Cmd::LayoutBuilder) && !b.cmd_enabled(Cmd::SlideSize(1280, 720)));
-        assert!(b.cmd_enabled(Cmd::Tool(Tool::Settings)) && b.cmd_enabled(Cmd::Open));
+        assert!(b.cmd_enabled(Cmd::Settings) && b.cmd_enabled(Cmd::Open));
         assert_eq!(Cmd::Tool(Tool::Spelling).shortcut().as_deref(), Some("F7"));
     }
 
@@ -12535,6 +12529,52 @@ mod tests {
             h.run_steps(5);
             h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("file-{name}.png"))).unwrap();
         }
+    }
+
+    #[test]
+    fn without_the_ribbon_publish_preview_and_try_it_move_to_the_title_bar_and_the_menus_stay_in_reach() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.show_ribbon = false;
+        a.show_menu_bar = true;
+        a.show_insert_bar = true;
+        a.file_view = false;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(5);
+        for tab in ["Objects", "Slides", "Help"] { assert!(h.query_all_by_label(tab).next().is_none() || tab == "Help", "{tab} tab is gone with the ribbon"); }
+        assert!(h.query_by_label("Objects").is_none(), "the ribbon's tabs are gone");
+        assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Preview").is_some(), "Publish and Preview are still in reach");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("no-ribbon.png")).unwrap(); }
+        h.get_by_label("Publish").click();
+        h.run_steps(4);
+        assert!(h.state().file_view && h.state().file_page == backstage::FilePage::Publish, "Publish opens its page");
+        // The last of the menu bar and the ribbon cannot be switched off.
+        h.state_mut().file_view = false;
+        h.state_mut().run_cmd(commands::Cmd::ShowMenuBar);
+        assert!(h.state().show_menu_bar, "with no ribbon the menu bar stays");
+        h.state_mut().run_cmd(commands::Cmd::ShowRibbon);
+        assert!(h.state().show_ribbon, "the ribbon comes back");
+        h.state_mut().run_cmd(commands::Cmd::ShowMenuBar);
+        assert!(!h.state().show_menu_bar, "and now the menu bar can go");
+        h.state_mut().run_cmd(commands::Cmd::ShowRibbon);
+        assert!(h.state().show_ribbon, "but then the ribbon stays");
+        // A 360° image being edited shows the ribbon anyway.
+        h.state_mut().show_ribbon = false;
+        assert!(!h.state().ribbon_visible());
+    }
+
+    #[test]
+    fn file_new_and_open_go_to_their_pages() {
+        use commands::Cmd;
+        let mut a = app();
+        a.file_view = false;
+        a.run_cmd(Cmd::Open);
+        assert!(a.file_view && a.file_page == backstage::FilePage::Open);
+        a.file_view = false;
+        a.run_cmd(Cmd::New);
+        assert!(a.file_view && a.file_page == backstage::FilePage::New);
+        assert!(a.project.is_some(), "going to the page does not start a project by itself");
     }
 
     #[test]
@@ -14272,26 +14312,21 @@ mod tests {
     }
 
     #[test]
-    fn the_publish_button_opens_a_dialog_listing_every_destination() {
+    fn the_publish_button_opens_the_publish_page_listing_every_destination() {
         use egui_kittest::kittest::Queryable;
         let mut h = harness(app());
         h.run_steps(3);
         h.state_mut().file_view = false;
         h.run_steps(3);
-        assert!(!h.state().publish_open);
-        // The ribbon's Publish button is the only thing labelled Publish until the dialog is up.
+        // The ribbon's Publish button is the only thing labelled Publish until the page is up.
         h.get_by_label("Publish").click();
         h.run_steps(4);
-        assert!(h.state().publish_open, "Publish opens the dialog instead of a menu");
+        assert!(h.state().file_view && h.state().file_page == backstage::FilePage::Publish, "Publish opens its page of the File view");
         for name in ["BrainBend Review (coming soon)", "BrainBend LMS (coming soon)", "Other LMS", "Video", "Web", "PDF", "Print", "Word", "PowerPoint"] {
             assert!(h.get_all_by_label(name).count() >= 1, "{name} is listed");
         }
         assert!(h.state().publish_page == publish_dialog::PublishPage::Web, "it opens on Web, the first one that works");
-        assert!(h.query_by_label("Cancel").is_some());
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("publish-dialog.png")).unwrap(); }
-        h.get_by_label("Cancel").click();
-        h.run_steps(3);
-        assert!(!h.state().publish_open);
     }
 
     #[test]
@@ -14326,7 +14361,7 @@ mod tests {
         let mut a = app();
         a.file_view = false;
         a.ribbon_tab = ribbon::PROJECT_TAB;
-        a.publish_open = true;
+        a.open_file_page(backstage::FilePage::Publish);
         let mut h = harness(a);
         h.run_steps(4);
         assert!(!disabled_publish(&h), "Web can be published");
@@ -14355,7 +14390,7 @@ mod tests {
         use brainbend_publish_html::HandoutOrientation;
         let mut a = app();
         a.file_view = false;
-        a.publish_open = true;
+        a.open_file_page(backstage::FilePage::Publish);
         a.publish_page = publish_dialog::PublishPage::Pdf;
         let mut h = harness(a);
         h.run_steps(8);
@@ -14383,7 +14418,7 @@ mod tests {
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
         a.file_view = false;
-        a.publish_open = true;
+        a.open_file_page(backstage::FilePage::Publish);
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("PowerPoint").is_none());
@@ -14859,7 +14894,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
-        a.publish_open = true;
+        a.open_file_page(backstage::FilePage::Publish);
         a.publish_page = publish_dialog::PublishPage::Print;
         let mut h = harness(a);
         h.run_steps(4);
@@ -14891,7 +14926,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = false;
-        a.publish_open = true;
+        a.open_file_page(backstage::FilePage::Publish);
         a.publish_page = publish_dialog::PublishPage::Word;
         a.handout.orientation = brainbend_publish_html::HandoutOrientation::Landscape;
         a.handout.per_page = 3;
@@ -15112,7 +15147,7 @@ mod tests {
         // Publish is a page of the File view now; the Publish button on the page does the publishing.
         h.get_by_label("Publish").click();
         h.run_steps(4);
-        assert!(h.state().file_view && h.state().file_page == backstage::FilePage::Publish && !h.state().publish_open, "Publish is a page, not a dialog");
+        assert!(h.state().file_view && h.state().file_page == backstage::FilePage::Publish , "Publish is a page");
         assert!(h.query_all_by_label_contains("Web").next().is_some(), "the page lists where to publish");
         let page = |h: &mut egui_kittest::Harness<'static, App>, nav: &str, want: backstage::FilePage| {
             h.get_by_label_contains(nav).click();
@@ -15748,7 +15783,7 @@ mod tests {
     }
 
     #[test]
-    fn the_publish_outline_button_tints_when_hovered_and_more_while_its_window_is_open() {
+    fn the_publish_outline_button_tints_when_hovered() {
         use egui_kittest::kittest::{NodeT, Queryable};
         let mut a = app();
         a.file_view = false;
@@ -15765,15 +15800,6 @@ mod tests {
         let hovered = sample(&mut h);
         let d = |a: u32, b: u32| a.abs_diff(b);
         assert!(d(hovered, rest) > 20, "hovering tints the inside: {rest} -> {hovered}");
-        h.event(egui::Event::PointerMoved(egui::pos2(5.0, 400.0)));
-        h.state_mut().publish_open = true;
-        h.run_steps(3);
-        let open = sample(&mut h);
-        // The window dims everything behind it, so compare with a plain bit of ribbon next to the button, dimmed the same.
-        let img = h.render().expect("renderer");
-        let q = img.get_pixel((b.x0 - 3.0) as u32, py);
-        let plain = q.0[0] as u32 + q.0[1] as u32 + q.0[2] as u32;
-        assert!(d(open, plain) > 15, "it stays tinted while the Publish window is open: ribbon {plain}, button {open}");
     }
 
     #[test]

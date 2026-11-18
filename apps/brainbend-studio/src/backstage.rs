@@ -14,7 +14,7 @@ const CLOSE: char = '\u{e4f6}';
 const IMPORT: char = '\u{e20c}';
 const MEDIA: char = '\u{e656}';
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum FilePage {
     #[default]
     New,
@@ -34,8 +34,6 @@ enum Choice {
     Back,
     Save,
     SaveAs,
-    /// Back to the project with the Publish dialog open.
-    Publish,
     Page(FilePage),
 }
 
@@ -101,6 +99,14 @@ const TEMPLATES: [Template; 2] = [
 ];
 
 impl App {
+    /// Open the File view on a page: from the menus, the title bar and the ribbon.
+    pub(crate) fn open_file_page(&mut self, page: FilePage) {
+        self.leave_master_view();
+        self.close_pano_edit();
+        self.file_view = true;
+        self.file_page = page;
+    }
+
     /// Draws the File view instead of the editor. Returns true while it is open.
     pub(super) fn backstage(&mut self, root: &mut egui::Ui, ctx: &egui::Context) -> bool {
         if !self.file_view { return false; }
@@ -167,7 +173,6 @@ impl App {
             Some(Choice::Back) => self.file_view = false,
             Some(Choice::Save) => { self.save(false); self.file_view = false; }
             Some(Choice::SaveAs) => { self.save(true); self.file_view = false; }
-            Some(Choice::Publish) => { self.file_view = false; self.publish_open = true; }
             Some(Choice::Page(p)) => self.file_page = p,
             None => {}
         }

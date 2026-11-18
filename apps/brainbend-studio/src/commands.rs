@@ -28,6 +28,10 @@ pub(crate) enum Cmd {
     SaveAs,
     Publish,
     Settings,
+    /// The File pages: the project's name and facts, its settings, and the About page.
+    ProjectInfo,
+    ProjectSettings,
+    About,
     Quit,
     ZoomIn,
     ZoomOut,
@@ -61,13 +65,13 @@ pub(crate) enum Item { Do(Cmd), Gap, Sub(&'static str, Vec<Cmd>), /// The galler
 pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
     use Item::{Do, Gap, Sub};
     vec![
-        ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
+        ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::ProjectInfo), Do(Cmd::ProjectSettings), Do(Cmd::PlayerSettings), Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
         ("Edit", vec![Do(Cmd::Undo), Do(Cmd::Redo), Gap, Do(Cmd::Cut), Do(Cmd::Copy), Do(Cmd::Paste), Do(Cmd::Delete), Gap, Do(Cmd::Duplicate), Do(Cmd::SelectAll), Gap, Do(Cmd::Find)]),
         ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowRibbon), Do(Cmd::ShowMenuBar), Do(Cmd::ShowInsertBar), Do(Cmd::DarkMode)]),
         ("Insert", vec![Item::Gallery]),
         ("Tools", vec![Do(Cmd::LayoutBuilder), Sub("Slide Size", SLIDE_SIZES.iter().map(|&(w, h)| Cmd::SlideSize(w, h)).collect()), Do(Cmd::Tool(crate::Tool::Colors)), Do(Cmd::PlayerSettings), Gap, Do(Cmd::Tool(crate::Tool::Variables)), Do(Cmd::Tool(crate::Tool::FocusOrder)), Gap, Do(Cmd::Tool(crate::Tool::Spelling)), Do(Cmd::Tool(crate::Tool::Check))]),
         ("Window", PANELS.iter().map(|&g| Do(Cmd::TogglePanel(g))).chain([Gap]).chain(dock::Preset::ALL.iter().map(|&p| Do(Cmd::Preset(p)))).collect()),
-        ("Help", vec![Do(Cmd::Docs), Do(Cmd::SubmitIssue), Do(Cmd::Community), Gap, Do(Cmd::CheckForUpdates)]),
+        ("Help", vec![Do(Cmd::Docs), Do(Cmd::SubmitIssue), Do(Cmd::Community), Gap, Do(Cmd::CheckForUpdates), Do(Cmd::About)]),
     ]
 }
 
@@ -96,18 +100,21 @@ impl Cmd {
             Cmd::Find => "Find and Replace".into(),
             Cmd::TogglePanel(g) => App::panel_title(g).into(),
             Cmd::Preset(p) => p.name().into(),
-            Cmd::New => "New Project".into(),
+            Cmd::New => "New Project…".into(),
             Cmd::Open => "Open…".into(),
             Cmd::Save => "Save".into(),
             Cmd::SaveAs => "Save As…".into(),
             Cmd::Publish => "Publish…".into(),
             Cmd::Settings => "Studio Settings…".into(),
+            Cmd::ProjectInfo => "Project Info…".into(),
+            Cmd::ProjectSettings => "Project Settings…".into(),
+            Cmd::About => "About BrainBend Studio".into(),
             Cmd::Quit => if cfg!(target_os = "macos") { "Quit BrainBend Studio".into() } else { "Exit".into() },
             Cmd::ZoomIn => "Zoom In".into(),
             Cmd::ZoomOut => "Zoom Out".into(),
             Cmd::ZoomFit => "Fit to Window".into(),
             Cmd::ZoomActual => "Actual Size".into(),
-            Cmd::ShowRibbon => "Keep the Ribbon Open".into(),
+            Cmd::ShowRibbon => "Show Ribbon".into(),
             Cmd::DarkMode => "Dark Mode".into(),
             Cmd::ShowMenuBar => "Show Menu Bar".into(),
             Cmd::ShowInsertBar => "Show Insert Bar".into(),
@@ -156,9 +163,9 @@ impl App {
         let has = self.project.is_some();
         let slides = self.editing_slides();
         match c {
-            Cmd::New | Cmd::Open | Cmd::Settings | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::ShowInsertBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
+            Cmd::New | Cmd::Open | Cmd::Settings | Cmd::About | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::ShowInsertBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
             Cmd::Docs => false,
-            Cmd::Tool(crate::Tool::Settings | crate::Tool::Find) => true,
+            Cmd::Tool(crate::Tool::Find) => true,
             Cmd::PlayerSettings | Cmd::Tool(_) | Cmd::LayoutBuilder | Cmd::SlideSize(..) if !has => false,
             Cmd::LayoutBuilder => !self.in_master_view() && !self.project.as_ref().is_some_and(|p| p.is_web()),
             Cmd::PlayerSettings | Cmd::Tool(_) => true,
@@ -170,7 +177,7 @@ impl App {
             Cmd::Cut | Cmd::Delete => if slides { self.project.as_ref().is_some_and(|p| p.slides.len() > self.slide_selection().len()) } else { self.selected.is_some() },
             Cmd::Copy | Cmd::Duplicate => slides || self.selected.is_some(),
             Cmd::Paste => if slides { !self.slide_clip.is_empty() } else { self.clipboard.is_some() },
-            Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ShowRibbon => true,
+            Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ProjectInfo | Cmd::ProjectSettings | Cmd::ShowRibbon => true,
             Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomFit | Cmd::ZoomActual => !self.scene_view && !self.file_view,
         }
     }
@@ -179,7 +186,7 @@ impl App {
     pub(crate) fn cmd_checked(&self, c: Cmd) -> Option<bool> {
         match c {
             Cmd::TogglePanel(g) => Some(self.panel_shown(g)),
-            Cmd::ShowRibbon => Some(self.ribbon_pinned),
+            Cmd::ShowRibbon => Some(self.show_ribbon),
             Cmd::ShowMenuBar => Some(self.show_menu_bar),
             Cmd::ShowInsertBar => Some(self.show_insert_bar),
             Cmd::SlideSize(w, h) => self.project.as_ref().map(|p| p.slides.first().is_some_and(|s| s.width as u32 == w && s.height as u32 == h)),
@@ -203,19 +210,30 @@ impl App {
             Cmd::Find => { self.find.get_or_insert_with(Default::default).focus = true; }
             Cmd::TogglePanel(g) => { let on = !self.panel_shown(g); self.set_panel_shown(g, on); }
             Cmd::Preset(p) => self.apply_preset(p),
-            Cmd::New => self.guard(crate::Pending::New),
-            Cmd::Open => self.guard(crate::Pending::Open),
+            // The File view's own pages choose what kind of project to start and which file to open.
+            Cmd::New => self.open_file_page(crate::backstage::FilePage::New),
+            Cmd::Open => self.open_file_page(crate::backstage::FilePage::Open),
             Cmd::Save => self.save(false),
             Cmd::SaveAs => self.save(true),
-            Cmd::Publish => self.publish_open = true,
-            Cmd::Settings => self.settings_open = true,
+            Cmd::Publish => self.open_file_page(crate::backstage::FilePage::Publish),
+            Cmd::Settings => self.open_file_page(crate::backstage::FilePage::Settings),
+            Cmd::ProjectInfo => self.open_file_page(crate::backstage::FilePage::Info),
+            Cmd::ProjectSettings => self.open_file_page(crate::backstage::FilePage::Project),
+            Cmd::About => self.open_file_page(crate::backstage::FilePage::About),
             Cmd::Quit => if let Some(ctx) = &self.ctx_copy { ctx.send_viewport_cmd(egui::ViewportCommand::Close); },
             Cmd::ZoomIn => self.zoom = (self.zoom * 1.25).clamp(0.1, 8.0),
             Cmd::ZoomOut => self.zoom = (self.zoom / 1.25).clamp(0.1, 8.0),
             Cmd::ZoomFit => { self.zoom = 1.0; self.pan = egui::Vec2::ZERO; }
             Cmd::ZoomActual => { self.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.pan = egui::Vec2::ZERO; }
-            Cmd::ShowRibbon => { self.ribbon_pinned = !self.ribbon_pinned; crate::prefs::set_bool("ribbon_pinned", self.ribbon_pinned); }
-            Cmd::ShowMenuBar => { self.show_menu_bar = !self.show_menu_bar; crate::prefs::set_bool("show_menu_bar", self.show_menu_bar); }
+            Cmd::ShowRibbon => {
+                // The menu bar or the ribbon has to stay, or File and the rest are out of reach.
+                if self.show_ribbon && !self.show_menu_bar { self.status = "Show the menu bar first, or File and the other menus are out of reach".into(); }
+                else { self.show_ribbon = !self.show_ribbon; crate::prefs::set_bool("show_ribbon", self.show_ribbon); }
+            }
+            Cmd::ShowMenuBar => {
+                if self.show_menu_bar && !self.show_ribbon { self.status = "Show the ribbon first, or File and the other menus are out of reach".into(); }
+                else { self.show_menu_bar = !self.show_menu_bar; crate::prefs::set_bool("show_menu_bar", self.show_menu_bar); }
+            }
             Cmd::ShowInsertBar => { self.show_insert_bar = !self.show_insert_bar; crate::prefs::set_bool("show_insert_bar", self.show_insert_bar); }
             Cmd::DarkMode => if let Some(ctx) = &self.ctx_copy {
                 let dark = ctx.theme() == egui::Theme::Dark;
@@ -229,10 +247,9 @@ impl App {
                 crate::Tool::Find => { self.find.get_or_insert_with(Default::default).focus = true; }
                 crate::Tool::Check => self.check_results = self.project.as_ref().map(|p| p.check()),
                 crate::Tool::Colors => self.theme_colors_open = true,
-                crate::Tool::Settings => self.settings_open = true,
             },
             Cmd::LayoutBuilder => self.enter_master_view(),
-            Cmd::PlayerSettings => self.player_open = true,
+            Cmd::PlayerSettings => self.open_file_page(crate::backstage::FilePage::Player),
             Cmd::SlideSize(w, h) => {
                 let Some(ctx) = self.ctx_copy.clone() else { return };
                 let Some(proj) = self.project.as_mut() else { return };

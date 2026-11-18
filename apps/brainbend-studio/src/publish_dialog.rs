@@ -112,27 +112,13 @@ impl App {
         }
     }
 
-    /// The Publish dialog.
-    pub(super) fn publish_window(&mut self, ctx: &egui::Context) {
-        if !self.publish_open { return; }
-        if self.project.is_none() { self.publish_open = false; return; }
-        let mut out = PublishOutcome::default();
-        let modal = egui::Modal::new(egui::Id::new("publish-dialog")).show(ctx, |ui| {
-            // A fixed size: a dialog that resizes itself as its contents change moves under the pointer.
-            ui.set_width(780.0);
-            ui.set_height(620.0);
-            out = self.publish_ui(ui, ctx, false);
-        });
-        self.publish_finish(ctx, out, modal.should_close(), true);
-    }
-
     /// Publish as a page of the File view: the same destinations and options, drawn into the page.
     pub(crate) fn publish_page_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let out = self.publish_ui(ui, ctx, true);
-        self.publish_finish(ctx, out, false, false);
+        self.publish_finish(ctx, out);
     }
 
-    /// The destinations, the options of the chosen one and the Publish button, for the dialog and the page. Returns what was decided.
+    /// The destinations, the options of the chosen one and the Publish button. Returns what was decided.
     fn publish_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, page_mode: bool) -> PublishOutcome {
         let Some(p) = self.project.as_ref() else { return PublishOutcome::default() };
         let is_web = p.is_web();
@@ -315,10 +301,9 @@ impl App {
         PublishOutcome { go: go && page.available(), cancel, page, lms, fonts_id }
     }
 
-    /// What the dialog or page decided: the destination to publish to (when the button was pressed), or that it was cancelled.
-    fn publish_finish(&mut self, ctx: &egui::Context, out: PublishOutcome, closed: bool, closes_on_publish: bool) {
-        if closed || out.cancel || out.go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(out.fonts_id)); }
-        if closed || out.cancel || (out.go && closes_on_publish) { self.publish_open = false; }
+    /// What the page decided: publish to the destination (when the button was pressed).
+    fn publish_finish(&mut self, ctx: &egui::Context, out: PublishOutcome) {
+        if out.go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(out.fonts_id)); }
         if out.go { self.publish_run(out.page, out.lms); }
     }
 
