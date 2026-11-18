@@ -24,39 +24,34 @@ impl App {
         if !self.player_open { return; }
         let Some(proj) = self.project.as_mut() else { self.player_open = false; return };
         let before = Snap::of(proj);
-        let mut changed = false;
+        let mut ask = PlayerAsk::default();
         let mut open = true;
-        let mut pick_logo = false;
-        let mut pick_banner = false;
-        let mut pick_resource: Option<usize> = None;
-        let logo_name = proj.player.logo.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone());
-        let banner_name = proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone());
+        let (logo_name, banner_name) = (proj.player.logo.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()), proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()));
         let name = proj.name.clone();
         let pane = &mut self.player_pane;
-        crate::tool_window(ctx, "player-properties", "Player Properties", [920.0, 600.0], &mut open, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(pane, 0, "Features");
-                ui.selectable_value(pane, 1, "Colors & Effects");
-                ui.selectable_value(pane, 2, "Resources & Glossary");
-            });
-            ui.separator();
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(380.0);
-                    egui::ScrollArea::vertical().id_salt("player-left").show(ui, |ui| {
-                        if *pane == 0 {
-                            features_pane(ui, proj, &name, &logo_name, &banner_name, &mut changed, &mut pick_logo, &mut pick_banner);
-                        } else if *pane == 1 {
-                            colors_pane(ui, &mut proj.player, &mut changed);
-                        } else {
-                            resources_pane(ui, proj, &mut changed, &mut pick_resource);
-                        }
-                    });
-                });
-                ui.separator();
-                preview(ui, proj, &name);
-            });
-        });
+        crate::tool_window(ctx, "player-properties", "Player Properties", [920.0, 600.0], &mut open, |ui| player_layout(ui, proj, pane, &name, &logo_name, &banner_name, &mut ask));
+        self.player_finish(ctx, before, ask);
+        if !open { self.player_open = false; }
+    }
+
+    /// The same settings as a page of the File view.
+    pub(crate) fn player_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let Some(proj) = self.project.as_mut() else { return };
+        let before = Snap::of(proj);
+        let mut ask = PlayerAsk::default();
+        let (logo_name, banner_name) = (proj.player.logo.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()), proj.player.banner.as_ref().and_then(|k| proj.assets.get(k)).map(|a| a.name.clone()));
+        let name = proj.name.clone();
+        ui.heading("Player Settings");
+        ui.add_space(6.0);
+        ui.weak("The colors, font, sidebar, title, logo and controls of the published player.");
+        ui.add_space(10.0);
+        player_layout(ui, proj, &mut self.player_pane, &name, &logo_name, &banner_name, &mut ask);
+        self.player_finish(ctx, before, ask);
+    }
+
+    /// What the settings asked for while they were drawn: the edit is recorded, and a file is picked for a logo, banner or resource.
+    fn player_finish(&mut self, ctx: &egui::Context, before: Snap, ask: PlayerAsk) {
+        let PlayerAsk { changed, pick_logo, pick_banner, pick_resource } = ask;
         if changed { self.commit_project_edit(ctx, before); }
         if pick_logo {
             if let Some((key, _, _, _)) = self.load_image_asset() {
@@ -99,8 +94,38 @@ impl App {
                 }
             }
         }
-        if !open { self.player_open = false; }
+
     }
+}
+
+/// What the player settings ask the app to do once they have been drawn.
+#[derive(Default)]
+struct PlayerAsk { changed: bool, pick_logo: bool, pick_banner: bool, pick_resource: Option<usize> }
+
+/// The tabs, the settings of the chosen tab and the preview, in a window or on the File page.
+fn player_layout(ui: &mut egui::Ui, proj: &mut Project, pane: &mut usize, name: &str, logo_name: &Option<String>, banner_name: &Option<String>, ask: &mut PlayerAsk) {
+    ui.horizontal(|ui| {
+        ui.selectable_value(pane, 0, "Features");
+        ui.selectable_value(pane, 1, "Colors & Effects");
+        ui.selectable_value(pane, 2, "Resources & Glossary");
+    });
+    ui.separator();
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(380.0);
+            egui::ScrollArea::vertical().id_salt("player-left").show(ui, |ui| {
+                if *pane == 0 {
+                    features_pane(ui, proj, name, logo_name, banner_name, &mut ask.changed, &mut ask.pick_logo, &mut ask.pick_banner);
+                } else if *pane == 1 {
+                    colors_pane(ui, &mut proj.player, &mut ask.changed);
+                } else {
+                    resources_pane(ui, proj, &mut ask.changed, &mut ask.pick_resource);
+                }
+            });
+        });
+        ui.separator();
+        preview(ui, proj, name);
+    });
 }
 
 fn features_pane(ui: &mut egui::Ui, proj: &mut Project, project_name: &str, logo_name: &Option<String>, banner_name: &Option<String>, changed: &mut bool, pick_logo: &mut bool, pick_banner: &mut bool) {

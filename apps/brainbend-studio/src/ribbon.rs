@@ -1133,6 +1133,57 @@ fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
 }
 
 
+/// What the Studio Settings controls change: copies of the settings, applied by `App::apply_settings` after the controls are drawn.
+pub(crate) struct SettingsDraft {
+    one: bool,
+    hover: bool,
+    each_tab: bool,
+    preset: Option<crate::dock::Preset>,
+    menu_bar: bool,
+    insert_bar: bool,
+    panels: crate::prefs::Panels,
+}
+
+/// The Studio Settings controls, in the window and on the File page.
+pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
+        ui.label(egui::RichText::new("Windows and panels").strong());
+        ui.checkbox(&mut d.one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
+        ui.checkbox(&mut d.hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
+        ui.checkbox(&mut d.each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
+        ui.checkbox(&mut d.insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
+        ui.checkbox(&mut d.menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("Where things are").strong());
+        ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, to the left or top edge of the slide for a panel there, or out of the app for a window. Right-click a tab for the same moves from a menu.");
+        ui.horizontal_wrapped(|ui| {
+            for pr in crate::dock::Preset::ALL {
+                if ui.button(pr.name()).on_hover_text(pr.about()).clicked() { d.preset = Some(pr); }
+            }
+        });
+        ui.weak("Standard is how the app started. Tools go back to windows of their own.");
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("What shows").strong());
+        ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
+        ui.add_space(2.0);
+        ui.label("Bottom panel");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.timeline, "Timeline").on_hover_text("When things appear and move");
+            ui.checkbox(&mut d.panels.notes, "Slide Notes");
+            ui.checkbox(&mut d.panels.states, "States").on_hover_text("The looks of a button or object in each state");
+        });
+        ui.label("Side panel");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.properties, "Properties").on_hover_text("The settings of the slide or object you pick");
+            ui.checkbox(&mut d.panels.triggers, "Triggers");
+            ui.checkbox(&mut d.panels.ai, "AI");
+        });
+        ui.label("Slide");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.slides, "Slide List").on_hover_text("The slides of the scene, as thumbnails");
+            ui.checkbox(&mut d.panels.layers, "Slide Layers");
+        });
+}
+
 impl App {
     /// Object currently selected (primary) and whether it can carry text/shape formatting.
     fn ribbon_target(&self) -> Option<Object> {
@@ -1641,51 +1692,19 @@ impl App {
     pub(super) fn settings_window(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         if !self.settings_open { return; }
         let mut open = true;
-        let mut one = self.one_section;
-        let mut hover = self.ribbon_hover;
-        let mut each_tab = self.new_tab_each;
-        let mut preset: Option<crate::dock::Preset> = None;
-        let mut menu_bar = self.show_menu_bar;
-        let mut insert_bar = self.show_insert_bar;
-        let mut panels = self.panels;
-        crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
-            ui.label(egui::RichText::new("Windows and panels").strong());
-            ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
-            ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
-            ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
-            ui.checkbox(&mut insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
-            ui.checkbox(&mut menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
-            ui.add_space(10.0);
-            ui.label(egui::RichText::new("Where things are").strong());
-            ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, to the left or top edge of the slide for a panel there, or out of the app for a window. Right-click a tab for the same moves from a menu.");
-            ui.horizontal_wrapped(|ui| {
-                for pr in crate::dock::Preset::ALL {
-                    if ui.button(pr.name()).on_hover_text(pr.about()).clicked() { preset = Some(pr); }
-                }
-            });
-            ui.weak("Standard is how the app started. Tools go back to windows of their own.");
-            ui.add_space(10.0);
-            ui.label(egui::RichText::new("What shows").strong());
-            ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
-            ui.add_space(2.0);
-            ui.label("Bottom panel");
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut panels.timeline, "Timeline").on_hover_text("When things appear and move");
-                ui.checkbox(&mut panels.notes, "Slide Notes");
-                ui.checkbox(&mut panels.states, "States").on_hover_text("The looks of a button or object in each state");
-            });
-            ui.label("Side panel");
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut panels.properties, "Properties").on_hover_text("The settings of the slide or object you pick");
-                ui.checkbox(&mut panels.triggers, "Triggers");
-                ui.checkbox(&mut panels.ai, "AI");
-            });
-            ui.label("Slide");
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut panels.slides, "Slide List").on_hover_text("The slides of the scene, as thumbnails");
-                ui.checkbox(&mut panels.layers, "Slide Layers");
-            });
-        });
+        let mut d = self.settings_draft();
+        crate::dock_tool(ui, "Studio Settings", &mut open, |ui| settings_controls(ui, &mut d));
+        self.apply_settings(d);
+        if !open { self.settings_open = false; }
+    }
+
+    /// The settings as they are now, for the controls to change; `apply_settings` puts what they changed back.
+    pub(crate) fn settings_draft(&self) -> SettingsDraft {
+        SettingsDraft { one: self.one_section, hover: self.ribbon_hover, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, panels: self.panels }
+    }
+
+    pub(crate) fn apply_settings(&mut self, d: SettingsDraft) {
+        let SettingsDraft { one, hover, each_tab, preset, menu_bar, insert_bar, panels } = d;
         if let Some(pr) = preset { self.apply_preset(pr); }
         if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
         if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
@@ -1696,8 +1715,8 @@ impl App {
             if was != now { crate::prefs::set_bool(key, now); }
         }
         self.panels = panels;
-        if !open { self.settings_open = false; }
     }
+
 
     /// Help: documentation, reporting problems, the community, and checking for a newer version.
     fn help_tab(&mut self, ui: &mut egui::Ui) {

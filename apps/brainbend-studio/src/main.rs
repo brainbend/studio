@@ -12525,6 +12525,19 @@ mod tests {
     }
 
     #[test]
+    fn shot_file_pages() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        for (name, page) in [("project", backstage::FilePage::Project), ("publish", backstage::FilePage::Publish), ("player", backstage::FilePage::Player), ("settings", backstage::FilePage::Settings), ("help", backstage::FilePage::Help)] {
+            let mut a = app();
+            a.file_view = true;
+            a.file_page = page;
+            let mut h = harness(a);
+            h.run_steps(5);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("file-{name}.png"))).unwrap();
+        }
+    }
+
+    #[test]
     fn reset_layout_puts_every_tab_back_where_it_started() {
         let mut a = app();
         let main = a.dock.group_of(0).unwrap().id;
@@ -15090,20 +15103,34 @@ mod tests {
     }
 
     #[test]
-    fn file_publish_returns_to_the_project_with_the_publish_dialog_open() {
+    fn file_has_pages_for_publish_project_and_player_settings_studio_settings_and_help() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.file_view = true;
         let mut h = harness(a);
         h.run_steps(3);
-        assert!(!h.state().publish_open);
+        // Publish is a page of the File view now; the Publish button on the page does the publishing.
         h.get_by_label("Publish").click();
         h.run_steps(4);
-        assert!(!h.state().file_view, "the File view closes");
-        assert!(h.state().publish_open, "and the Publish dialog is open over the project");
-        h.get_by_label("Cancel").click();
+        assert!(h.state().file_view && h.state().file_page == backstage::FilePage::Publish && !h.state().publish_open, "Publish is a page, not a dialog");
+        assert!(h.query_all_by_label_contains("Web").next().is_some(), "the page lists where to publish");
+        let page = |h: &mut egui_kittest::Harness<'static, App>, nav: &str, want: backstage::FilePage| {
+            h.get_by_label_contains(nav).click();
+            h.run_steps(4);
+            assert!(h.state().file_page == want, "{nav} opens its page");
+        };
+        page(&mut h, "Project Settings", backstage::FilePage::Project);
+        assert!(h.query_all_by_label_contains("Slide size").next().is_some() && h.query_all_by_label_contains("Pass mark").next().is_some());
+        page(&mut h, "Player Settings", backstage::FilePage::Player);
+        assert!(h.query_all_by_label_contains("Features").next().is_some(), "the player's tabs are on the page");
+        page(&mut h, "Studio Settings", backstage::FilePage::Settings);
+        assert!(h.query_all_by_label_contains("Show the menu bar").next().is_some());
+        page(&mut h, "Help", backstage::FilePage::Help);
+        assert!(h.query_all_by_label_contains("Set up AI").next().is_some());
+        // Back to the project.
+        h.get_by_label("Back to Project").click();
         h.run_steps(3);
-        assert!(!h.state().publish_open && !h.state().file_view);
+        assert!(!h.state().file_view);
     }
 
     #[test]

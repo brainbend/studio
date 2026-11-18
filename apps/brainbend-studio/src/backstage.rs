@@ -20,6 +20,13 @@ pub enum FilePage {
     New,
     Open,
     Info,
+    /// Slide size, pass mark, fonts and colors of the whole project.
+    Project,
+    Player,
+    Publish,
+    /// The app's own settings.
+    Settings,
+    Help,
     About,
 }
 
@@ -102,7 +109,7 @@ impl App {
         let has_project = self.project.is_some();
         if has_project && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.file_view = false; return false; }
         // With nothing open there is no Project Info to show.
-        if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open | FilePage::About) { self.file_page = FilePage::New; }
+        if !has_project && !matches!(self.file_page, FilePage::New | FilePage::Open | FilePage::About | FilePage::Settings | FilePage::Help) { self.file_page = FilePage::New; }
         let mut choice: Option<Choice> = None;
         let mut create: Option<ProjectKind> = None;
         let mut open_action: Option<OpenAction> = None;
@@ -113,24 +120,28 @@ impl App {
             .show_separator_line(false)
             .show(root, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
-                let items: [(char, &str, Choice, bool); 7] = [
+                let items: [(char, &str, Choice, bool); 9] = [
                     (BACK, "Back to Project", Choice::Back, has_project),
                     (INFO, "Project Info", Choice::Page(FilePage::Info), has_project),
                     (NEW, "New", Choice::Page(FilePage::New), true),
                     (OPEN, "Open", Choice::Page(FilePage::Open), true),
                     (SAVE, "Save", Choice::Save, has_project),
                     (SAVE_AS, "Save As", Choice::SaveAs, has_project),
-                    (ribbon::EXPORT, "Publish", Choice::Publish, has_project),
+                    (ribbon::EXPORT, "Publish", Choice::Page(FilePage::Publish), has_project),
+                    (ribbon::GEAR, "Project Settings", Choice::Page(FilePage::Project), has_project),
+                    (ribbon::PLAY, "Player Settings", Choice::Page(FilePage::Player), has_project),
                 ];
                 for (n, (icon, label, ch, enabled)) in items.into_iter().enumerate() {
                     // The first entry is the way out; keep it apart from the file commands.
-                    if n == 1 { ui.add_space(8.0); }
+                    if n == 1 || n == 7 { ui.add_space(8.0); }
                     let selected = matches!(&ch, Choice::Page(p) if *p == self.file_page);
                     if nav_row(ui, icon, label, enabled, selected) { choice = Some(ch); }
                 }
                 // About sits at the bottom, apart from the commands above.
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                    if nav_row(ui, ribbon::QUESTION, "About", true, self.file_page == FilePage::About) { choice = Some(Choice::Page(FilePage::About)); }
+                    if nav_row(ui, INFO, "About", true, self.file_page == FilePage::About) { choice = Some(Choice::Page(FilePage::About)); }
+                    if nav_row(ui, ribbon::QUESTION, "Help", true, self.file_page == FilePage::Help) { choice = Some(Choice::Page(FilePage::Help)); }
+                    if nav_row(ui, ribbon::GEAR, "Studio Settings", true, self.file_page == FilePage::Settings) { choice = Some(Choice::Page(FilePage::Settings)); }
                 });
             });
         // Every page shares one column: left-aligned, starting at the same place under its heading, up to 980px wide.
@@ -140,6 +151,11 @@ impl App {
             let used = ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 match self.file_page {
                     FilePage::Info if has_project => self.info_page(ui),
+                    FilePage::Project if has_project => self.project_page(ui, ctx),
+                    FilePage::Player if has_project => self.player_page(ui, ctx),
+                    FilePage::Publish if has_project => self.publish_page_ui(ui, ctx),
+                    FilePage::Settings => self.settings_page(ui),
+                    FilePage::Help => self.help_page(ui),
                     FilePage::About => self.about_page(ui),
                     FilePage::Open => open_action = self.open_page(ui),
                     _ => create = self.new_page(ui),
@@ -280,6 +296,79 @@ impl App {
             row("Variables", p.variables.len().to_string());
             row("Pass mark", format!("{}%", p.pass_mark));
         });
+    }
+
+    /// The Project Settings page: how the whole project looks and behaves, which used to be groups of the ribbon's Project tab.
+    fn project_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.heading("Project Settings");
+        ui.add_space(6.0);
+        ui.weak("These apply to every slide of the project.");
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("Slide size").strong());
+        let current = self.project.as_ref().and_then(|p| p.slides.first()).map(|s| (s.width as u32, s.height as u32)).unwrap_or((0, 0));
+        let mut size: Option<(u32, u32)> = None;
+        ui.horizontal_wrapped(|ui| {
+            for (w, h) in crate::commands::SLIDE_SIZES {
+                if ui.selectable_label(current == (w, h), crate::commands::Cmd::SlideSize(w, h).label()).clicked() { size = Some((w, h)); }
+            }
+        });
+        if let Some((w, h)) = size { self.run_cmd(crate::commands::Cmd::SlideSize(w, h)); }
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Pass mark").strong());
+        let Some(proj) = self.project.as_mut() else { return };
+        let before = Snap::of(proj);
+        let mut changed = ui.horizontal(|ui| {
+            let c = ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed();
+            ui.weak("The score a learner needs to pass the lesson.");
+            c
+        }).inner;
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new("Brand").strong());
+        let mut next = proj.theme.clone();
+        let mut moved = false;
+        for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
+            ui.horizontal(|ui| {
+                ui.add_sized([70.0, 24.0], egui::Label::new(label)).on_hover_text(tip);
+                let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
+                moved |= crate::font_store::font_menu(ui, id, font, 220.0);
+            });
+        }
+        if moved { proj.set_theme(next.named()); changed = true; }
+        if changed { self.commit_project_edit(ctx, before); }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button("Brand colors…").on_hover_text("Your project's colors, offered first in every color menu").clicked() { self.theme_colors_open = true; self.file_view = false; }
+            if ui.button("Layout Builder…").on_hover_text("Build your own slide layouts").clicked() { self.file_view = false; self.enter_master_view(); }
+        });
+    }
+
+    /// The Studio Settings page: the same settings as the window.
+    fn settings_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Studio Settings");
+        ui.add_space(6.0);
+        ui.weak("How Studio looks and behaves for you. They follow you, not the project.");
+        ui.add_space(10.0);
+        let mut d = self.settings_draft();
+        ribbon::settings_controls(ui, &mut d);
+        self.apply_settings(d);
+    }
+
+    /// The Help page: where to read, ask and report, how to set up AI, and updates.
+    fn help_page(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Help");
+        ui.add_space(10.0);
+        ui.add_enabled(false, egui::Button::new("Documentation")).on_disabled_hover_text("Documentation is coming soon");
+        ui.add_space(4.0);
+        if ui.button("Submit an issue or an idea").on_hover_text("Report a problem or suggest a feature on GitHub").clicked() { update::open_in_browser(ribbon::ISSUES_URL); }
+        ui.add_space(4.0);
+        if ui.button("BrainBend Community").on_hover_text("Join the BrainBend community on Discord").clicked() { update::open_in_browser(ribbon::COMMUNITY_URL); }
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("AI").strong());
+        ui.weak("Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription.");
+        if ui.button("Set up AI").clicked() { self.set_panel_shown(2, true); self.show_panel_tab(2); if self.project.is_some() { self.file_view = false; } }
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("Updates").strong());
+        self.update_controls(ui);
     }
 
     /// The About page: the version, updates, and credits. It needs no project, so it is there from the start.
