@@ -417,12 +417,18 @@ fn caret_job_plain(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJ
     job
 }
 
-/// One row in a dropdown: small icon, then text.
-fn menu_item(ui: &mut egui::Ui, icon: char, text: &str) -> egui::Response {
+/// An icon and a word in the menu's own color, for a row of a dropdown.
+fn menu_job(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
     let col = text_col(ui);
     let mut job = egui::text::LayoutJob::default();
     job.append(&icon.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: col, ..Default::default() });
     job.append(&format!("   {text}"), 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(13.0), color: col, ..Default::default() });
+    job
+}
+
+/// One row in a dropdown: small icon, then text.
+fn menu_item(ui: &mut egui::Ui, icon: char, text: &str) -> egui::Response {
+    let job = menu_job(ui, icon, text);
     ui.add(egui::Button::new(job).frame(false).min_size(egui::vec2(ui.available_width().min(300.0), 24.0)))
 }
 
@@ -1034,6 +1040,37 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
             }); }); }); });
         }
 }
+
+
+fn multiple_response() -> Question {
+    let mut q = Question::new_single();
+    q.multiple = true;
+    q.choices[1].correct = true;
+    q
+}
+// Every question type is a button of its own, laid out three to a column so they fit the ribbon.
+
+const GRADED_QUESTIONS: [(char, &str, &str, fn() -> Question); 15] = [
+    (RADIO, "Multiple choice", "One correct answer from several", Question::new_single),
+    (CHECK, "Multiple response", "Several correct answers", multiple_response),
+    (SLIDERS, "True / False", "True or false", Question::new_true_false),
+    (TEXT_T, "Fill in the blank", "Type the answer", Question::new_text_entry),
+    (SHAPES, "Matching", "Match each item to its partner", Question::new_matching),
+    (LIST_NUM, "Sequencing", "Put the items in order", Question::new_sequence),
+    (TEXTBOX, "Fill in the blanks", "Type the missing words in a passage", Question::new_fill_blanks),
+    (CLICK, "Drag the words", "Drag words into the gaps of a passage", Question::new_drag_words),
+    (PEN, "Mark the words", "Mark the right words in a passage", Question::new_mark_words),
+    (TEXT_AA, "Number", "Type a number", Question::new_numeric),
+    (STACK, "Sort into groups", "Drag each item into its group", Question::new_categorize),
+    (IMAGE, "Find the hotspot", "Click the right place on a picture", Question::new_hotspot),
+    (FRAME, "Label the picture", "Put each label on its place in a picture", Question::new_label_picture),
+    (RADIO, "Choose from lists", "Pick the right word from drop-down lists in a passage", Question::new_dropdowns),
+    (SPEAKER, "Dictation", "Type what is heard", Question::new_dictation),
+];
+const SURVEY_QUESTIONS: [(char, &str, &str, fn() -> Question); 2] = [
+    (SLIDERS, "Rating scale", "A survey question answered on a scale; not scored", Question::new_likert),
+    (TEXTBOX, "Free text", "A survey question answered in the learner's own words; not scored", Question::new_reflection),
+];
 
 impl App {
     /// Object currently selected (primary) and whether it can carry text/shape formatting.
@@ -2295,6 +2332,47 @@ impl App {
         if menu_item(ui, CHECK, "Results slide").clicked() { self.add_slide(SlideKind::Results); }
     }
 
+    /// The menu that adds a slide, in the slide list and its right-click menu: the choices of the Add Slides tab, with their icons.
+    /// `scene` is the scene the slide goes at the end of (`None`: after the slide that is showing).
+    pub(crate) fn add_slide_choices(&mut self, ui: &mut egui::Ui, scene: Option<usize>) {
+        enum Pick { Kind(SlideKind), Layout(Option<String>), Scene }
+        let mut pick: Option<Pick> = None;
+        ui.set_min_width(220.0);
+        if menu_item(ui, FILE_PLUS, "Slide").on_hover_text("A slide with the layout of the one before it").clicked() { pick = Some(Pick::Kind(SlideKind::Normal)); ui.close(); }
+        let layouts: Vec<(String, String)> = self.project.as_ref().map(|p| p.layouts.iter().map(|l| (l.id.clone(), l.name.clone())).collect()).unwrap_or_default();
+        if !layouts.is_empty() {
+            ui.menu_button(menu_job(ui, FRAME, "Slide from layout"), |ui| {
+                for (id, name) in &layouts {
+                    if menu_item(ui, FRAME, name).clicked() { pick = Some(Pick::Layout(Some(id.clone()))); ui.close(); }
+                }
+                ui.separator();
+                if menu_item(ui, FILE_PLUS, "No layout").clicked() { pick = Some(Pick::Layout(None)); ui.close(); }
+            });
+        }
+        ui.menu_button(menu_job(ui, RADIO, "Graded question"), |ui| {
+            for (icon, label, tip, make) in GRADED_QUESTIONS {
+                if menu_item(ui, icon, label).on_hover_text(tip).clicked() { pick = Some(Pick::Kind(SlideKind::Question(make()))); ui.close(); }
+            }
+        });
+        ui.menu_button(menu_job(ui, SLIDERS, "Survey question"), |ui| {
+            for (icon, label, tip, make) in SURVEY_QUESTIONS {
+                if menu_item(ui, icon, label).on_hover_text(tip).clicked() { pick = Some(Pick::Kind(SlideKind::Question(make()))); ui.close(); }
+            }
+        });
+        if menu_item(ui, CHECK, "Results").on_hover_text("A quiz results slide").clicked() { pick = Some(Pick::Kind(SlideKind::Results)); ui.close(); }
+        ui.separator();
+        if menu_item(ui, STACK, "New scene").on_hover_text("A new scene, with a slide in it").clicked() { pick = Some(Pick::Scene); ui.close(); }
+        if let Some(p) = pick {
+            if let Some(&last) = scene.and_then(|si| self.project.as_ref().map(|pr| pr.scene_slides(si))).as_ref().and_then(|v| v.last()) { self.slide = last; }
+            match p {
+                Pick::Kind(kind) => self.add_slide(kind),
+                Pick::Layout(l) => self.add_slide_with_layout(SlideKind::Normal, l),
+                Pick::Scene => self.add_scene(),
+            }
+            self.scene_view = false;
+        }
+    }
+
     fn slides_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         group(ui, "New", |ui| {
             ui.horizontal(|ui| {
@@ -2302,34 +2380,7 @@ impl App {
                 big_menu(ui, FILE_PLUS, "New Slide", "Add a slide after this one", |ui| self.new_slide_menu(ui));
             });
         });
-        fn multiple_response() -> Question {
-            let mut q = Question::new_single();
-            q.multiple = true;
-            q.choices[1].correct = true;
-            q
-        }
-        // Every question type is a button of its own, laid out three to a column so they fit the ribbon.
-        let graded: [(char, &str, &str, fn() -> Question); 15] = [
-            (RADIO, "Multiple choice", "One correct answer from several", Question::new_single),
-            (CHECK, "Multiple response", "Several correct answers", multiple_response),
-            (SLIDERS, "True / False", "True or false", Question::new_true_false),
-            (TEXT_T, "Fill in the blank", "Type the answer", Question::new_text_entry),
-            (SHAPES, "Matching", "Match each item to its partner", Question::new_matching),
-            (LIST_NUM, "Sequencing", "Put the items in order", Question::new_sequence),
-            (TEXTBOX, "Fill in the blanks", "Type the missing words in a passage", Question::new_fill_blanks),
-            (CLICK, "Drag the words", "Drag words into the gaps of a passage", Question::new_drag_words),
-            (PEN, "Mark the words", "Mark the right words in a passage", Question::new_mark_words),
-            (TEXT_AA, "Number", "Type a number", Question::new_numeric),
-            (STACK, "Sort into groups", "Drag each item into its group", Question::new_categorize),
-            (IMAGE, "Find the hotspot", "Click the right place on a picture", Question::new_hotspot),
-            (FRAME, "Label the picture", "Put each label on its place in a picture", Question::new_label_picture),
-            (RADIO, "Choose from lists", "Pick the right word from drop-down lists in a passage", Question::new_dropdowns),
-            (SPEAKER, "Dictation", "Type what is heard", Question::new_dictation),
-        ];
-        let survey: [(char, &str, &str, fn() -> Question); 2] = [
-            (SLIDERS, "Rating scale", "A survey question answered on a scale; not scored", Question::new_likert),
-            (TEXTBOX, "Free text", "A survey question answered in the learner's own words; not scored", Question::new_reflection),
-        ];
+        let (graded, survey) = (GRADED_QUESTIONS, SURVEY_QUESTIONS);
         fn grid(ui: &mut egui::Ui, items: &[(char, &str, &str, fn() -> Question)]) -> Option<fn() -> Question> {
             let mut picked = None;
             ui.horizontal_top(|ui| {

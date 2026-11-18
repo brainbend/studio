@@ -3967,31 +3967,7 @@ impl App {
 
     /// The "new slide" choices shared by every menu that adds one: a slide, a question slide, a results slide and a
     /// scene. With `scene`, the slide goes at the end of that scene; otherwise after the current slide.
-    fn new_slide_items(&mut self, ui: &mut egui::Ui, scene: Option<usize>) {
-        const QUESTIONS: [(&str, fn() -> Question); 16] = [
-            ("Multiple choice", Question::new_single), ("True / false", Question::new_true_false), ("Fill in the blank", Question::new_text_entry),
-            ("Matching", Question::new_matching), ("Sequencing", Question::new_sequence), ("Fill in the blanks", Question::new_fill_blanks),
-            ("Drag the words", Question::new_drag_words), ("Mark the words", Question::new_mark_words), ("Number", Question::new_numeric),
-            ("Sort into groups", Question::new_categorize), ("Find the hotspot", Question::new_hotspot), ("Label the picture", Question::new_label_picture),
-            ("Choose from lists", Question::new_dropdowns), ("Dictation", Question::new_dictation), ("Survey scale (not graded)", Question::new_likert),
-            ("Free text (not graded)", Question::new_reflection),
-        ];
-        let mut add: Option<SlideKind> = None;
-        if ui.button("Slide").clicked() { add = Some(SlideKind::Normal); ui.close(); }
-        ui.menu_button("Question", |ui| {
-            for (label, make) in QUESTIONS {
-                if ui.button(label).clicked() { add = Some(SlideKind::Question(make())); ui.close(); }
-            }
-        });
-        if ui.button("Results").clicked() { add = Some(SlideKind::Results); ui.close(); }
-        if let Some(kind) = add {
-            if let Some(&last) = scene.and_then(|si| self.project.as_ref().map(|p| p.scene_slides(si))).as_ref().and_then(|v| v.last()) { self.slide = last; }
-            self.add_slide(kind);
-            self.scene_view = false;
-        }
-        ui.separator();
-        if ui.button("New scene").clicked() { self.add_scene(); self.scene_view = false; ui.close(); }
-    }
+    fn new_slide_items(&mut self, ui: &mut egui::Ui, scene: Option<usize>) { self.add_slide_choices(ui, scene); }
 
     /// Right-click menu of a slide in the slide list or Scene View.
     fn slide_context_menu(&mut self, ui: &mut egui::Ui) {
@@ -11159,7 +11135,7 @@ mod tests {
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: Default::default() });
         h.run_steps(3);
-        { use egui_kittest::kittest::Queryable; h.get_by_label("New scene").click(); }
+        { use egui_kittest::kittest::Queryable; h.get_by_label_contains("New scene").click(); }
         h.run_steps(3);
         assert_eq!(h.state().project.as_ref().unwrap().scenes.len(), 3, "the list's right-click menu added a scene");
         h.state_mut().scene_view = true;
@@ -12324,6 +12300,36 @@ mod tests {
         event(&mut h, egui::Event::PointerMoved(egui::pos2(700.0, 300.0)));
         event(&mut h, egui::Event::PointerButton { pos: egui::pos2(700.0, 300.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
         assert_eq!(h.state().area_of(P_TIMELINE), Area::Window, "over the slide itself it stays a window");
+    }
+
+    #[test]
+    fn shot_document_tabs() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        for (name, light) in [("dark", false), ("light", true)] {
+            let mut a = app();
+            a.add_slide(SlideKind::Normal);
+            a.selected = None;
+            a.new_tab_request = true;
+            let mut h = harness(a);
+            h.ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+            h.run_steps(6);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("doc-tabs-{name}.png"))).unwrap();
+        }
+    }
+
+    #[test]
+    fn shot_add_slide_menu() {
+        use egui_kittest::kittest::Queryable;
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        let mut a = app();
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_by_label("+ Add slide").click();
+        h.run_steps(3);
+        h.get_by_label_contains("Graded question").click();
+        h.run_steps(3);
+        h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join("add-slide-menu.png")).unwrap();
     }
 
     #[test]

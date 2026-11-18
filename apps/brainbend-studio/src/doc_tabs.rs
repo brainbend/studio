@@ -330,7 +330,7 @@ impl App {
 /// and muted text, with a faint fill on hover. The × shows on the active tab and on hover. Returns the tab and
 /// whether its × was pressed.
 fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32) -> (egui::Response, bool) {
-    tab_chip_sized(ui, icon, label, active, closable, width, if closable { 12.5 } else { 11.5 })
+    tab_chip_ex(ui, icon, label, active, closable, width, if closable { 12.5 } else { 11.5 }, true)
 }
 
 /// `panel_tabs` for tabs that carry their own number, so a panel can leave some out and keep the numbers of the rest.
@@ -467,17 +467,24 @@ fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bo
     tab_chip_ex(ui, icon, label, active, closable, width, size, false)
 }
 
-/// A tab; `italic` marks the one tab that the next slide chosen replaces.
+/// A tab. `doc` is for the tabs of what is being edited (slides, Scene View and the editing modes): a lifted tab with a bar on top, not
+/// the blue block of a panel's tabs.
 #[allow(clippy::too_many_arguments)]
-fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, italic: bool) -> (egui::Response, bool) {
+fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, doc: bool) -> (egui::Response, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click_and_drag());
     let dark = ui.visuals().dark_mode;
     let text = ui.visuals().text_color();
-    let ink = if active { egui::Color32::WHITE } else { text.gamma_multiply(0.7) };
+    // Panel tabs are a blue block with white text; document tabs are lifted off the band, with the theme's own text.
+    let blue = active && !doc;
+    let ink = if blue { egui::Color32::WHITE } else if active { ui.visuals().strong_text_color() } else { text.gamma_multiply(0.7) };
     // Round the top corners only, like the ribbon tabs above; the bottom edge stays square on the line under the strip.
     let top_round = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
-    if active {
+    if blue {
         ui.painter().rect_filled(rect, top_round, ui.visuals().selection.bg_fill);
+    } else if active {
+        let lift = if dark { egui::Color32::from_gray(66) } else { egui::Color32::from_gray(236) };
+        ui.painter().rect_filled(rect, top_round, lift);
+        ui.painter().rect_filled(egui::Rect::from_min_size(rect.left_top(), egui::vec2(rect.width(), 3.0)), egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, ui.visuals().selection.bg_fill);
     } else if ui.rect_contains_pointer(rect) {
         ui.painter().rect_filled(rect, top_round, if dark { egui::Color32::from_white_alpha(14) } else { egui::Color32::from_black_alpha(12) });
     }
@@ -489,19 +496,13 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
     }
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max - egui::vec2(if closable { 28.0 } else { 8.0 }, 0.0));
     let font = egui::FontId::proportional(size);
-    if italic {
-        let job = egui::text::LayoutJob::single_section(label.to_string(), egui::TextFormat { font_id: font, color: ink, italics: true, ..Default::default() });
-        let galley = ui.fonts_mut(|f| f.layout_job(job));
-        ui.painter().with_clip_rect(text_rect).galley(egui::pos2(text_rect.left(), mid - galley.size().y / 2.0), galley, ink);
-    } else {
-        ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
-    }
+    ui.painter().with_clip_rect(text_rect).text(egui::pos2(text_rect.left(), mid), egui::Align2::LEFT_CENTER, label, font, ink);
     let mut closed = false;
     if closable && (active || ui.rect_contains_pointer(rect)) {
         let x = egui::Rect::from_center_size(egui::pos2(rect.right() - 15.0, mid), egui::vec2(18.0, 18.0));
         let xr = ui.interact(x, resp.id.with("close"), egui::Sense::click());
-        if xr.hovered() { ui.painter().rect_filled(x, 9.0, if active { egui::Color32::from_white_alpha(45) } else if dark { egui::Color32::from_white_alpha(28) } else { egui::Color32::from_black_alpha(24) }); }
-        ui.painter().text(x.center(), egui::Align2::CENTER_CENTER, "\u{00d7}", egui::FontId::proportional(15.0), if active || xr.hovered() { if active { egui::Color32::WHITE } else { text } } else { ink });
+        if xr.hovered() { ui.painter().rect_filled(x, 9.0, if blue { egui::Color32::from_white_alpha(45) } else if dark { egui::Color32::from_white_alpha(28) } else { egui::Color32::from_black_alpha(24) }); }
+        ui.painter().text(x.center(), egui::Align2::CENTER_CENTER, "\u{00d7}", egui::FontId::proportional(15.0), if active || xr.hovered() { if blue { egui::Color32::WHITE } else { text } } else { ink });
         closed = xr.clicked();
     }
     // Slide tabs share their words with the slide list, so only the tabs with an icon are named for screen readers here.
