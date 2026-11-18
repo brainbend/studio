@@ -114,6 +114,7 @@ impl App {
     }
 
     /// Move a slide's tab to another place among the slide tabs; the tab that is showing stays the one showing.
+    #[cfg(test)]
     pub(super) fn move_tab(&mut self, from: usize, to: usize) {
         if from >= self.tabs.len() || to >= self.tabs.len() || from == to { return; }
         let active = self.active_tab.and_then(|k| self.tabs.get(k)).map(|t| t.slide_id.clone());
@@ -332,14 +333,6 @@ fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, cl
     tab_chip_sized(ui, icon, label, active, closable, width, if closable { 12.5 } else { 11.5 })
 }
 
-/// A row of tabs for a panel (Properties/Triggers, Timeline/Slide Notes/States, Slide Layers), drawn like the
-/// document tabs: the active one is a blue block that meets a blue line under the row. Returns whether a tab
-/// other than the current one was clicked; `current` is updated to it.
-pub(super) fn panel_tabs(ui: &mut egui::Ui, labels: &[String], current: &mut usize) -> bool {
-    let tabs: Vec<(usize, String)> = labels.iter().cloned().enumerate().collect();
-    panel_tabs_of(ui, &tabs, current)
-}
-
 /// `panel_tabs` for tabs that carry their own number, so a panel can leave some out and keep the numbers of the rest.
 pub(super) fn panel_tabs_of(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut usize) -> bool {
     panel_tabs_inner(ui, tabs, current, None).0
@@ -366,7 +359,12 @@ fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut u
     let row = ui.horizontal(|ui| {
         for (i, label) in tabs.iter().map(|(i, l)| (*i, l)) {
             let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), egui::FontId::proportional(12.5), egui::Color32::WHITE).size().x);
-            let (r, _) = tab_chip_sized(ui, None, label, *current == i, false, tw + 28.0, 12.5);
+            // The tab showing has buttons to close it and to pop it out into a window of its own (a docked tool's tab always does).
+            let buttons = (salt.is_some() || super::App::is_tool_id(i)) && *current == i;
+            let (r, closed) = tab_chip_ex(ui, None, label, *current == i, buttons, tw + 28.0 + if buttons { 44.0 } else { 0.0 }, 12.5, false, buttons);
+            let at = salt.unwrap_or("side");
+            if closed { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-closed", at)), i)); }
+            if ui.ctx().data_mut(|d| d.remove_temp::<bool>(r.id.with("popped"))).unwrap_or(false) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-popped", at)), i)); }
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *current == i, label));
             if r.clicked() && *current != i { *current = i; changed = true; }
             chips.push(r);
@@ -378,6 +376,28 @@ fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut u
     ui.spacing_mut().item_spacing.x = before;
     ui.add_space(PANEL_TABS_GAP + 2.0);
     (changed, moved)
+}
+
+/// The tab at the top of a tool's window of its own, drawn like the tabs of the panels: dragging it onto the side panel docks the tool
+/// there. Returns the tab.
+pub(super) fn window_tab(ui: &mut egui::Ui, label: &str, inset: f32) -> (egui::Response, bool) {
+    let before = ui.spacing().item_spacing.x;
+    ui.spacing_mut().item_spacing.x = 0.0;
+    let band = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
+    let top = ui.cursor().min.y;
+    let full = ui.max_rect().expand2(egui::vec2(8.0, 0.0));
+    let painter = ui.painter().with_clip_rect(full);
+    painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), top), egui::pos2(full.right(), top + 30.0)), 0.0, band);
+    let tw = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), egui::FontId::proportional(12.5), egui::Color32::WHITE).size().x);
+    // The strip is the window's title bar: its empty part moves the window, and `inset` leaves room for the system's window buttons.
+    let strip = ui.interact(egui::Rect::from_min_max(egui::pos2(full.left(), top), egui::pos2(full.right(), top + 30.0)), ui.id().with("window-strip"), egui::Sense::click_and_drag());
+    if strip.drag_started() { ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag); }
+    let row = ui.horizontal(|ui| { ui.add_space(inset); tab_chip_sized(ui, None, label, true, true, tw + 44.0, 12.5) });
+    let bottom = row.response.rect.bottom();
+    painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), bottom - 2.0), egui::pos2(full.right(), bottom)), 0.0, ui.visuals().selection.bg_fill);
+    ui.spacing_mut().item_spacing.x = before;
+    ui.add_space(PANEL_TABS_GAP + 2.0);
+    (row.inner.0.on_hover_text("Drag this onto the side panel to dock it there"), row.inner.1)
 }
 
 /// Dragging a tab to a new place: while it is dragged a line shows where it will go, and when it is let go the move is returned as
@@ -398,6 +418,14 @@ fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(
     }
     if dragged.drag_stopped() {
         ui.ctx().data_mut(|d| d.remove_temp::<usize>(key));
+        // Let go over the other panel: the tab moves there.
+        let other = match salt { "side" => "bottom", "bottom" => "side", _ => "" };
+        if let (Some(r), Some(p)) = (ui.ctx().data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("panel-rect", other)))), ui.ctx().pointer_latest_pos()) {
+            if r.contains(p) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-dropped-on", salt)), (from, other == "bottom"))); return None; }
+        }
+        // Let go outside the window: the tab is being taken out of the panel, not moved within it.
+        let inside = ui.ctx().pointer_latest_pos().is_some_and(|p| ui.ctx().content_rect().contains(p));
+        if !inside { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-dropped-outside", salt)), from)); return None; }
         let to = (if slot > from { slot - 1 } else { slot }).min(chips.len() - 1);
         if to != from { return Some((from, to)); }
     }
@@ -415,12 +443,12 @@ pub(super) fn tabbed_panel_frame(style: &egui::Style, nested: bool) -> egui::Fra
 }
 
 fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32) -> (egui::Response, bool) {
-    tab_chip_ex(ui, icon, label, active, closable, width, size, false)
+    tab_chip_ex(ui, icon, label, active, closable, width, size, false, false)
 }
 
 /// A tab; `italic` marks the one tab that the next slide chosen replaces.
 #[allow(clippy::too_many_arguments)]
-fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, italic: bool) -> (egui::Response, bool) {
+fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32, italic: bool, popout: bool) -> (egui::Response, bool) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::click_and_drag());
     let dark = ui.visuals().dark_mode;
     let text = ui.visuals().text_color();
@@ -438,7 +466,7 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
         ui.painter().text(egui::pos2(left, mid), egui::Align2::LEFT_CENTER, ch.to_string(), egui::FontId::new(15.0, ribbon::icons()), ink);
         left += 24.0;
     }
-    let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max - egui::vec2(if closable { 28.0 } else { 8.0 }, 0.0));
+    let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max - egui::vec2(if closable { if popout { 50.0 } else { 28.0 } } else { 8.0 }, 0.0));
     let font = egui::FontId::proportional(size);
     if italic {
         let job = egui::text::LayoutJob::single_section(label.to_string(), egui::TextFormat { font_id: font, color: ink, italics: true, ..Default::default() });
@@ -454,6 +482,25 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
         if xr.hovered() { ui.painter().rect_filled(x, 9.0, if active { egui::Color32::from_white_alpha(45) } else if dark { egui::Color32::from_white_alpha(28) } else { egui::Color32::from_black_alpha(24) }); }
         ui.painter().text(x.center(), egui::Align2::CENTER_CENTER, "\u{00d7}", egui::FontId::proportional(15.0), if active || xr.hovered() { if active { egui::Color32::WHITE } else { text } } else { ink });
         closed = xr.clicked();
+        // A tab in a panel can also be popped out into a window of its own: a small square with an arrow out of its corner.
+        if popout {
+            let px = egui::Rect::from_center_size(egui::pos2(rect.right() - 37.0, mid), egui::vec2(18.0, 18.0));
+            let pr = ui.interact(px, resp.id.with("popout"), egui::Sense::click());
+            if pr.hovered() { ui.painter().rect_filled(px, 9.0, if active { egui::Color32::from_white_alpha(45) } else if dark { egui::Color32::from_white_alpha(28) } else { egui::Color32::from_black_alpha(24) }); }
+            let ink = if active || pr.hovered() { if active { egui::Color32::WHITE } else { text } } else { ink };
+            let c = px.center();
+            let st = egui::Stroke::new(1.3, ink);
+            ui.painter().line_segment([c + egui::vec2(-3.0, -4.0), c + egui::vec2(-5.0, -4.0)], st);
+            ui.painter().line_segment([c + egui::vec2(-5.0, -4.0), c + egui::vec2(-5.0, 5.0)], st);
+            ui.painter().line_segment([c + egui::vec2(-5.0, 5.0), c + egui::vec2(4.0, 5.0)], st);
+            ui.painter().line_segment([c + egui::vec2(4.0, 5.0), c + egui::vec2(4.0, 2.0)], st);
+            ui.painter().line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(5.0, -5.0)], st);
+            ui.painter().line_segment([c + egui::vec2(1.0, -5.0), c + egui::vec2(5.0, -5.0)], st);
+            ui.painter().line_segment([c + egui::vec2(5.0, -5.0), c + egui::vec2(5.0, 1.0)], st);
+            pr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Pop out"));
+            let pr = pr.on_hover_text("Pop out into a window of its own");
+            if pr.clicked() { ui.ctx().data_mut(|d| d.insert_temp(resp.id.with("popped"), true)); }
+        }
     }
     // Slide tabs share their words with the slide list, so only the tabs with an icon are named for screen readers here.
     if icon.is_some() { resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); }

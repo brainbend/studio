@@ -229,6 +229,10 @@ struct App {
     new_tab_each: bool,
     /// The order of the tab strip: "s:<slide id>" for slide tabs, "layout" and "pano" for the others. Kept for the session.
     strip_order: Vec<String>,
+    /// Where each tab was put when it is not where it starts (see `area_of`); remembered per person.
+    areas: HashMap<usize, Area>,
+    /// The Slide Layers panel is out in a window of its own.
+    layers_out: bool,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
     scene_tabs: Option<Vec<String>>,
     /// The Scene View tab that is showing, or that was showing last.
@@ -320,7 +324,7 @@ struct App {
     side_order: Vec<usize>,
     /// The order of the bottom panel's tabs (0 Timeline, 1 Slide Notes, 2 States), as the person arranged them.
     bottom_order: Vec<usize>,
-    tools_seen: Vec<Tool>,
+    tools_seen: Vec<usize>,
     ribbon_open: bool,
     /// Resting the pointer on a tab opens the ribbon too (a person's choice).
     ribbon_hover: bool,
@@ -528,7 +532,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: 0, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, bottom_order: prefs::get_str("bottom_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), side_order: prefs::get_str("side_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], areas: load_areas(), layers_out: prefs::get_bool("layers_popped").unwrap_or(false), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, bottom_order: prefs::get_str("bottom_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse::<usize>().ok()).map(|n| if n < 3 { n + P_TIMELINE } else { n }).collect()).unwrap_or_default(), side_order: prefs::get_str("side_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -770,8 +774,44 @@ pub(crate) enum Tool { Variables, FocusOrder, Spelling, Find, Check, Colors, Set
 
 const TOOLS: [Tool; 7] = [Tool::Variables, Tool::FocusOrder, Tool::Spelling, Tool::Find, Tool::Check, Tool::Colors, Tool::Settings];
 
+/// What the Properties tab asks the app to do once it has been drawn (it cannot, while it holds the project).
+#[derive(Default)]
+struct SideWants {
+    want_captions: Option<(usize, usize)>,
+    want_equation: Option<(usize, usize)>,
+    want_pano: Option<(usize, usize)>,
+    want_thumb: Option<(usize, usize)>,
+    restore_ratio: bool,
+    want_poster: Option<(usize, usize, PosterWant)>,
+    copy_look: bool,
+    paste_look: bool,
+}
+
+/// The tabs a person has moved, from the settings: "id:S", "id:B" or "id:W", separated by commas.
+fn load_areas() -> HashMap<usize, Area> {
+    let mut out = HashMap::new();
+    for part in prefs::get_str("tab_areas").unwrap_or_default().split(',') {
+        let Some((id, a)) = part.split_once(':') else { continue };
+        let Ok(id) = id.trim().parse::<usize>() else { continue };
+        out.insert(id, match a.trim() { "S" => Area::Side, "B" => Area::Bottom, _ => Area::Window });
+    }
+    out
+}
+
 /// The side panel's tab numbers: 0 Properties, 1 Triggers, 2 AI, then a docked tool is `TOOL_TAB` plus its place in `TOOLS`.
 const TOOL_TAB: usize = 10;
+
+/// The numbers of the panels that are not tools, in both the side and the bottom panel: 0 Properties, 1 Triggers, 2 AI, 20 Timeline,
+/// 21 Slide Notes, 22 States. A tool is `TOOL_TAB` plus its place in `TOOLS`. A tab can be docked in either panel or be a window of its own.
+const P_TRIGGERS: usize = 1;
+const P_TIMELINE: usize = 20;
+const P_NOTES: usize = 21;
+const P_STATES: usize = 22;
+const PANEL_IDS: [usize; 6] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES];
+
+/// Where a tab is: in the side panel, in the bottom panel, or in a window of its own outside the app.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Area { Side, Bottom, Window }
 
 impl Tool {
     fn title(self) -> &'static str {
@@ -792,23 +832,217 @@ impl Tool {
 /// what it shows, which scrolls. The tool being drawn says where it is, and whether it can dock, through the context.
 pub(crate) fn dock_tool(ui: &mut egui::Ui, _title: &str, open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
     let docked: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("tool-docked"))).unwrap_or(false);
+    let tall = (ui.ctx().content_rect().height() * 0.75).max(240.0);
     let can_dock: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("tool-can-dock"))).unwrap_or(false);
+    // Closing the tool's operating-system window closes the tool.
+    if ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-close"))).unwrap_or(false) { *open = false; }
+    // In a window of its own the tool has a tab at the top, like the panels, and docks by dragging it onto the side panel.
+    let own_window = ui.ctx().viewport_id() != egui::ViewportId::ROOT;
+    if own_window && !docked {
+        let (tab, closed) = doc_tabs::window_tab(ui, _title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
+        if closed { *open = false; }
+        if let Some(to) = drag_to_dock(ui.ctx(), &tab) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-dock-to"), if to == "bottom" { 1u8 } else { 0u8 })); }
+    } else if !docked {
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("\u{00d7}").on_hover_text("Close").clicked() { *open = false; }
             if can_dock || docked {
-                let (label, tip) = if docked { ("Pop out", "Show this in a window of its own") } else { ("Dock", "Show this as a tab of the side panel") };
+                let (label, tip) = if docked { ("Pop out", "Show this in a window of its own, outside the app") } else { ("Dock", "Show this as a tab of the side panel, inside the app") };
                 if ui.small_button(label).on_hover_text(tip).clicked() { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-toggle-dock"), true)); }
             }
         });
     });
+    }
     // Docked, it fills the panel. Floating, the window is as tall as what is in it, up to most of the app's height.
-    let tall = (ui.ctx().content_rect().height() * 0.75).max(240.0);
-    let area = egui::ScrollArea::vertical().auto_shrink([false, docked]);
-    (if docked { area } else { area.max_height(tall) }).show(ui, |ui| content(ui));
+    // A window of its own is as big as the person makes it, so what is in it fills it.
+    let area = egui::ScrollArea::vertical().auto_shrink([false, docked || own_window]);
+    (if docked || own_window { area } else { area.max_height(tall) }).show(ui, |ui| content(ui));
+}
+
+/// Dragging the tab of a window of its own: the window follows the pointer, and the side or bottom panel of the main window lights up while the
+/// pointer is over it. Returns the panel ("side" or "bottom") when the tab was let go over it. Windows are separate, so the pointer is compared on
+/// the screen: the window's own place plus where the pointer is in it.
+fn drag_to_dock(ctx: &egui::Context, tab: &egui::Response) -> Option<&'static str> {
+    let last = egui::Id::new("dock-drag-pointer");
+    if !(tab.dragged() || tab.drag_stopped()) { return None; }
+    if let (Some(p), Some(own)) = (ctx.input(|i| i.pointer.latest_pos()), ctx.input(|i| i.viewport().inner_rect)) {
+        let now = own.min + p.to_vec2();
+        ctx.data_mut(|d| d.insert_temp(last, now));
+        // The window goes with the tab: it keeps the same place under the pointer as when the drag began.
+        let grab_id = egui::Id::new("dock-drag-grab");
+        if tab.drag_started() { let outer = ctx.input(|i| i.viewport().outer_rect).unwrap_or(own); ctx.data_mut(|d| d.insert_temp(grab_id, now - outer.min)); }
+        if tab.dragged() {
+            if let Some(grab) = ctx.data(|d| d.get_temp::<egui::Vec2>(grab_id)) { ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(now - grab)); }
+        }
+    }
+    let main = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
+    let at: Option<egui::Pos2> = ctx.data(|d| d.get_temp(last));
+    let mut over: Option<&'static str> = None;
+    for target in ["side", "bottom"] {
+        let panel: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new(("panel-rect", target))));
+        if matches!((main, panel, at), (Some(m), Some(s), Some(p)) if s.translate(m.min.to_vec2()).contains(p)) { over = Some(target); }
+    }
+    for target in ["side", "bottom"] { ctx.data_mut(|d| d.insert_temp(egui::Id::new(("dock-hover", target)), tab.dragged() && over == Some(target))); }
+    ctx.request_repaint_of(egui::ViewportId::ROOT);
+    if tab.drag_stopped() {
+        ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(last));
+        return over;
+    }
+    None
+}
+
+/// Remember where a panel is this frame, and light it up while a window's tab is dragged over it.
+fn dock_target(ctx: &egui::Context, ui: &egui::Ui, target: &str) {
+    let here = ui.max_rect().expand(8.0);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("panel-rect", target)), here));
+    if ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("dock-hover", target)))).unwrap_or(false) {
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("dock-hint", target))));
+        p.rect_filled(here, 0.0, ui.visuals().selection.bg_fill.gamma_multiply(0.3));
+        p.rect_stroke(here.shrink(2.0), 0.0, egui::Stroke::new(2.0, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
+    }
 }
 
 impl App {
+    fn is_tool_id(g: usize) -> bool { (TOOL_TAB..TOOL_TAB + TOOLS.len()).contains(&g) }
+
+    fn tool_of(g: usize) -> Option<Tool> { if Self::is_tool_id(g) { TOOLS.get(g - TOOL_TAB).copied() } else { None } }
+
+    /// Whether a panel (not a tool) is switched on in Studio Settings.
+    fn panel_shown(&self, g: usize) -> bool {
+        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, _ => false }
+    }
+
+    fn panel_title(g: usize) -> &'static str {
+        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", _ => "States" }
+    }
+
+    /// Where a tab is. What the person chose wins; otherwise the panels start where they always were (Properties, Triggers and AI at the
+    /// side, Timeline, Slide Notes and States at the bottom) and a tool is a window unless it was docked.
+    fn area_of(&self, g: usize) -> Area {
+        if let Some(a) = self.areas.get(&g) { return *a; }
+        match g {
+            0..=2 => Area::Side,
+            P_TIMELINE | P_NOTES | P_STATES => Area::Bottom,
+            _ => match Self::tool_of(g) { Some(t) if self.docked.contains(&t) => Area::Side, _ => Area::Window },
+        }
+    }
+
+    /// Put a tab in the side panel, the bottom panel or a window of its own. It is remembered.
+    fn set_area(&mut self, g: usize, area: Area) {
+        self.areas.insert(g, area);
+        if let Some(t) = Self::tool_of(g) {
+            if area == Area::Window { self.docked.retain(|x| *x != t); } else if !self.docked.contains(&t) { self.docked.push(t); }
+            crate::prefs::set_bool(t.key(), area != Area::Window);
+        }
+        let text: Vec<String> = self.areas.iter().map(|(g, a)| format!("{g}:{}", match a { Area::Side => "S", Area::Bottom => "B", Area::Window => "W" })).collect();
+        crate::prefs::set_str("tab_areas", &text.join(","));
+        // It goes at the end of that panel's tabs.
+        if area != Area::Window {
+            let mut ids = if area == Area::Side { self.side_tab_ids() } else { self.bottom_tab_ids() };
+            ids.retain(|x| *x != g);
+            ids.push(g);
+            let order = if area == Area::Side { &mut self.side_order } else { &mut self.bottom_order };
+            let rest: Vec<usize> = order.iter().copied().filter(|o| !ids.contains(o)).collect();
+            *order = ids.into_iter().chain(rest).collect();
+            let text = order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(",");
+            crate::prefs::set_str(if area == Area::Side { "side_tab_order" } else { "bottom_tab_order" }, &text);
+        }
+        // The tab that was put in a panel is the one showing there.
+        match area { Area::Side => self.right_tab = g, Area::Bottom => self.bottom_tab = g, Area::Window => {} }
+    }
+
+    /// Show a tab if it is in a panel (the tab of a window is already showing).
+    fn show_panel_tab(&mut self, g: usize) {
+        match self.area_of(g) { Area::Side => self.right_tab = g, Area::Bottom => self.bottom_tab = g, Area::Window => {} }
+    }
+
+    /// Whether the States panel is the one showing, wherever it is.
+    fn states_showing(&self) -> bool {
+        self.panels.states && match self.area_of(P_STATES) { Area::Side => self.right_tab == P_STATES, Area::Bottom => self.bottom_tab == P_STATES, Area::Window => true }
+    }
+
+    /// The tabs that are shown in a panel: the panels that are on in Studio Settings, and the tools that are open and docked there.
+    fn tabs_in(&self, area: Area) -> Vec<usize> {
+        let mut ids: Vec<usize> = PANEL_IDS.iter().copied().filter(|g| self.panel_shown(*g) && self.area_of(*g) == area).collect();
+        if area != Area::Window && self.can_dock_here() {
+            ids.extend(TOOLS.iter().filter(|t| self.tool_open(**t) && self.area_of(TOOL_TAB + t.index()) == area).map(|t| TOOL_TAB + t.index()));
+        }
+        ids
+    }
+
+    /// The names on the tabs, with the number of triggers on the one for Triggers and a dot on AI while a tool is connected.
+    fn tab_labels(&self, ids: &[usize], slide_idx: usize) -> Vec<(usize, String)> {
+        ids.iter().map(|&g| (g, match g {
+            1 => { let n = self.trigger_count(slide_idx); if n > 0 { format!("Triggers ({n})") } else { "Triggers".to_string() } }
+            2 => if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() },
+            _ => match Self::tool_of(g) { Some(t) => t.title().to_string(), None => Self::panel_title(g).to_string() },
+        })).collect()
+    }
+
+    /// How many triggers the chosen thing owns.
+    fn trigger_count(&self, slide_idx: usize) -> usize {
+        let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
+        let sl = &self.project.as_ref().unwrap().slides[slide_idx];
+        let lid = sl.layers[self.layer.min(sl.layers.len() - 1)].id.clone();
+        sl.triggers.iter().filter(|t| match (&t.owner, &owner_id) {
+            (Owner::Object(a), Some(b)) => a == b,
+            (Owner::Layer(l), None) => self.layer > 0 && *l == lid,
+            (Owner::Slide, None) => self.layer == 0,
+            _ => false,
+        }).count()
+    }
+
+    /// What a tab shows: its panel's body, or its tool.
+    fn panel_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, g: usize, wants: &mut SideWants) {
+        match g {
+            0 => self.properties_body(ui, ctx, slide_idx, wants),
+            1 => self.triggers_panel(ui, ctx, slide_idx),
+            2 => self.ai_panel(ui),
+            P_TIMELINE => self.timeline_panel(ui, slide_idx),
+            P_STATES => self.states_tab(ui, slide_idx),
+            P_NOTES => self.notes_panel(ui, slide_idx),
+            _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
+        }
+    }
+
+    /// Close a tab: a tool closes, and a panel is hidden (Studio Settings brings it back).
+    fn close_panel_tab(&mut self, g: usize) {
+        if let Some(t) = Self::tool_of(g) { self.close_tool(t); return; }
+        let (key, flag) = match g {
+            0 => ("show_properties", &mut self.panels.properties), 1 => ("show_triggers", &mut self.panels.triggers), 2 => ("show_ai", &mut self.panels.ai),
+            P_TIMELINE => ("show_timeline", &mut self.panels.timeline), P_NOTES => ("show_notes", &mut self.panels.notes), P_STATES => ("show_states", &mut self.panels.states),
+            _ => return,
+        };
+        *flag = false;
+        crate::prefs::set_bool(key, false);
+    }
+
+    /// Hide the Slide Layers panel.
+    fn hide_layers(&mut self) {
+        self.layers_out = false;
+        crate::prefs::set_bool("layers_popped", false);
+        self.panels.layers = false;
+        crate::prefs::set_bool("show_layers", false);
+    }
+
+    fn set_layers_out(&mut self, out: bool) { self.layers_out = out; crate::prefs::set_bool("layers_popped", out); }
+
+    /// The Slide Layers panel is out in a window of its own (and is not hidden).
+    fn layers_popped(&self) -> bool { self.panels.layers && self.layers_out }
+
+    /// Close a tool, wherever it is shown.
+    fn close_tool(&mut self, t: Tool) {
+        match t {
+            Tool::Variables => self.variables_open = false,
+            Tool::FocusOrder => self.focus_open = false,
+            Tool::Spelling => self.spell = None,
+            Tool::Find => self.find = None,
+            Tool::Check => self.check_results = None,
+            Tool::Colors => self.theme_colors_open = false,
+            Tool::Settings => self.settings_open = false,
+        }
+    }
+
     fn tool_open(&self, t: Tool) -> bool {
         match t {
             Tool::Variables => self.variables_open,
@@ -822,13 +1056,13 @@ impl App {
     }
 
     /// Whether a tool shows as a tab of the side panel: where it was left, except in the 360° editor, whose panel is its own.
-    fn tool_docked(&self, t: Tool) -> bool { self.docked.contains(&t) && self.can_dock_here() }
+    fn tool_docked(&self, t: Tool) -> bool { self.area_of(TOOL_TAB + t.index()) != Area::Window && self.can_dock_here() }
 
     /// Docking needs the side panel: the 360° editor and a web lesson have their own.
     fn can_dock_here(&self) -> bool { self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web()) }
 
-    /// The tabs of the side panel for the tools that are docked and open, in the order they were docked.
-    fn docked_open(&self) -> Vec<Tool> { self.docked.iter().copied().filter(|t| self.tool_open(*t) && self.can_dock_here()).collect() }
+    /// The tools that are open and docked in the side panel, in the order they were docked.
+    fn docked_open(&self) -> Vec<Tool> { self.docked.iter().copied().filter(|t| self.tool_open(*t) && self.can_dock_here() && self.area_of(TOOL_TAB + t.index()) == Area::Side).collect() }
 
     fn show_tool(&mut self, ctx: &egui::Context, t: Tool, ui: &mut egui::Ui) {
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("tool-docked"), self.tool_docked(t)); d.insert_temp(egui::Id::new("tool-can-dock"), self.can_dock_here()); d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock")); });
@@ -841,41 +1075,51 @@ impl App {
             Tool::Colors => self.theme_colors_window(ctx, ui),
             Tool::Settings => self.settings_window(ctx, ui),
         }
-        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock"))).unwrap_or(false) {
-            let now = !self.docked.contains(&t);
-            if now { self.docked.push(t); } else { self.docked.retain(|x| *x != t); }
-            crate::prefs::set_bool(t.key(), now);
+        // The Dock and Pop out buttons, and a tool window's tab let go over a panel.
+        let g = TOOL_TAB + t.index();
+        if let Some(to) = ctx.data_mut(|d| d.remove_temp::<u8>(egui::Id::new("tool-dock-to"))) {
+            self.set_area(g, if to == 1 { Area::Bottom } else { Area::Side });
+        } else if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock"))).unwrap_or(false) {
+            let now = if self.area_of(g) == Area::Window { Area::Side } else { Area::Window };
+            self.set_area(g, now);
         }
     }
 
-    /// The tools that are open and not docked, each in a window of its own inside the app. Also notices a tool being opened
+    /// The tools that are open and not docked, each in a window of its own outside the app. Also notices a tool being opened
     /// or docked, so the side panel shows it.
     fn tool_windows(&mut self, ctx: &egui::Context) {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-variables"))).unwrap_or(false) { self.variables_open = true; }
+        // The buttons on a tab: close it, or pop it out into a window of its own.
+        if ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", "layers")))).is_some() { self.hide_layers(); }
+        if ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", "layers")))).is_some() { self.set_layers_out(true); }
+        for salt in ["side", "bottom"] {
+            if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", salt)))) { self.close_panel_tab(g); }
+            if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", salt)))) { self.set_area(g, Area::Window); }
+        }
         if self.file_view || self.project.is_none() { self.tools_seen.clear(); return; }
-        // A docked tool that has just opened (or been docked) is the tab showing.
-        let docked = self.docked_open();
-        if let Some(new) = docked.iter().find(|t| !self.tools_seen.contains(t)) { self.right_tab = TOOL_TAB + new.index(); }
+        // A docked tool that has just opened (or been docked) is the tab showing in its panel.
+        let docked: Vec<usize> = TOOLS.iter().filter(|t| self.tool_open(**t) && self.tool_docked(**t)).map(|t| TOOL_TAB + t.index()).collect();
+        if let Some(&new) = docked.iter().find(|g| !self.tools_seen.contains(g)) { self.show_panel_tab(new); }
         self.tools_seen = docked;
         for t in TOOLS {
             if !self.tool_open(t) || self.tool_docked(t) { continue; }
-            dialog_window(ctx, t.title()).id(egui::Id::new(("tool-window", t.index()))).collapsible(false).resizable(true).default_width(t.size()[0]).show(ctx, |ui| self.show_tool(ctx, t, ui));
+            // Not docked, a tool is a window of its own, outside the app.
+            let mut open = true;
+            os_window(ctx, t.title(), t.size(), &mut open, |ui| self.show_tool(ctx, t, ui));
         }
     }
 
-    /// The side panel's tab numbers: Properties, Triggers and AI as the person chose, then the docked tools.
+    /// The side panel's tabs, in the order the person gave them; the ones they have not placed keep their usual order, after.
     fn side_tab_ids(&self) -> Vec<usize> {
-        let mut ids = self.panels.side_tabs();
-        ids.extend(self.docked_open().iter().map(|t| TOOL_TAB + t.index()));
-        // In the order the person gave them; the ones they have not placed keep their usual order, after.
+        let mut ids = self.tabs_in(Area::Side);
         let rank = |id: &usize| self.side_order.iter().position(|o| o == id).unwrap_or(usize::MAX);
         ids.sort_by_key(rank);
         ids
     }
 
-    /// The bottom panel's tabs that show, in the order the person gave them.
+    /// The bottom panel's tabs, in the order the person gave them.
     fn bottom_tab_ids(&self) -> Vec<usize> {
-        let mut ids = self.panels.bottom_tabs();
+        let mut ids = self.tabs_in(Area::Bottom);
         ids.sort_by_key(|id| self.bottom_order.iter().position(|o| o == id).unwrap_or(usize::MAX));
         ids
     }
@@ -900,6 +1144,536 @@ impl App {
         let rest: Vec<usize> = self.side_order.iter().copied().filter(|o| !ids.contains(o)).collect();
         self.side_order = ids.into_iter().chain(rest).collect();
         crate::prefs::set_str("side_tab_order", &self.side_order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","));
+    }
+
+    /// The panels that are windows of their own, each with a tab at the top to drag it onto the side or the bottom panel.
+    fn panel_windows(&mut self, ctx: &egui::Context, slide_idx: usize, wants: &mut SideWants) {
+        if self.file_view || self.project.is_none() { return; }
+        let editable = !self.try_mode;
+        if self.layers_popped() && !self.in_master_view() {
+            let mut open = true;
+            let mut closed_here = false;
+            let mut back = false;
+            os_window_inner(ctx, "panel-layers", "Slide Layers", [320.0, 420.0], &mut open, false, |ui| {
+                let (tab, closed) = doc_tabs::window_tab(ui, "Slide Layers", if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
+                if closed { closed_here = true; }
+                // The layers belong at the foot of the side panel, so that whole panel is where it goes back.
+                if drag_to_dock(ui.ctx(), &tab).is_some_and(|t| t == "side") { back = true; }
+                ui.add_enabled_ui(editable, |ui| self.layers_panel(ui, ctx, slide_idx, true));
+            });
+            if back { self.set_layers_out(false); }
+            else if closed_here || !open { self.hide_layers(); }
+        }
+        for g in self.tabs_in(Area::Window) {
+            let title = Self::panel_title(g);
+            let size = if g >= P_TIMELINE { [760.0, 300.0] } else { [380.0, 640.0] };
+            let mut open = true;
+            let mut closed_here = false;
+            let mut to: Option<&'static str> = None;
+            os_window_inner(ctx, &format!("panel-{g}"), title, size, &mut open, false, |ui| {
+                let (tab, closed) = doc_tabs::window_tab(ui, title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
+                if closed { closed_here = true; }
+                to = drag_to_dock(ui.ctx(), &tab);
+                ui.add_enabled_ui(editable, |ui| self.panel_body(ui, ctx, slide_idx, g, wants));
+            });
+            if let Some(t) = to { self.set_area(g, if t == "bottom" { Area::Bottom } else { Area::Side }); }
+            else if closed_here || !open { self.close_panel_tab(g); }
+        }
+    }
+
+    /// The Properties tab: the settings of whatever is chosen. Also the body of its window when it is popped out.
+    fn properties_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, w: &mut SideWants) {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let n_sel = self.selection().len();
+            if n_sel > 1 && self.selected_object().is_some_and(|o| o.table.is_some()) {
+                self.table_panel(ui, ctx);
+                return;
+            }
+            if n_sel > 1 && self.group_panel(ui, ctx, slide_idx) { return; }
+            if n_sel > 1 {
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new(format!("{n_sel} OBJECTS")).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                // What is chosen below is applied to every selected object.
+                ui.label(egui::RichText::new("Drag to move them together. Shift-click adds or removes one.").weak().size(12.0));
+                ui.add_space(4.0);
+                self.format_accordion(ui, ctx);
+                return;
+            }
+            let Some((li, oi)) = self.selected else {
+                ui.add_space(2.0);
+                let layer_idx = self.layer;
+                // With no object chosen, the panel is about the layer picked in the list below, or the slide when that is the base layer.
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(if layer_idx > 0 { "LAYER" } else { "SLIDE" }).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                    if layer_idx > 0 {
+                        let name = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(layer_idx)).map(|l| l.name.clone()).unwrap_or_default();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate()); });
+                    } else {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ribbon::format_panel::expand_buttons(ui));
+                    }
+                });
+                ui.add_space(2.0);
+                let mut ctr = self.id_counter;
+                let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+                let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
+                let layer_idx = self.layer;
+                let in_layout = self.in_master_view();
+                let proj = self.project.as_mut().unwrap();
+                let before = proj.slides.clone();
+                let mut changed = false;
+                let mut want_asset: Option<AssetWant> = None;
+                let mut want_bg_picture = false;
+                let number_vars: Vec<(String, String)> = proj.variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
+                let mut delete_layer = None;
+                let mut show_master_set: Option<(String, bool)> = None;
+                // The slide's own bars, the layer's and an object's are separate lists: each remembers which bar of it is open.
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), if layer_idx > 0 { 2u8 } else { 1u8 }));
+                if layer_idx == 0 {
+                // A question or results slide opens on what makes it that; any other slide opens on its settings.
+                let plain_slide = matches!(proj.slides[slide_idx].kind, SlideKind::Normal);
+                ribbon::format_panel::section(ui, "slide-settings", "Settings", plain_slide, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Name");
+                    changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
+                });
+                // The master's and layout's shapes only exist for a slide that uses a layout.
+                if let (true, Some(id)) = (in_layout, proj.slides[slide_idx].layout.clone()) {
+                    // In the Layout Builder the slide is a layout: its switch decides whether the master's shapes show behind it.
+                    if let Some(l) = proj.layouts.iter().find(|l| l.id == id) {
+                        let mut on = l.show_master;
+                        if ui.checkbox(&mut on, "Show master shapes").on_hover_text("Draw the master's shapes behind this layout").changed() { show_master_set = Some((id, on)); }
+                    }
+                } else if in_layout {
+                    ui.label(egui::RichText::new("Shapes and background here appear on every layout").weak().size(12.0));
+                } else if proj.slides[slide_idx].layout.is_some() {
+                    changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
+                }
+                });
+                let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
+                // The slide's (or layout's) background, in the Layout Builder too.
+                let picture_name = match &proj.slides[slide_idx].background { Some(Background::Image { asset }) => proj.assets.get(asset).map(|a| a.name.clone()), _ => None };
+                ribbon::format_panel::section(ui, "slide-background", "Background", false, |ui| {
+                    let theme = proj.theme.clone();
+                    changed |= ribbon::background_controls(ui, &mut proj.slides[slide_idx].background, &theme, (slide_w, slide_h), slide_idx > 0, picture_name, &mut want_bg_picture);
+                });
+                match &mut proj.slides[slide_idx].kind {
+                    SlideKind::Question(q) => {
+                        ribbon::format_panel::section(ui, "question", "Question", true, |ui| {
+                            egui::ScrollArea::vertical().id_salt("qedit").max_height(440.0).show(ui, |ui| {
+                                changed |= question_editor(ui, q, &mut gen, &mut want_asset, &number_vars);
+                                changed |= question_area_editor(ui, q, slide_w, slide_h);
+                            });
+                        });
+                    }
+                    SlideKind::Results => {
+                        ribbon::format_panel::section(ui, "results", "Results", true, |ui| {
+                            ui.label("Shows the quiz score, pass or fail, and a Retry button. Put it after the last question.");
+                        });
+                    }
+                    SlideKind::Normal => {}
+                }
+                ribbon::format_panel::section(ui, "timeline", "Timeline", false, |ui| {
+                    let last = proj.slides[slide_idx].layers.len() - 1;
+                    let li = layer_idx.min(last);
+                    ui.horizontal(|ui| {
+                        let layer = &mut proj.slides[slide_idx].layers[li];
+                        let mut timed = layer.duration_ms.is_some();
+                        if ui.checkbox(&mut timed, if li == 0 { "Slide length" } else { "Layer length" }).on_hover_text("Length of the timeline; timed objects follow it").changed() {
+                            layer.duration_ms = if timed { Some(5000) } else { None };
+                            changed = true;
+                        }
+                        if let Some(d) = layer.duration_ms.as_mut() {
+                            changed |= ui.add(egui::DragValue::new(d).range(250..=3_600_000).speed(50.0).suffix(" ms")).changed();
+                        }
+                    });
+                    if li == 0 {
+                        changed |= ui.checkbox(&mut proj.slides[slide_idx].auto_advance, "Go to the next slide when it ends").changed();
+                    }
+                });
+                if !in_layout { ribbon::format_panel::section(ui, "transition", "Transition", false, |ui| {
+                    use brainbend_doc::{Transition, TransitionKind};
+                    let sl = &mut proj.slides[slide_idx];
+                    let cur = sl.transition;
+                    let mut opts: Vec<(Option<TransitionKind>, &str)> = vec![(None, "None")];
+                    opts.extend(TransitionKind::ALL.iter().map(|k| (Some(*k), k.label())));
+                    let now = (sl.fade_ms > 0).then_some(cur.kind);
+                    ribbon::format_panel::row(ui, "Effect", |ui, w| {
+                        if let Some(v) = ribbon::format_panel::pick(ui, "slide-transition", w, now.map(|k| k.label()).unwrap_or("None"), &opts, Some(now)) {
+                            match v {
+                                None => sl.fade_ms = 0,
+                                Some(k) => { sl.transition = Transition::of(k); if sl.fade_ms == 0 { sl.fade_ms = 500; } }
+                            }
+                            changed = true;
+                        }
+                    });
+                    let variants = Transition::variants(sl.transition.kind);
+                    if sl.fade_ms > 0 && variants.len() > 1 {
+                        ribbon::format_panel::row(ui, "Options", |ui, w| {
+                            let labels: Vec<(usize, String)> = variants.iter().enumerate().map(|(i, v)| (i, v.variant_label())).collect();
+                            let opts: Vec<(usize, &str)> = labels.iter().map(|(i, l)| (*i, l.as_str())).collect();
+                            let at = variants.iter().position(|v| v.variant_label() == sl.transition.variant_label());
+                            if let Some(i) = ribbon::format_panel::pick(ui, "slide-transition-variant", w, &sl.transition.variant_label(), &opts, at) { sl.transition = variants[i]; changed = true; }
+                        });
+                    }
+                    if sl.fade_ms > 0 {
+                        ribbon::format_panel::row(ui, "Duration", |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut sl.fade_ms).range(50..=5000).speed(10.0).suffix(" ms")).changed(); });
+                        if ui.button("Apply to all slides").clicked() {
+                            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
+                            for s2 in proj.slides.iter_mut() { s2.fade_ms = ms; s2.transition = tr; }
+                            changed = true;
+                        }
+                    }
+                }); }
+                ribbon::format_panel::section(ui, "navigation", "Navigation", false, |ui| {
+                    let nav = &mut proj.slides[slide_idx].nav;
+                    ui.horizontal(|ui| {
+                        ui.label("Next button");
+                        let label = match nav.next { NextRule::Always => "always works", NextRule::AfterTimeline => "after the timeline ends", NextRule::Never => "never works" };
+                        combo("nav-next").selected_text(label).show_ui(ui, |ui| {
+                            for (r, l) in [(NextRule::Always, "always works"), (NextRule::AfterTimeline, "after the timeline ends"), (NextRule::Never, "never works")] {
+                                if ui.selectable_label(nav.next == r, l).clicked() { nav.next = r; changed = true; }
+                            }
+                        });
+                    });
+                    changed |= ui.checkbox(&mut nav.previous_allowed, "Previous button works").changed();
+                    ui.horizontal(|ui| {
+                        ui.label("On return");
+                        let label = match nav.revisit { Revisit::Reset => "start over", Revisit::Resume => "resume where left" };
+                        combo("nav-revisit").selected_text(label).show_ui(ui, |ui| {
+                            for (r, l) in [(Revisit::Reset, "start over"), (Revisit::Resume, "resume where left")] {
+                                if ui.selectable_label(nav.revisit == r, l).clicked() { nav.revisit = r; changed = true; }
+                            }
+                        });
+                    });
+                });
+                // Random questions: a scene can show each learner a different selection of its question slides.
+                let scene_id = proj.slides[slide_idx].scene.clone();
+                let questions = proj.slides.iter().filter(|s| s.scene == scene_id && matches!(s.kind, SlideKind::Question(_))).count();
+                if questions > 0 {
+                    ribbon::format_panel::section(ui, "random-questions", "Random Questions", false, |ui| {
+                    if let Some(sc) = proj.scenes.iter_mut().find(|c| c.id == scene_id) {
+                        let mut on = sc.bank.is_some();
+                        if ui.checkbox(&mut on, "Show a random selection of this scene's questions").on_hover_text("Each attempt draws different question slides from this scene, so two learners (or two tries) do not see the same quiz. The score counts only the questions shown.").changed() {
+                            sc.bank = if on { Some(Bank { draw: (questions as u32).min(5).max(1), shuffle: false }) } else { None };
+                            changed = true;
+                        }
+                        if let Some(b) = sc.bank.as_mut() {
+                            ui.horizontal(|ui| {
+                                ui.label("Show");
+                                changed |= ui.add(egui::DragValue::new(&mut b.draw).range(0..=999).speed(0.2)).changed();
+                                ui.label(format!("of {questions} (0 = all)"));
+                            });
+                            changed |= ui.checkbox(&mut b.shuffle, "Shuffle the order").changed();
+                        }
+                    }
+                    });
+                }
+                } else if proj.slides[slide_idx].layers.get(layer_idx).is_some() {
+                    // A layer other than the base layer: what it does to the slide while it shows, and how long it runs.
+                    ribbon::format_panel::section(ui, "layer-shows", "When This Layer Shows", true, |ui| {
+                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
+                        changed |= ui.checkbox(&mut layer.modal, "Block clicks on the layers beneath").on_hover_text("While this layer shows, learners cannot click the base layer").changed();
+                        changed |= ui.checkbox(&mut layer.hide_others, "Hide the slide's other layers when it shows").changed();
+                        changed |= ui.checkbox(&mut layer.pause_base, "Pause the base layer while it shows").on_hover_text("The slide's timeline and its video or audio stop, and run on when this layer hides").changed();
+                    });
+                    ribbon::format_panel::section(ui, "layer-timeline", "Timeline", false, |ui| {
+                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
+                        ui.horizontal(|ui| {
+                            let mut timed = layer.duration_ms.is_some();
+                            if ui.checkbox(&mut timed, "Layer length").on_hover_text("Length of the timeline; timed objects follow it").changed() {
+                                layer.duration_ms = if timed { Some(5000) } else { None };
+                                changed = true;
+                            }
+                            if let Some(d) = layer.duration_ms.as_mut() {
+                                changed |= ui.add(egui::DragValue::new(d).range(250..=3_600_000).speed(50.0).suffix(" ms")).changed();
+                            }
+                        });
+                    });
+                }
+                ui.add_space(8.0);
+                ui.weak("Click an object on the canvas to edit it.");
+
+                self.id_counter = ctr;
+                if let Some((id, on)) = show_master_set {
+                    let before = self.project.as_ref().map(Snap::of);
+                    if let (Some(before), Some(l)) = (before, self.project.as_mut().and_then(|p| p.layouts.iter_mut().find(|l| l.id == id))) {
+                        l.show_master = on;
+                        self.commit_project_edit(ctx, before);
+                    }
+                }
+                if changed {
+                    let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
+                    if !(self.edit_open && editing) {
+                        self.push_undo(before);
+                    }
+                    self.edit_open = true;
+                    self.dirty = true;
+                }
+                if let Some(l) = delete_layer { self.delete_layer(l); }
+                if want_bg_picture {
+                    if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
+                        self.snapshot();
+                        if let Some(sl) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)) { sl.background = Some(Background::Image { asset: key }); }
+                        self.dirty = true;
+                    }
+                }
+                if let Some(w) = want_asset {
+                    let key = match w {
+                        AssetWant::Image => self.load_image_asset().map(|(k, _, _, _)| k),
+                        AssetWant::Audio => self.load_media(&["mp3", "wav", "ogg", "m4a"], "Audio").map(|(k, _)| k),
+                    };
+                    if let Some(key) = key {
+                        self.snapshot();
+                        if let Some(SlideKind::Question(q)) = self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) { q.style.set_asset(key); }
+                        self.dirty = true;
+                    }
+                }
+                return;
+            };
+            let layer_choices: Vec<(String, String)> = self.project.as_ref().unwrap().slides[slide_idx].layers.iter().map(|l| (l.id.clone(), l.name.clone())).collect();
+            let text_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Text(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
+            let num_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
+            let kind_title = self.format_title();
+            let can_paste = self.style_clip.is_some();
+            let proj = self.project.as_mut().unwrap();
+            // Slides are small (assets live on the project), so a per-frame copy is cheap.
+            let before = proj.slides.clone();
+            let clickable = {
+                let s = &proj.slides[slide_idx];
+                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.has_click_trigger(&o.id))
+            };
+            let group_role = proj.slides[slide_idx].group_role(li, oi);
+            let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
+            let mut changed = false;
+            // What is selected, in the main color, with the Format Painter beside it.
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let title = kind_title.map(str::to_string).unwrap_or_else(|| kind_name(&obj.kind).to_uppercase());
+                ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ribbon::format_panel::expand_buttons(ui);
+                    let (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
+                    if copy { w.copy_look = true; }
+                    if paste { w.paste_look = true; }
+                });
+            });
+            ui.add_space(2.0);
+            ribbon::format_panel::section(ui, "settings", "Settings", true, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
+            });
+            match obj.alt_use(clickable, group_role) {
+                AltUse::Hidden => {}
+                AltUse::ButtonText => {
+                    // "Use the text" is an empty alt text; unticking it shows the box (remembered while it is still empty).
+                    let id = egui::Id::new(("alt-uses-text", obj.id.clone()));
+                    let mut uses_text = obj.alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
+                    let what = if group_role.is_some() { "group's text" } else if obj.check.is_some() { "label text" } else { "button text" };
+                    if ui.checkbox(&mut uses_text, format!("Use the {what} for screen readers")).on_hover_text("Screen readers read the text on it. Untick to give it a different description, such as \"Next: Fire exits\".").changed() {
+                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
+                        if uses_text { obj.alt.clear(); }
+                        changed = true;
+                    }
+                    if !uses_text {
+                        ui.horizontal(|ui| {
+                            ui.label("Alt text");
+                            changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)).changed();
+                        });
+                    }
+                }
+                AltUse::Field(label, hint) => {
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text(hint).desired_width(f32::INFINITY)).changed();
+                    });
+                    changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
+                }
+            }
+            if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
+                ui.horizontal(|ui| {
+                    ui.label("Read as");
+                    combo("text-role").selected_text(obj.role.label()).show_ui(ui, |ui| {
+                        for r in TextRole::CHOICES {
+                            changed |= ui.selectable_value(&mut obj.role, r, r.label()).changed();
+                        }
+                    }).response.on_hover_text("What screen readers announce this text as: a heading (a Heading 1 is the page's main heading) or ordinary text");
+                });
+            }
+            let mut pick_captions = false;
+            if matches!(obj.kind, Kind::Video) {
+                ui.horizontal(|ui| {
+                    ui.label(if obj.captions.is_some() { "Captions: attached" } else { "Captions: none" });
+                    if ui.button("Choose .vtt…").clicked() { pick_captions = true; }
+                    if obj.captions.is_some() && ui.small_button("Remove").clicked() { obj.captions = None; changed = true; }
+                });
+            }
+            if pick_captions { w.want_captions = Some((li, oi)); }
+            if matches!(obj.kind, Kind::Video) {
+                // The picture shown before the video plays: its first frame unless the author picks another.
+                ui.label("Poster frame").on_hover_text("The picture shown before the video plays. It starts as the video's first frame.");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Choose picture…").on_hover_text("Use a picture from a file").clicked() { w.want_poster = Some((li, oi, PosterWant::Picture)); }
+                    if ui.button("First frame").on_hover_text("Go back to the video's first frame").clicked() { w.want_poster = Some((li, oi, PosterWant::Frame(0.0))); }
+                });
+                ui.horizontal(|ui| {
+                    let id = ui.id().with(("poster-secs", &obj.id));
+                    let mut secs: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+                    ui.add(egui::DragValue::new(&mut secs).speed(0.1).range(0.0..=36000.0).suffix(" s"));
+                    ui.data_mut(|d| d.insert_temp(id, secs));
+                    if ui.button("Use frame at this time").clicked() { w.want_poster = Some((li, oi, PosterWant::Frame(secs))); }
+                });
+            }
+            if let Some(e) = &obj.equation {
+                ui.horizontal(|ui| {
+                    ui.label("Equation");
+                    if ui.button("Edit equation…").clicked() { w.want_equation = Some((li, oi)); }
+                });
+                ui.label(egui::RichText::new(&e.latex).monospace().size(12.0).weak());
+                ui.weak("Its color is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
+            }
+            if let Some(m) = obj.marker.as_mut() {
+                ui.horizontal(|ui| {
+                    ui.label("Title");
+                    changed |= ui.add(egui::TextEdit::singleline(&mut m.title).desired_width(f32::INFINITY).hint_text("shown when the marker is hovered")).changed();
+                });
+                ui.label("Description");
+                changed |= ui.add(egui::TextEdit::multiline(&mut m.description).desired_rows(4).desired_width(f32::INFINITY).hint_text("shown in a card when the marker is clicked")).changed();
+                ui.horizontal(|ui| {
+                    ui.label("Card");
+                    changed |= ui.add(egui::DragValue::new(&mut m.card_w).range(160.0..=1800.0).speed(2.0).suffix(" wide")).changed();
+                    changed |= ui.add(egui::DragValue::new(&mut m.card_h).range(100.0..=1000.0).speed(2.0).suffix(" high")).changed();
+                });
+                ui.weak("The title shows on hover or keyboard focus; clicking opens the card, and clicking anywhere else closes it. The card is shown here while the marker is selected.");
+            }
+            if let Kind::Input(f) = &mut obj.kind {
+                changed |= controls::input_editor(ui, f, &text_vars, &num_vars);
+                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add a label above: it is the field's name for screen readers.");
+            }
+            if let Kind::Pano(p) = &obj.kind {
+                ui.horizontal(|ui| {
+                    ui.label("360° image");
+                    if ui.button("Edit markers and hotspots…").clicked() { w.want_pano = Some((li, oi)); }
+                });
+                ui.weak(format!("{} annotation{}. Starts looking {:.0}° across, {:.0}° up, zoom {:.0}°{}.", p.pins.len(), if p.pins.len() == 1 { "" } else { "s" }, p.yaw, p.pitch, p.fov, if p.auto_rotate { ", turning slowly" } else { "" }));
+                ui.weak("Add alt text above: it describes the scene for screen readers. The learner can look around with the mouse, touch or the arrow keys.");
+            }
+            if let Kind::Web(w) = &mut obj.kind {
+                ui.horizontal(|ui| {
+                    ui.label("Web address");
+                    changed |= ui.add(egui::TextEdit::singleline(&mut w.url).hint_text("https://example.com").desired_width(f32::INFINITY)).changed();
+                });
+                changed |= ui.checkbox(&mut w.scroll, "Learner can scroll the page").changed();
+                if !w.url.trim().is_empty() && w.safe_url().is_none() { ui.colored_label(ui.visuals().warn_fg_color, "The address must start with https:// (or http://)."); }
+                else if w.url.trim_start().starts_with("http://") { ui.colored_label(ui.visuals().warn_fg_color, "http:// pages are blocked inside https:// courses by most browsers. Use https:// if the site has it."); }
+                ui.weak("Some sites refuse to be shown inside another page. Add alt text above: it names the frame for screen readers.");
+            }
+            if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
+                let old_text = obj.text.clone();
+                ui.label("Text");
+                let mut buf = obj.text.clone();
+                if ui.add(egui::TextEdit::multiline(&mut buf).desired_rows(4).desired_width(f32::INFINITY)).changed() {
+                    // Characters you did not touch keep their formatting.
+                    obj.edit_text(&buf);
+                    // Objects with states (buttons) draw their text from the initial state, so keep it in step.
+                    let (new_text, new_rich, init) = (obj.text.clone(), obj.rich.clone(), obj.initial_state.clone());
+                    for s in obj.states.iter_mut() {
+                        if s.text == old_text || s.name == init { s.text = new_text.clone(); s.rich = new_rich.clone(); }
+                    }
+                    changed = true;
+                }
+                ui.weak("To format part of the text, double-click it on the slide, select words, and press ⌘B / ⌘I / ⌘U.");
+            }
+            });
+            if matches!(obj.kind, Kind::Video | Kind::Audio) {
+                ribbon::format_panel::section(ui, "playback", "Playback", true, |ui| {
+                    let m = &mut obj.media;
+                    changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
+                    changed |= ui.checkbox(&mut m.looped, "Loop").changed();
+                    changed |= ui.checkbox(&mut m.muted, "Muted").changed();
+                    ui.horizontal(|ui| {
+                        ui.label("Volume");
+                        let mut pct = (m.volume * 100.0).round();
+                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%")).changed() { m.volume = pct / 100.0; changed = true; }
+                    });
+                });
+            }
+            ribbon::format_panel::section(ui, "size-position", "Size and Position", false, |ui| {
+                for (label, v) in [("X", &mut obj.x), ("Y", &mut obj.y), ("Width", &mut obj.w), ("Height", &mut obj.h)] {
+                    ribbon::format_panel::row(ui, label, |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(v).speed(1.0)).changed(); });
+                }
+                ribbon::format_panel::row(ui, "Rotation", |ui, w| {
+                    changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
+                });
+                if matches!(obj.kind, Kind::Image | Kind::Video) {
+                    if ui.add_sized([ui.available_width(), 22.0], egui::Button::new("Restore Aspect Ratio")).on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { w.restore_ratio = true; }
+                }
+            });
+            // What the object is (its name, text and size) is above; its formatting follows, then what it does.
+            let commit = |this: &mut App, before: Vec<Slide>, changed: bool| {
+                if changed {
+                    // One undo step per continuous edit (drag or typing burst).
+                    let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
+                    if !(this.edit_open && editing) { this.push_undo(before); }
+                    this.edit_open = true;
+                    this.dirty = true;
+                } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
+                    this.edit_open = false;
+                }
+            };
+            commit(self, before, changed);
+            self.format_accordion(ui, ctx);
+            let proj = self.project.as_mut().unwrap();
+            let before = proj.slides.clone();
+            let mut changed = false;
+            let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
+            if let Kind::Slider(sl) = &mut obj.kind {
+                let mut pick_thumb = false;
+                ribbon::format_panel::section(ui, "slider", "Slider", true, |ui| { changed |= controls::slider_editor(ui, sl, &num_vars, &mut pick_thumb); });
+                if pick_thumb { w.want_thumb = Some((li, oi)); }
+            }
+            // A check box or a dial: an object is one or the other, chosen in one bar.
+            let can_check = matches!(obj.kind, Kind::Text | Kind::Rect);
+            let can_dial = !matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_));
+            if can_check || can_dial {
+                let on = obj.check.is_some() || obj.dial.is_some();
+                ribbon::format_panel::section(ui, &format!("interactive-{}", obj.id), "Make Interactive", on, |ui| { changed |= controls::interactive_editor(ui, obj, &num_vars, can_check, can_dial); });
+            }
+            if li == 0 && layer_choices.len() > 1 {
+                ribbon::format_panel::section(ui, &format!("hide-{}", obj.id), "Hide when layers show", !obj.hide_on_layers.is_empty(), |ui| {
+                    ui.weak("This object is not drawn while any ticked layer is showing.");
+                    for (lid, lname) in layer_choices.iter().skip(1) {
+                        let mut on = obj.hide_on_layers.contains(lid);
+                        if ui.checkbox(&mut on, lname).changed() {
+                            if on { obj.hide_on_layers.push(lid.clone()); } else { obj.hide_on_layers.retain(|x| x != lid); }
+                            changed = true;
+                        }
+                    }
+                });
+            }
+            if states_panel::supports_states(obj) && !obj.states.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Button set").on_hover_text("Buttons that share a name work as a set: pressing one selects it and releases the others");
+                    let mut set = obj.button_set.clone().unwrap_or_default();
+                    if ui.add(egui::TextEdit::singleline(&mut set).desired_width(120.0).hint_text("none")).changed() {
+                        obj.button_set = (!set.trim().is_empty()).then_some(set);
+                        changed = true;
+                    }
+                });
+            }
+            if changed {
+                // One undo step per continuous edit (drag or typing burst).
+                let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
+                if !(self.edit_open && editing) {
+                    self.push_undo(before);
+                }
+                self.edit_open = true;
+                self.dirty = true;
+            } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
+                self.edit_open = false;
+            }
+            });
     }
 
     fn spelling_tool(&mut self, ui: &mut egui::Ui) {
@@ -1091,7 +1865,51 @@ impl App {
 
 /// A floating tool window, inside the app (the wide ones: Player Properties, Google Fonts). Narrow tools open in the tool dock.
 pub(crate) fn tool_window(ctx: &egui::Context, id: &'static str, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
-    dialog_window(ctx, title).id(egui::Id::new(id)).open(open).collapsible(false).resizable(true).default_size(size).show(ctx, content);
+    os_window_inner(ctx, id, title, size, open, true, content);
+}
+
+/// The app ID (the window class on X11) of every window of its own that the app opens for a tool. A tiling window manager can
+/// match it with a rule that floats these windows, since there is no standard that makes every one of them float on its own.
+pub(crate) const POPOUT_APP_ID: &str = "brainbend-studio-tool";
+
+/// A window of its own, outside the app, with the same content as the floating window. Closing it closes the tool.
+pub(crate) fn os_window(ctx: &egui::Context, title: &str, size: [f32; 2], open: &mut bool, content: impl FnOnce(&mut egui::Ui)) {
+    os_window_inner(ctx, title, title, size, open, false, content);
+}
+
+/// `os_window` with its own key for the window; `closer` gives the in-app fallback a title-bar × (the tools have their own).
+pub(crate) fn os_window_inner(ctx: &egui::Context, key: &str, title: &str, size: [f32; 2], open: &mut bool, closer: bool, content: impl FnOnce(&mut egui::Ui)) {
+    // Where windows cannot be separate (a backend without them, and the tests), it floats inside the app.
+    if ctx.embed_viewports() {
+        let w = dialog_window(ctx, title).id(egui::Id::new(("pop-out", key))).collapsible(false).resizable(true).default_width(size[0]);
+        if closer { w.open(open).show(ctx, content); } else { w.show(ctx, content); }
+        return;
+    }
+    let mut content = Some(content);
+    let builder = egui::ViewportBuilder::default()
+        .with_title(title)
+        .with_inner_size(size)
+        .with_app_id(POPOUT_APP_ID)
+        .with_window_type(egui::viewport::X11WindowType::Utility);
+    // On macOS the tab strip is the title bar, as in the main window; the window buttons stay where they are. A window that cannot dock
+    // (Player Properties, Google Fonts) has no tab, so it keeps the system's title bar.
+    let builder = if cfg!(target_os = "macos") && !closer { builder.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false) } else { builder };
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(("pop-out", key)), builder, |ui, class| {
+        if ui.ctx().input(|i| i.viewport().close_requested()) {
+            *open = false;
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-close"), true));
+        }
+        let Some(c) = content.take() else { return };
+        if class == egui::ViewportClass::EmbeddedWindow { c(ui); }
+        else {
+            // No space above the tabs: they are the top of the window. Without tabs it is an ordinary window.
+            let frame = if closer { egui::Frame::central_panel(&ui.ctx().global_style()) } else { egui::Frame::central_panel(&ui.ctx().global_style()).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 8 }) };
+            egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+                c(ui)
+            });
+        }
+        ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-close")));
+    });
 }
 
 /// A dialog window: it opens in the middle of the app (whatever its size), below the title bar and its window buttons,
@@ -2705,7 +3523,7 @@ impl App {
             ui.add_enabled_ui(n > 1, |ui| { if ui.button("Group").clicked() { self.group_selected(); ui.close(); } });
             if ui.button("Ungroup").clicked() { self.ungroup_selected(); ui.close(); }
             ui.separator();
-            if self.panels.states && self.selected_object().is_some_and(states_panel::supports_states) && ui.button("Edit states…").clicked() { self.bottom_tab = 2; ui.close(); }
+            if self.panels.states && self.selected_object().is_some_and(states_panel::supports_states) && ui.button("Edit states…").clicked() { self.show_panel_tab(P_STATES); ui.close(); }
             if self.panels.triggers && ui.button("Triggers…").on_hover_text("Show this object's triggers").clicked() { self.right_tab = 1; ui.close(); }
         });
         if !has_sel {
@@ -3110,7 +3928,7 @@ impl App {
     fn states_tab(&mut self, ui: &mut egui::Ui, slide_idx: usize) {
         let Some((li, oi)) = self.selected else {
             ui.horizontal(|ui| {
-                if ui.button("DONE").clicked() { self.bottom_tab = 0; }
+                if ui.button("DONE").clicked() { self.show_panel_tab(P_TIMELINE); }
                 ui.weak("Select an object to see its states.");
             });
             return;
@@ -3120,7 +3938,7 @@ impl App {
         let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return };
         if !states_panel::supports_states(obj) {
             ui.horizontal(|ui| {
-                if ui.button("DONE").clicked() { self.bottom_tab = 0; }
+                if ui.button("DONE").clicked() { self.show_panel_tab(P_TIMELINE); }
                 ui.weak("States are not available for this kind of object.");
             });
             return;
@@ -3139,7 +3957,7 @@ impl App {
             self.dirty = true;
         }
         if out.done {
-            self.bottom_tab = 0;
+            self.show_panel_tab(P_TIMELINE);
             self.state_view = None;
         }
         if out.want_picture {
@@ -4023,7 +4841,7 @@ impl App {
     /// Put the States tab's viewed state on its object for this frame.
     fn begin_state_swap(&mut self) {
         self.swap = None;
-        if self.bottom_tab != 2 || self.try_mode { return; }
+        if !self.states_showing() || self.try_mode { return; }
         let Some((li, oi)) = self.selected else { return };
         let slide_idx = self.slide;
         let Some(proj) = self.project.as_mut() else { return };
@@ -4502,12 +5320,13 @@ impl App {
     /// Slide Layers: a panel pinned to the bottom of the right column.
     /// Topmost layer first, the base layer (named after the slide) last; each row has a thumbnail,
     /// the name, and an eye to show or hide the layer on the canvas.
-    fn layers_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) {
+    fn layers_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, in_window: bool) {
         use ribbon::icons;
         let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
         let n = slide.layers.len();
         if self.visible.len() != n { self.visible = vec![true; n]; }
-        doc_tabs::panel_tabs(ui, &["Slide Layers".to_string()], &mut 0);
+        // Docked, the panel has its tab (with the buttons that pop it out and hide it); in a window of its own the window's tab does.
+        if !in_window { doc_tabs::panel_tabs_movable(ui, &[(0, "Slide Layers".to_string())], &mut 0, "layers"); }
         let list_h = (ui.available_height() - 40.0).max(40.0);
         egui::ScrollArea::vertical().id_salt("layers").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -6240,8 +7059,7 @@ fn sync_app_icon(ctx: &egui::Context) {
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         sync_app_icon(root.ctx());
-        // Windows are never separate operating-system windows: the same on every system and window manager.
-        if !root.ctx().embed_viewports() { root.ctx().set_embed_viewports(true); }
+        // A window the person pops out of the app is a real operating-system window (eframe turns that on); nothing else is.
         self.show(root);
     }
 }
@@ -6475,7 +7293,7 @@ impl App {
                     if !docked.iter().any(|t| TOOL_TAB + t.index() == self.right_tab) { self.right_tab = TOOL_TAB + docked[0].index(); }
                     let tabs: Vec<(usize, String)> = docked.iter().map(|t| (TOOL_TAB + t.index(), t.title().to_string())).collect();
                     doc_tabs::panel_tabs_of(ui, &tabs, &mut self.right_tab);
-                    if let Some(&t) = TOOLS.get(self.right_tab - TOOL_TAB) { self.show_tool(ctx, t, ui); }
+                    if let Some(t) = Self::tool_of(self.right_tab) { self.show_tool(ctx, t, ui); }
                 });
             }
             egui::CentralPanel::default().show(root, |ui| self.scene_view_ui(ui, ctx));
@@ -6575,20 +7393,14 @@ impl App {
         // Inspector
         // The left panel can add or delete slides; re-read the index before anything else uses it.
         let slide_idx = self.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
-        let mut want_captions: Option<(usize, usize)> = None;
-        let mut want_equation: Option<(usize, usize)> = None;
-        let mut want_pano: Option<(usize, usize)> = None;
-        let mut want_thumb: Option<(usize, usize)> = None;
-        let mut restore_ratio = false;
-        let mut want_poster: Option<(usize, usize, PosterWant)> = None;
-        let mut copy_look = false;
-        let mut paste_look = false;
+        let mut wants = SideWants::default();
         // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
-        let wide_panel = (self.right_tab == AI_TAB && self.assistant.shows_terminal()) || self.right_tab >= TOOL_TAB;
-        let show_side = !self.side_tab_ids().is_empty() || (self.panels.layers && !self.in_master_view());
+        let wide_panel = (self.right_tab == AI_TAB && self.assistant.shows_terminal()) || Self::is_tool_id(self.right_tab);
+        let show_side = !self.side_tab_ids().is_empty() || (self.panels.layers && !self.layers_popped() && !self.in_master_view()) || self.tabs_in(Area::Window).iter().any(|g| *g < P_TIMELINE) || self.layers_popped();
         if show_side {
         egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
             let editable = !self.try_mode;
+            dock_target(ctx, ui, "side");
             // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
             // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
             // stays put.
@@ -6597,548 +7409,61 @@ impl App {
             let seen = (self.selected, self.layer, self.slide);
             let from_triggers = std::mem::take(&mut self.trigger_select);
             // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
-            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab != AI_TAB && self.right_tab < TOOL_TAB { self.right_tab = 0; }
+            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab == P_TRIGGERS { self.right_tab = 0; }
             self.inspector_seen = Some(seen);
             if !side.contains(&self.right_tab) { if let Some(&first) = side.first() { self.right_tab = first; } }
             ui.add_enabled_ui(editable, |ui| {
-            // The AI tab has the whole column: the chat and the ways to connect a tool need the room, and the layers are a
-            // tab away.
-            if !self.in_master_view() && self.right_tab != AI_TAB && self.right_tab < TOOL_TAB && self.panels.layers {
+            if !self.in_master_view() && self.panels.layers && !self.layers_popped() {
                 egui::Panel::bottom("layers-panel-with-formatting").resizable(true).default_size(150.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
-                    self.layers_panel(ui, ctx, slide_idx);
+                    self.layers_panel(ui, ctx, slide_idx, false);
                 });
             }
             if side.is_empty() { return; }
-            {
-                let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
-                let count = {
-                    let sl = &self.project.as_ref().unwrap().slides[slide_idx];
-                    let lid = sl.layers[self.layer.min(sl.layers.len() - 1)].id.clone();
-                    sl.triggers.iter().filter(|t| match (&t.owner, &owner_id) {
-                        (Owner::Object(a), Some(b)) => a == b,
-                        (Owner::Layer(l), None) => self.layer > 0 && *l == lid,
-                        (Owner::Slide, None) => self.layer == 0,
-                        _ => false,
-                    }).count()
-                };
-                let labels = ["Properties".to_string(), if count > 0 { format!("Triggers ({count})") } else { "Triggers".to_string() }, if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() }];
-                let tabs: Vec<(usize, String)> = side.iter().map(|&i| (i, if i < TOOL_TAB { labels[i].clone() } else { TOOLS[i - TOOL_TAB].title().to_string() })).collect();
-                if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.right_tab, "side") { self.move_side_tab(f, t); }
+            let tabs = self.tab_labels(&side, slide_idx);
+            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.right_tab, "side") { self.move_side_tab(f, t); }
+            // A tab let go outside the app is taken out into a window of its own; over the bottom panel, it goes there.
+            if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", "side")))) {
+                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, Area::Window); }
             }
-            if self.right_tab >= TOOL_TAB {
-                if let Some(&t) = TOOLS.get(self.right_tab - TOOL_TAB) { self.show_tool(ctx, t, ui); }
-                return;
+            if let Some((k, bottom)) = ctx.data_mut(|d| d.remove_temp::<(usize, bool)>(egui::Id::new(("tab-dropped-on", "side")))) {
+                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, if bottom { Area::Bottom } else { Area::Side }); }
             }
-            if self.right_tab == AI_TAB {
-                self.ai_panel(ui);
-                return;
-            }
-            if self.right_tab == 1 {
-                self.triggers_panel(ui, ctx, slide_idx);
-                return;
-            }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let n_sel = self.selection().len();
-            if n_sel > 1 && self.selected_object().is_some_and(|o| o.table.is_some()) {
-                self.table_panel(ui, ctx);
-                return;
-            }
-            if n_sel > 1 && self.group_panel(ui, ctx, slide_idx) { return; }
-            if n_sel > 1 {
-                ui.add_space(2.0);
-                ui.label(egui::RichText::new(format!("{n_sel} OBJECTS")).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
-                // What is chosen below is applied to every selected object.
-                ui.label(egui::RichText::new("Drag to move them together. Shift-click adds or removes one.").weak().size(12.0));
-                ui.add_space(4.0);
-                self.format_accordion(ui, ctx);
-                return;
-            }
-            let Some((li, oi)) = self.selected else {
-                ui.add_space(2.0);
-                let layer_idx = self.layer;
-                // With no object chosen, the panel is about the layer picked in the list below, or the slide when that is the base layer.
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(if layer_idx > 0 { "LAYER" } else { "SLIDE" }).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
-                    if layer_idx > 0 {
-                        let name = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(layer_idx)).map(|l| l.name.clone()).unwrap_or_default();
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate()); });
-                    } else {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ribbon::format_panel::expand_buttons(ui));
-                    }
-                });
-                ui.add_space(2.0);
-                let mut ctr = self.id_counter;
-                let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-                let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
-                let layer_idx = self.layer;
-                let in_layout = self.in_master_view();
-                let proj = self.project.as_mut().unwrap();
-                let before = proj.slides.clone();
-                let mut changed = false;
-                let mut want_asset: Option<AssetWant> = None;
-                let mut want_bg_picture = false;
-                let number_vars: Vec<(String, String)> = proj.variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
-                let mut delete_layer = None;
-                let mut show_master_set: Option<(String, bool)> = None;
-                // The slide's own bars, the layer's and an object's are separate lists: each remembers which bar of it is open.
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), if layer_idx > 0 { 2u8 } else { 1u8 }));
-                if layer_idx == 0 {
-                // A question or results slide opens on what makes it that; any other slide opens on its settings.
-                let plain_slide = matches!(proj.slides[slide_idx].kind, SlideKind::Normal);
-                ribbon::format_panel::section(ui, "slide-settings", "Settings", plain_slide, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Name");
-                    changed |= ui.text_edit_singleline(&mut proj.slides[slide_idx].name).changed();
-                });
-                // The master's and layout's shapes only exist for a slide that uses a layout.
-                if let (true, Some(id)) = (in_layout, proj.slides[slide_idx].layout.clone()) {
-                    // In the Layout Builder the slide is a layout: its switch decides whether the master's shapes show behind it.
-                    if let Some(l) = proj.layouts.iter().find(|l| l.id == id) {
-                        let mut on = l.show_master;
-                        if ui.checkbox(&mut on, "Show master shapes").on_hover_text("Draw the master's shapes behind this layout").changed() { show_master_set = Some((id, on)); }
-                    }
-                } else if in_layout {
-                    ui.label(egui::RichText::new("Shapes and background here appear on every layout").weak().size(12.0));
-                } else if proj.slides[slide_idx].layout.is_some() {
-                    changed |= ui.checkbox(&mut proj.slides[slide_idx].hide_backdrop, "Hide Background Graphics").on_hover_text("Do not draw the master's and layout's shapes on this slide").changed();
-                }
-                });
-                let (slide_w, slide_h) = (proj.slides[slide_idx].width, proj.slides[slide_idx].height);
-                // The slide's (or layout's) background, in the Layout Builder too.
-                let picture_name = match &proj.slides[slide_idx].background { Some(Background::Image { asset }) => proj.assets.get(asset).map(|a| a.name.clone()), _ => None };
-                ribbon::format_panel::section(ui, "slide-background", "Background", false, |ui| {
-                    let theme = proj.theme.clone();
-                    changed |= ribbon::background_controls(ui, &mut proj.slides[slide_idx].background, &theme, (slide_w, slide_h), slide_idx > 0, picture_name, &mut want_bg_picture);
-                });
-                match &mut proj.slides[slide_idx].kind {
-                    SlideKind::Question(q) => {
-                        ribbon::format_panel::section(ui, "question", "Question", true, |ui| {
-                            egui::ScrollArea::vertical().id_salt("qedit").max_height(440.0).show(ui, |ui| {
-                                changed |= question_editor(ui, q, &mut gen, &mut want_asset, &number_vars);
-                                changed |= question_area_editor(ui, q, slide_w, slide_h);
-                            });
-                        });
-                    }
-                    SlideKind::Results => {
-                        ribbon::format_panel::section(ui, "results", "Results", true, |ui| {
-                            ui.label("Shows the quiz score, pass or fail, and a Retry button. Put it after the last question.");
-                        });
-                    }
-                    SlideKind::Normal => {}
-                }
-                ribbon::format_panel::section(ui, "timeline", "Timeline", false, |ui| {
-                    let last = proj.slides[slide_idx].layers.len() - 1;
-                    let li = layer_idx.min(last);
-                    ui.horizontal(|ui| {
-                        let layer = &mut proj.slides[slide_idx].layers[li];
-                        let mut timed = layer.duration_ms.is_some();
-                        if ui.checkbox(&mut timed, if li == 0 { "Slide length" } else { "Layer length" }).on_hover_text("Length of the timeline; timed objects follow it").changed() {
-                            layer.duration_ms = if timed { Some(5000) } else { None };
-                            changed = true;
-                        }
-                        if let Some(d) = layer.duration_ms.as_mut() {
-                            changed |= ui.add(egui::DragValue::new(d).range(250..=3_600_000).speed(50.0).suffix(" ms")).changed();
-                        }
-                    });
-                    if li == 0 {
-                        changed |= ui.checkbox(&mut proj.slides[slide_idx].auto_advance, "Go to the next slide when it ends").changed();
-                    }
-                });
-                if !in_layout { ribbon::format_panel::section(ui, "transition", "Transition", false, |ui| {
-                    use brainbend_doc::{Transition, TransitionKind};
-                    let sl = &mut proj.slides[slide_idx];
-                    let cur = sl.transition;
-                    let mut opts: Vec<(Option<TransitionKind>, &str)> = vec![(None, "None")];
-                    opts.extend(TransitionKind::ALL.iter().map(|k| (Some(*k), k.label())));
-                    let now = (sl.fade_ms > 0).then_some(cur.kind);
-                    ribbon::format_panel::row(ui, "Effect", |ui, w| {
-                        if let Some(v) = ribbon::format_panel::pick(ui, "slide-transition", w, now.map(|k| k.label()).unwrap_or("None"), &opts, Some(now)) {
-                            match v {
-                                None => sl.fade_ms = 0,
-                                Some(k) => { sl.transition = Transition::of(k); if sl.fade_ms == 0 { sl.fade_ms = 500; } }
-                            }
-                            changed = true;
-                        }
-                    });
-                    let variants = Transition::variants(sl.transition.kind);
-                    if sl.fade_ms > 0 && variants.len() > 1 {
-                        ribbon::format_panel::row(ui, "Options", |ui, w| {
-                            let labels: Vec<(usize, String)> = variants.iter().enumerate().map(|(i, v)| (i, v.variant_label())).collect();
-                            let opts: Vec<(usize, &str)> = labels.iter().map(|(i, l)| (*i, l.as_str())).collect();
-                            let at = variants.iter().position(|v| v.variant_label() == sl.transition.variant_label());
-                            if let Some(i) = ribbon::format_panel::pick(ui, "slide-transition-variant", w, &sl.transition.variant_label(), &opts, at) { sl.transition = variants[i]; changed = true; }
-                        });
-                    }
-                    if sl.fade_ms > 0 {
-                        ribbon::format_panel::row(ui, "Duration", |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut sl.fade_ms).range(50..=5000).speed(10.0).suffix(" ms")).changed(); });
-                        if ui.button("Apply to all slides").clicked() {
-                            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
-                            for s2 in proj.slides.iter_mut() { s2.fade_ms = ms; s2.transition = tr; }
-                            changed = true;
-                        }
-                    }
-                }); }
-                ribbon::format_panel::section(ui, "navigation", "Navigation", false, |ui| {
-                    let nav = &mut proj.slides[slide_idx].nav;
-                    ui.horizontal(|ui| {
-                        ui.label("Next button");
-                        let label = match nav.next { NextRule::Always => "always works", NextRule::AfterTimeline => "after the timeline ends", NextRule::Never => "never works" };
-                        combo("nav-next").selected_text(label).show_ui(ui, |ui| {
-                            for (r, l) in [(NextRule::Always, "always works"), (NextRule::AfterTimeline, "after the timeline ends"), (NextRule::Never, "never works")] {
-                                if ui.selectable_label(nav.next == r, l).clicked() { nav.next = r; changed = true; }
-                            }
-                        });
-                    });
-                    changed |= ui.checkbox(&mut nav.previous_allowed, "Previous button works").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("On return");
-                        let label = match nav.revisit { Revisit::Reset => "start over", Revisit::Resume => "resume where left" };
-                        combo("nav-revisit").selected_text(label).show_ui(ui, |ui| {
-                            for (r, l) in [(Revisit::Reset, "start over"), (Revisit::Resume, "resume where left")] {
-                                if ui.selectable_label(nav.revisit == r, l).clicked() { nav.revisit = r; changed = true; }
-                            }
-                        });
-                    });
-                });
-                // Random questions: a scene can show each learner a different selection of its question slides.
-                let scene_id = proj.slides[slide_idx].scene.clone();
-                let questions = proj.slides.iter().filter(|s| s.scene == scene_id && matches!(s.kind, SlideKind::Question(_))).count();
-                if questions > 0 {
-                    ribbon::format_panel::section(ui, "random-questions", "Random Questions", false, |ui| {
-                    if let Some(sc) = proj.scenes.iter_mut().find(|c| c.id == scene_id) {
-                        let mut on = sc.bank.is_some();
-                        if ui.checkbox(&mut on, "Show a random selection of this scene's questions").on_hover_text("Each attempt draws different question slides from this scene, so two learners (or two tries) do not see the same quiz. The score counts only the questions shown.").changed() {
-                            sc.bank = if on { Some(Bank { draw: (questions as u32).min(5).max(1), shuffle: false }) } else { None };
-                            changed = true;
-                        }
-                        if let Some(b) = sc.bank.as_mut() {
-                            ui.horizontal(|ui| {
-                                ui.label("Show");
-                                changed |= ui.add(egui::DragValue::new(&mut b.draw).range(0..=999).speed(0.2)).changed();
-                                ui.label(format!("of {questions} (0 = all)"));
-                            });
-                            changed |= ui.checkbox(&mut b.shuffle, "Shuffle the order").changed();
-                        }
-                    }
-                    });
-                }
-                } else if proj.slides[slide_idx].layers.get(layer_idx).is_some() {
-                    // A layer other than the base layer: what it does to the slide while it shows, and how long it runs.
-                    ribbon::format_panel::section(ui, "layer-shows", "When This Layer Shows", true, |ui| {
-                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
-                        changed |= ui.checkbox(&mut layer.modal, "Block clicks on the layers beneath").on_hover_text("While this layer shows, learners cannot click the base layer").changed();
-                        changed |= ui.checkbox(&mut layer.hide_others, "Hide the slide's other layers when it shows").changed();
-                        changed |= ui.checkbox(&mut layer.pause_base, "Pause the base layer while it shows").on_hover_text("The slide's timeline and its video or audio stop, and run on when this layer hides").changed();
-                    });
-                    ribbon::format_panel::section(ui, "layer-timeline", "Timeline", false, |ui| {
-                        let layer = &mut proj.slides[slide_idx].layers[layer_idx];
-                        ui.horizontal(|ui| {
-                            let mut timed = layer.duration_ms.is_some();
-                            if ui.checkbox(&mut timed, "Layer length").on_hover_text("Length of the timeline; timed objects follow it").changed() {
-                                layer.duration_ms = if timed { Some(5000) } else { None };
-                                changed = true;
-                            }
-                            if let Some(d) = layer.duration_ms.as_mut() {
-                                changed |= ui.add(egui::DragValue::new(d).range(250..=3_600_000).speed(50.0).suffix(" ms")).changed();
-                            }
-                        });
-                    });
-                }
-                ui.add_space(8.0);
-                ui.weak("Click an object on the canvas to edit it.");
-
-                self.id_counter = ctr;
-                if let Some((id, on)) = show_master_set {
-                    let before = self.project.as_ref().map(Snap::of);
-                    if let (Some(before), Some(l)) = (before, self.project.as_mut().and_then(|p| p.layouts.iter_mut().find(|l| l.id == id))) {
-                        l.show_master = on;
-                        self.commit_project_edit(ctx, before);
-                    }
-                }
-                if changed {
-                    let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
-                    if !(self.edit_open && editing) {
-                        self.push_undo(before);
-                    }
-                    self.edit_open = true;
-                    self.dirty = true;
-                }
-                if let Some(l) = delete_layer { self.delete_layer(l); }
-                if want_bg_picture {
-                    if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
-                        self.snapshot();
-                        if let Some(sl) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)) { sl.background = Some(Background::Image { asset: key }); }
-                        self.dirty = true;
-                    }
-                }
-                if let Some(w) = want_asset {
-                    let key = match w {
-                        AssetWant::Image => self.load_image_asset().map(|(k, _, _, _)| k),
-                        AssetWant::Audio => self.load_media(&["mp3", "wav", "ogg", "m4a"], "Audio").map(|(k, _)| k),
-                    };
-                    if let Some(key) = key {
-                        self.snapshot();
-                        if let Some(SlideKind::Question(q)) = self.project.as_mut().map(|p| &mut p.slides[slide_idx].kind) { q.style.set_asset(key); }
-                        self.dirty = true;
-                    }
-                }
-                return;
-            };
-            let layer_choices: Vec<(String, String)> = self.project.as_ref().unwrap().slides[slide_idx].layers.iter().map(|l| (l.id.clone(), l.name.clone())).collect();
-            let text_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Text(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
-            let num_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
-            ctx.data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
-            let kind_title = self.format_title();
-            let can_paste = self.style_clip.is_some();
-            let proj = self.project.as_mut().unwrap();
-            // Slides are small (assets live on the project), so a per-frame copy is cheap.
-            let before = proj.slides.clone();
-            let clickable = {
-                let s = &proj.slides[slide_idx];
-                s.layers.get(li).and_then(|l| l.objects.get(oi)).is_some_and(|o| s.has_click_trigger(&o.id))
-            };
-            let group_role = proj.slides[slide_idx].group_role(li, oi);
-            let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
-            let mut changed = false;
-            // What is selected, in the main color, with the Format Painter beside it.
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                let title = kind_title.map(str::to_string).unwrap_or_else(|| kind_name(&obj.kind).to_uppercase());
-                ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ribbon::format_panel::expand_buttons(ui);
-                    let (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
-                    if copy { copy_look = true; }
-                    if paste { paste_look = true; }
-                });
-            });
-            ui.add_space(2.0);
-            ribbon::format_panel::section(ui, "settings", "Settings", true, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Name");
-                changed |= ui.add(egui::TextEdit::singleline(&mut obj.name).desired_width(f32::INFINITY)).changed();
-            });
-            match obj.alt_use(clickable, group_role) {
-                AltUse::Hidden => {}
-                AltUse::ButtonText => {
-                    // "Use the text" is an empty alt text; unticking it shows the box (remembered while it is still empty).
-                    let id = egui::Id::new(("alt-uses-text", obj.id.clone()));
-                    let mut uses_text = obj.alt.trim().is_empty() && ctx.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
-                    let what = if group_role.is_some() { "group's text" } else if obj.check.is_some() { "label text" } else { "button text" };
-                    if ui.checkbox(&mut uses_text, format!("Use the {what} for screen readers")).on_hover_text("Screen readers read the text on it. Untick to give it a different description, such as \"Next: Fire exits\".").changed() {
-                        ctx.data_mut(|d| d.insert_temp(id, uses_text));
-                        if uses_text { obj.alt.clear(); }
-                        changed = true;
-                    }
-                    if !uses_text {
-                        ui.horizontal(|ui| {
-                            ui.label("Alt text");
-                            changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text("what it does, if not its text").desired_width(f32::INFINITY)).changed();
-                        });
-                    }
-                }
-                AltUse::Field(label, hint) => {
-                    ui.horizontal(|ui| {
-                        ui.label(label);
-                        changed |= ui.add(egui::TextEdit::singleline(&mut obj.alt).hint_text(hint).desired_width(f32::INFINITY)).changed();
-                    });
-                    changed |= ui.checkbox(&mut obj.decorative, "Decorative (screen readers skip it)").changed();
-                }
-            }
-            if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
-                ui.horizontal(|ui| {
-                    ui.label("Read as");
-                    combo("text-role").selected_text(obj.role.label()).show_ui(ui, |ui| {
-                        for r in TextRole::CHOICES {
-                            changed |= ui.selectable_value(&mut obj.role, r, r.label()).changed();
-                        }
-                    }).response.on_hover_text("What screen readers announce this text as: a heading (a Heading 1 is the page's main heading) or ordinary text");
-                });
-            }
-            let mut pick_captions = false;
-            if matches!(obj.kind, Kind::Video) {
-                ui.horizontal(|ui| {
-                    ui.label(if obj.captions.is_some() { "Captions: attached" } else { "Captions: none" });
-                    if ui.button("Choose .vtt…").clicked() { pick_captions = true; }
-                    if obj.captions.is_some() && ui.small_button("Remove").clicked() { obj.captions = None; changed = true; }
-                });
-            }
-            if pick_captions { want_captions = Some((li, oi)); }
-            if matches!(obj.kind, Kind::Video) {
-                // The picture shown before the video plays: its first frame unless the author picks another.
-                ui.label("Poster frame").on_hover_text("The picture shown before the video plays. It starts as the video's first frame.");
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Choose picture…").on_hover_text("Use a picture from a file").clicked() { want_poster = Some((li, oi, PosterWant::Picture)); }
-                    if ui.button("First frame").on_hover_text("Go back to the video's first frame").clicked() { want_poster = Some((li, oi, PosterWant::Frame(0.0))); }
-                });
-                ui.horizontal(|ui| {
-                    let id = ui.id().with(("poster-secs", &obj.id));
-                    let mut secs: f64 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
-                    ui.add(egui::DragValue::new(&mut secs).speed(0.1).range(0.0..=36000.0).suffix(" s"));
-                    ui.data_mut(|d| d.insert_temp(id, secs));
-                    if ui.button("Use frame at this time").clicked() { want_poster = Some((li, oi, PosterWant::Frame(secs))); }
-                });
-            }
-            if let Some(e) = &obj.equation {
-                ui.horizontal(|ui| {
-                    ui.label("Equation");
-                    if ui.button("Edit equation…").clicked() { want_equation = Some((li, oi)); }
-                });
-                ui.label(egui::RichText::new(&e.latex).monospace().size(12.0).weak());
-                ui.weak("Its color is Shape Fill; resize it like any shape. Screen readers get the equation as MathML.");
-            }
-            if let Some(m) = obj.marker.as_mut() {
-                ui.horizontal(|ui| {
-                    ui.label("Title");
-                    changed |= ui.add(egui::TextEdit::singleline(&mut m.title).desired_width(f32::INFINITY).hint_text("shown when the marker is hovered")).changed();
-                });
-                ui.label("Description");
-                changed |= ui.add(egui::TextEdit::multiline(&mut m.description).desired_rows(4).desired_width(f32::INFINITY).hint_text("shown in a card when the marker is clicked")).changed();
-                ui.horizontal(|ui| {
-                    ui.label("Card");
-                    changed |= ui.add(egui::DragValue::new(&mut m.card_w).range(160.0..=1800.0).speed(2.0).suffix(" wide")).changed();
-                    changed |= ui.add(egui::DragValue::new(&mut m.card_h).range(100.0..=1000.0).speed(2.0).suffix(" high")).changed();
-                });
-                ui.weak("The title shows on hover or keyboard focus; clicking opens the card, and clicking anywhere else closes it. The card is shown here while the marker is selected.");
-            }
-            if let Kind::Input(f) = &mut obj.kind {
-                changed |= controls::input_editor(ui, f, &text_vars, &num_vars);
-                ui.weak("What the learner types is kept in the variable; triggers can react when it changes. Add a label above: it is the field's name for screen readers.");
-            }
-            if let Kind::Pano(p) = &obj.kind {
-                ui.horizontal(|ui| {
-                    ui.label("360° image");
-                    if ui.button("Edit markers and hotspots…").clicked() { want_pano = Some((li, oi)); }
-                });
-                ui.weak(format!("{} annotation{}. Starts looking {:.0}° across, {:.0}° up, zoom {:.0}°{}.", p.pins.len(), if p.pins.len() == 1 { "" } else { "s" }, p.yaw, p.pitch, p.fov, if p.auto_rotate { ", turning slowly" } else { "" }));
-                ui.weak("Add alt text above: it describes the scene for screen readers. The learner can look around with the mouse, touch or the arrow keys.");
-            }
-            if let Kind::Web(w) = &mut obj.kind {
-                ui.horizontal(|ui| {
-                    ui.label("Web address");
-                    changed |= ui.add(egui::TextEdit::singleline(&mut w.url).hint_text("https://example.com").desired_width(f32::INFINITY)).changed();
-                });
-                changed |= ui.checkbox(&mut w.scroll, "Learner can scroll the page").changed();
-                if !w.url.trim().is_empty() && w.safe_url().is_none() { ui.colored_label(ui.visuals().warn_fg_color, "The address must start with https:// (or http://)."); }
-                else if w.url.trim_start().starts_with("http://") { ui.colored_label(ui.visuals().warn_fg_color, "http:// pages are blocked inside https:// courses by most browsers. Use https:// if the site has it."); }
-                ui.weak("Some sites refuse to be shown inside another page. Add alt text above: it names the frame for screen readers.");
-            }
-            if !matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Path(_) | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
-                let old_text = obj.text.clone();
-                ui.label("Text");
-                let mut buf = obj.text.clone();
-                if ui.add(egui::TextEdit::multiline(&mut buf).desired_rows(4).desired_width(f32::INFINITY)).changed() {
-                    // Characters you did not touch keep their formatting.
-                    obj.edit_text(&buf);
-                    // Objects with states (buttons) draw their text from the initial state, so keep it in step.
-                    let (new_text, new_rich, init) = (obj.text.clone(), obj.rich.clone(), obj.initial_state.clone());
-                    for s in obj.states.iter_mut() {
-                        if s.text == old_text || s.name == init { s.text = new_text.clone(); s.rich = new_rich.clone(); }
-                    }
-                    changed = true;
-                }
-                ui.weak("To format part of the text, double-click it on the slide, select words, and press ⌘B / ⌘I / ⌘U.");
-            }
-            });
-            if matches!(obj.kind, Kind::Video | Kind::Audio) {
-                ribbon::format_panel::section(ui, "playback", "Playback", true, |ui| {
-                    let m = &mut obj.media;
-                    changed |= ui.checkbox(&mut m.autoplay, "Start automatically").on_hover_text("Plays when the object's turn on the timeline comes; otherwise the learner presses play").changed();
-                    changed |= ui.checkbox(&mut m.looped, "Loop").changed();
-                    changed |= ui.checkbox(&mut m.muted, "Muted").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("Volume");
-                        let mut pct = (m.volume * 100.0).round();
-                        if ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%")).changed() { m.volume = pct / 100.0; changed = true; }
-                    });
-                });
-            }
-            ribbon::format_panel::section(ui, "size-position", "Size and Position", false, |ui| {
-                for (label, v) in [("X", &mut obj.x), ("Y", &mut obj.y), ("Width", &mut obj.w), ("Height", &mut obj.h)] {
-                    ribbon::format_panel::row(ui, label, |ui, w| { changed |= ui.add_sized([w, 22.0], egui::DragValue::new(v).speed(1.0)).changed(); });
-                }
-                ribbon::format_panel::row(ui, "Rotation", |ui, w| {
-                    changed |= ui.add_sized([w, 22.0], egui::DragValue::new(&mut obj.rotation).speed(1.0).range(0.0..=359.0).suffix("°")).on_hover_text("Turns the object clockwise about its centre").changed();
-                });
-                if matches!(obj.kind, Kind::Image | Kind::Video) {
-                    if ui.add_sized([ui.available_width(), 22.0], egui::Button::new("Restore Aspect Ratio")).on_hover_text("Keep the width and set the height to match the picture or video's own proportions").clicked() { restore_ratio = true; }
-                }
-            });
-            // What the object is (its name, text and size) is above; its formatting follows, then what it does.
-            let commit = |this: &mut App, before: Vec<Slide>, changed: bool| {
-                if changed {
-                    // One undo step per continuous edit (drag or typing burst).
-                    let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
-                    if !(this.edit_open && editing) { this.push_undo(before); }
-                    this.edit_open = true;
-                    this.dirty = true;
-                } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
-                    this.edit_open = false;
-                }
-            };
-            commit(self, before, changed);
-            self.format_accordion(ui, ctx);
-            let proj = self.project.as_mut().unwrap();
-            let before = proj.slides.clone();
-            let mut changed = false;
-            let Some(obj) = proj.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return; };
-            if let Kind::Slider(sl) = &mut obj.kind {
-                let mut pick_thumb = false;
-                ribbon::format_panel::section(ui, "slider", "Slider", true, |ui| { changed |= controls::slider_editor(ui, sl, &num_vars, &mut pick_thumb); });
-                if pick_thumb { want_thumb = Some((li, oi)); }
-            }
-            // A check box or a dial: an object is one or the other, chosen in one bar.
-            let can_check = matches!(obj.kind, Kind::Text | Kind::Rect);
-            let can_dial = !matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Line | Kind::LineUp | Kind::Slider(_) | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_));
-            if can_check || can_dial {
-                let on = obj.check.is_some() || obj.dial.is_some();
-                ribbon::format_panel::section(ui, &format!("interactive-{}", obj.id), "Make Interactive", on, |ui| { changed |= controls::interactive_editor(ui, obj, &num_vars, can_check, can_dial); });
-            }
-            if li == 0 && layer_choices.len() > 1 {
-                ribbon::format_panel::section(ui, &format!("hide-{}", obj.id), "Hide when layers show", !obj.hide_on_layers.is_empty(), |ui| {
-                    ui.weak("This object is not drawn while any ticked layer is showing.");
-                    for (lid, lname) in layer_choices.iter().skip(1) {
-                        let mut on = obj.hide_on_layers.contains(lid);
-                        if ui.checkbox(&mut on, lname).changed() {
-                            if on { obj.hide_on_layers.push(lid.clone()); } else { obj.hide_on_layers.retain(|x| x != lid); }
-                            changed = true;
-                        }
-                    }
-                });
-            }
-            if states_panel::supports_states(obj) && !obj.states.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label("Button set").on_hover_text("Buttons that share a name work as a set: pressing one selects it and releases the others");
-                    let mut set = obj.button_set.clone().unwrap_or_default();
-                    if ui.add(egui::TextEdit::singleline(&mut set).desired_width(120.0).hint_text("none")).changed() {
-                        obj.button_set = (!set.trim().is_empty()).then_some(set);
-                        changed = true;
-                    }
-                });
-            }
-            if changed {
-                // One undo step per continuous edit (drag or typing burst).
-                let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
-                if !(self.edit_open && editing) {
-                    self.push_undo(before);
-                }
-                self.edit_open = true;
-                self.dirty = true;
-            } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
-                self.edit_open = false;
-            }
-            });
+            self.panel_body(ui, ctx, slide_idx, self.right_tab, &mut wants);
                     });
         });
         }
 
-        if copy_look {
+        self.panel_windows(ctx, slide_idx, &mut wants);
+        let bottom = self.bottom_tab_ids();
+        if !bottom.contains(&self.bottom_tab) { if let Some(&first) = bottom.first() { self.bottom_tab = first; } }
+        if !bottom.is_empty() || self.tabs_in(Area::Window).iter().any(|g| *g >= P_TIMELINE) { egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
+            let editable = !self.try_mode;
+            dock_target(ctx, ui, "bottom");
+            ui.add_enabled_ui(editable, |ui| {
+            let tabs = self.tab_labels(&bottom, slide_idx);
+            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.bottom_tab, "bottom") { self.move_bottom_tab(f, t); }
+            if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", "bottom")))) {
+                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, Area::Window); }
+            }
+            if let Some((k, to_bottom)) = ctx.data_mut(|d| d.remove_temp::<(usize, bool)>(egui::Id::new(("tab-dropped-on", "bottom")))) {
+                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, if to_bottom { Area::Bottom } else { Area::Side }); }
+            }
+            if bottom.is_empty() {
+                ui.add_space(8.0);
+                ui.weak("Drag a panel's tab here to dock it.");
+            } else {
+                self.panel_body(ui, ctx, slide_idx, self.bottom_tab, &mut wants);
+            }
+                    });
+        }); }
+
+        if wants.copy_look {
             self.style_clip = self.selected_object().map(|o| Box::new(o.clone()));
             self.status = "Style copied. Select another object and choose Paste Style.".into();
         }
-        if paste_look { self.paste_style(ctx); }
-        if restore_ratio { self.restore_aspect_ratio(); }
-        if let Some((li, oi)) = want_thumb {
+        if wants.paste_look { self.paste_style(ctx); }
+        if wants.restore_ratio { self.restore_aspect_ratio(); }
+        if let Some((li, oi)) = wants.want_thumb {
             if let Some((key, _, _, _)) = self.load_image_asset() {
                 self.snapshot();
                 if let Some(Kind::Slider(sl)) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)).map(|o| &mut o.kind) {
@@ -7146,9 +7471,9 @@ impl App {
                 }
             }
         }
-        if let Some(t) = want_equation { self.open_equation_dialog(Some(t)); }
-        if let Some(t) = want_pano { self.open_pano_dialog(t); }
-        if let Some((li, oi, want)) = want_poster {
+        if let Some(t) = wants.want_equation { self.open_equation_dialog(Some(t)); }
+        if let Some(t) = wants.want_pano { self.open_pano_dialog(t); }
+        if let Some((li, oi, want)) = wants.want_poster {
             let key = match want {
                 PosterWant::Picture => self.load_image_asset_titled("Choose Poster Frame").map(|(k, _, _, _)| k),
                 PosterWant::Frame(secs) => {
@@ -7173,7 +7498,7 @@ impl App {
                 self.dirty = true;
             }
         }
-        if let Some((li, oi)) = want_captions {
+        if let Some((li, oi)) = wants.want_captions {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
                 if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
@@ -7181,24 +7506,6 @@ impl App {
                 }
             }
         }
-
-        let bottom = self.bottom_tab_ids();
-        if !bottom.contains(&self.bottom_tab) { if let Some(&first) = bottom.first() { self.bottom_tab = first; } }
-        if !bottom.is_empty() { egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
-            let editable = !self.try_mode;
-            ui.add_enabled_ui(editable, |ui| {
-            let names = ["Timeline", "Slide Notes", "States"];
-            let tabs: Vec<(usize, String)> = bottom.iter().map(|&i| (i, names[i].to_string())).collect();
-            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.bottom_tab, "bottom") { self.move_bottom_tab(f, t); }
-            if self.bottom_tab == 0 {
-                self.timeline_panel(ui, slide_idx);
-            } else if self.bottom_tab == 2 {
-                self.states_tab(ui, slide_idx);
-            } else {
-                self.notes_panel(ui, slide_idx);
-            }
-                    });
-        }); }
 
         egui::CentralPanel::default().show(root, |ui| {
             let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
@@ -7387,7 +7694,7 @@ impl App {
                 _ => slide,
             };
             // The States tab shows its object alone and brightly, with everything else faded behind it.
-            let state_object = if self.bottom_tab == 2 && self.state_dim && self.swap.is_some() && !try_on { self.selected } else { None };
+            let state_object = if self.states_showing() && self.state_dim && self.swap.is_some() && !try_on { self.selected } else { None };
             if let Some((sli, soi)) = state_object.filter(|&(l, o)| slide.layers.get(l).is_some_and(|ly| o < ly.objects.len())) {
                 let mut rest = slide.clone();
                 let one = rest.layers[sli].objects.remove(soi);
@@ -9102,17 +9409,17 @@ mod tests {
                 let (li, oi) = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().position(|o| o.name == "Button 01").map(|oi| (0, oi)).unwrap();
                 let oi_btn = oi;
                 a.selected = Some((li, oi));
-                a.bottom_tab = 2;
+                a.bottom_tab = P_STATES;
                 a.state_view = Some((a.project.as_ref().unwrap().slides[0].layers[0].objects[oi].id.clone(), "Hover".into()));
                 let mut h = harness(a);
                 // Editing Layer 1: the base body text and character it replaces are not drawn.
                 h.state_mut().try_mode = false;
-                h.state_mut().bottom_tab = 0;
+                h.state_mut().bottom_tab = P_TIMELINE;
                 h.state_mut().selected = None;
                 h.state_mut().layer = 1;
                 shot(&mut h, "hide-on-layers.png");
                 h.state_mut().layer = 0;
-                h.state_mut().bottom_tab = 2;
+                h.state_mut().bottom_tab = P_STATES;
                 h.state_mut().selected = Some((0, oi_btn));
                 shot(&mut h, "states-tab.png");
                 // Try it: the second tab has been pressed, so it is Selected and the first is back to Normal.
@@ -9199,7 +9506,7 @@ mod tests {
             if p.exists() {
                 let mut a = App::default();
                 a.open(&p);
-                a.bottom_tab = 0;
+                a.bottom_tab = P_TIMELINE;
                 let mut h = harness(a);
                 shot(&mut h, "7-timeline.png");
             }
@@ -9264,7 +9571,7 @@ mod tests {
         shot(&mut h, "5p-scene-dropdown.png");
         h.state_mut().slide = 0;
         h.state_mut().right_tab = 1;
-        h.state_mut().bottom_tab = 1;
+        h.state_mut().bottom_tab = P_NOTES;
         h.run_steps(3);
         shot(&mut h, "5m-triggers-notes.png");
         h.state_mut().find = Some(FindState { query: "layer".into(), with: "level".into(), ..Default::default() });
@@ -9292,7 +9599,7 @@ mod tests {
         h.state_mut().right_tab = 0;
         h.state_mut().import_report.clear();
         h.state_mut().right_tab = 0;
-        h.state_mut().bottom_tab = 0;
+        h.state_mut().bottom_tab = P_TIMELINE;
         h.state_mut().layer_edit = Some(1);
         h.run_steps(3);
         shot(&mut h, "5l2-layer-rename.png");
@@ -11141,7 +11448,7 @@ mod tests {
         h.run_steps(2);
         h.state_mut().check_results = h.state().project.as_ref().map(|p| p.check());
         h.run_steps(2);
-        h.state_mut().bottom_tab = 0;
+        h.state_mut().bottom_tab = P_TIMELINE;
         h.state_mut().insert_text();
         h.state_mut().insert_rect();
         h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[0].timing = Some(Timing { start_ms: 500, dur_ms: Some(1500) });
@@ -11150,17 +11457,17 @@ mod tests {
         h.state_mut().add_slide(SlideKind::Results);
         h.run_steps(2); // a slide kind with no timeline
         h.state_mut().slide = 0;
-        h.state_mut().bottom_tab = 0;
+        h.state_mut().bottom_tab = P_TIMELINE;
         h.state_mut().insert_rect();
         h.state_mut().insert_button();
         h.state_mut().copy_selected();
         h.state_mut().paste();
         h.run_steps(3);
         h.state_mut().right_tab = 1;
-        h.state_mut().bottom_tab = 1;
+        h.state_mut().bottom_tab = P_NOTES;
         h.run_steps(3);
         h.state_mut().right_tab = 0;
-        h.state_mut().bottom_tab = 0;
+        h.state_mut().bottom_tab = P_TIMELINE;
         h.run_steps(2);
         h.state_mut().zoom = 3.0;
         h.state_mut().pan = egui::vec2(200.0, -100.0);
@@ -11187,7 +11494,7 @@ mod tests {
         let (li, oi) = a.selected.unwrap();
         let hover_before = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().find(|s| s.name == "Hover").unwrap().fill;
         let own_before = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].fill;
-        a.bottom_tab = 2;
+        a.bottom_tab = P_STATES;
         let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
         a.state_view = Some((id, "Hover".into()));
         // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolors, the frame ends.
@@ -11334,6 +11641,34 @@ mod tests {
     /// Tools open in windows of their own, can be docked as tabs of the side panel (in every view), and open again where they
     /// were left.
     #[test]
+    fn any_tab_can_be_docked_in_either_panel_or_be_a_window_and_closing_hides_it() {
+        let mut a = app();
+        assert_eq!(a.side_tab_ids(), vec![0, 1, 2]);
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_NOTES, P_STATES]);
+        // A side tab can be a window, and a bottom tab can go to the side panel.
+        a.set_area(1, Area::Window);
+        assert_eq!(a.side_tab_ids(), vec![0, 2], "Triggers left the side panel");
+        assert_eq!(a.tabs_in(Area::Window), vec![1], "and is a window of its own");
+        a.set_area(P_NOTES, Area::Side);
+        assert_eq!(a.side_tab_ids(), vec![0, 2, P_NOTES]);
+        assert_eq!(a.right_tab, P_NOTES, "the tab that was docked is the one showing");
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_STATES]);
+        // And back: a window can be docked in the bottom panel.
+        a.set_area(1, Area::Bottom);
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_STATES, 1]);
+        // A tool can go to the bottom panel too.
+        a.variables_open = true;
+        a.set_area(TOOL_TAB + Tool::Variables.index(), Area::Bottom);
+        assert!(a.bottom_tab_ids().contains(&(TOOL_TAB + Tool::Variables.index())));
+        assert!(a.tool_docked(Tool::Variables) && a.docked_open().is_empty(), "docked, but not in the side panel");
+        // Closing hides it, wherever it is, until Studio Settings shows it again.
+        a.close_panel_tab(1);
+        assert!(!a.panels.triggers && !a.bottom_tab_ids().contains(&1));
+        a.close_panel_tab(P_TIMELINE);
+        assert!(!a.bottom_tab_ids().contains(&P_TIMELINE));
+    }
+
+    #[test]
     fn tools_float_and_can_be_docked_as_tabs_of_the_side_panel() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
@@ -11417,13 +11752,13 @@ mod tests {
         a.move_side_tab(3, 1);
         assert_eq!(a.side_tab_ids(), vec![2, TOOL_TAB + Tool::Variables.index(), 0, 1]);
         // The bottom panel: Timeline, Slide Notes, States, until moved; a hidden tab is skipped and keeps its place.
-        assert_eq!(a.bottom_tab_ids(), vec![0, 1, 2]);
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_NOTES, P_STATES]);
         a.move_bottom_tab(0, 2);
-        assert_eq!(a.bottom_tab_ids(), vec![1, 2, 0], "Timeline last");
+        assert_eq!(a.bottom_tab_ids(), vec![P_NOTES, P_STATES, P_TIMELINE], "Timeline last");
         a.panels.notes = false;
-        assert_eq!(a.bottom_tab_ids(), vec![2, 0]);
+        assert_eq!(a.bottom_tab_ids(), vec![P_STATES, P_TIMELINE]);
         a.panels.notes = true;
-        assert_eq!(a.bottom_tab_ids(), vec![1, 2, 0], "Slide Notes comes back where it was");
+        assert_eq!(a.bottom_tab_ids(), vec![P_NOTES, P_STATES, P_TIMELINE], "Slide Notes comes back where it was");
     }
 
     #[test]
@@ -12969,6 +13304,7 @@ mod tests {
         h.get_by_label_contains("Colors").click();
         h.run_steps(3);
         assert!(h.state().theme_colors_open);
+        h.run_steps(3);
         // With no colors yet the picker is already showing, and what it shows is added.
         h.get_by_label("Add to palette").click();
         h.run_steps(3);
