@@ -1,22 +1,19 @@
 //! Scene View and slide tabs: the Scene View is the first tab (more can be opened with the "+"), and each slide opened from it
 //! (or from the slide list) gets a tab of its own that remembers its layer, selection, zoom and bottom panel.
 //!
-//! The editor keeps working on "the current slide" (`App::slide`, `layer`, `selected`, ...). A tab holds the view state of
-//! a slide that is not current: the active tab's state is copied into it at the end of every frame, and copied back
+//! The editor keeps working on "the current slide" (`App::view`: the slide, `layer`, `selected`, ...). A tab holds the view of
+//! a slide that is not current: the active tab's view is copied into it at the end of every frame, and copied back
 //! when the tab becomes current again. Tabs are keyed by slide id, so reordering slides does not disturb them and
 //! deleting a slide closes its tab.
 use super::*;
+use crate::view::View;
 
 #[derive(Clone, Debug)]
 pub struct SlideTab {
     pub slide_id: String,
-    layer: usize,
-    selected: Option<(usize, usize)>,
-    zoom: f32,
-    pan: egui::Vec2,
+    /// What the editor holds for this slide while another is showing: its layer, selection, zoom, pan and the rest (see `view.rs`).
+    view: View,
     bottom_tab: usize,
-    visible: Vec<bool>,
-    state_view: Option<(String, String)>,
 }
 
 impl App {
@@ -32,13 +29,8 @@ impl App {
     fn tab_for(&self, slide_idx: usize) -> SlideTab {
         SlideTab {
             slide_id: self.project.as_ref().map(|p| p.slides[slide_idx].id.clone()).unwrap_or_default(),
-            layer: self.layer,
-            selected: self.selected,
-            zoom: self.zoom,
-            pan: self.pan,
+            view: self.view.clone(),
             bottom_tab: self.bottom_tab,
-            visible: self.visible.clone(),
-            state_view: self.state_view.clone(),
         }
     }
 
@@ -52,7 +44,7 @@ impl App {
         self.tabs.retain(|t| ids.contains(&t.slide_id));
         self.active_tab = active_id.clone().and_then(|id| self.tabs.iter().position(|t| t.slide_id == id));
         if self.scene_view { self.active_tab = None; return; }
-        let cur_idx = self.slide.min(ids.len() - 1);
+        let cur_idx = self.view.slide.min(ids.len() - 1);
         let cur = ids[cur_idx].clone();
         // A slide chosen in the slide list is shown in the tab that is showing now. It gets a tab of its own only when asked for
         // (a double-click, a middle-click or the slide's menu), when it is opened from the Scene View, or when the person has chosen
@@ -63,14 +55,18 @@ impl App {
         if self.active_tab.is_some_and(|k| self.tabs[k].slide_id == cur) { return; }
         if let Some(k) = self.tabs.iter().position(|t| t.slide_id == cur) {
             let t = self.tabs[k].clone();
-            let layers = self.project.as_ref().unwrap().slides[cur_idx].layers.len();
-            self.layer = t.layer.min(layers - 1);
-            self.selected = t.selected.filter(|&(l, o)| self.project.as_ref().unwrap().slides[cur_idx].layers.get(l).is_some_and(|ly| o < ly.objects.len()));
-            self.zoom = t.zoom;
-            self.pan = t.pan;
+            let slide = &self.project.as_ref().unwrap().slides[cur_idx];
+            let layers = slide.layers.len();
+            // The tab's view comes back, for the slide as it is now: a layer or an object that has gone is dropped.
+            let mut v = t.view;
+            v.slide = cur_idx;
+            v.layer = v.layer.min(layers - 1);
+            v.selected = v.selected.filter(|&(l, o)| slide.layers.get(l).is_some_and(|ly| o < ly.objects.len()));
+            if v.selected.is_none() { v.multi.clear(); }
+            let visible_ok = v.visible.len() == layers;
+            self.view = v;
             self.bottom_tab = t.bottom_tab;
-            self.state_view = t.state_view;
-            if t.visible.len() == layers { self.visible = t.visible; } else { self.reset_visibility(); }
+            if !visible_ok { self.reset_visibility(); }
             self.active_tab = Some(k);
         } else {
             let t = self.tab_for(cur_idx);
@@ -87,9 +83,9 @@ impl App {
     pub(super) fn save_active_tab(&mut self) {
         if self.in_master_view() || self.scene_view { return; }
         let (Some(k), Some(p)) = (self.active_tab, self.project.as_ref()) else { return };
-        let cur = p.slides[self.slide.min(p.slides.len() - 1)].id.clone();
+        let cur = p.slides[self.view.slide.min(p.slides.len() - 1)].id.clone();
         if self.tabs.get(k).is_some_and(|t| t.slide_id == cur) {
-            let t = self.tab_for(self.slide.min(p.slides.len() - 1));
+            let t = self.tab_for(self.view.slide.min(p.slides.len() - 1));
             self.tabs[k] = t;
         }
     }
@@ -153,7 +149,7 @@ impl App {
         let next = if k > 0 { Some(k - 1) } else if !self.tabs.is_empty() { Some(0) } else { None };
         match next.and_then(|n| self.tabs.get(n)).map(|t| t.slide_id.clone()) {
             Some(id) => {
-                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.slide = i; self.scene_view = false; }
+                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.view.slide = i; self.scene_view = false; }
             }
             None => self.scene_view = true,
         }
@@ -298,7 +294,7 @@ impl App {
             else if go_story { self.leave_master_view(); self.scene_view = true; }
             else if let Some(id) = go_slide {
                 self.leave_master_view();
-                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.slide = i; self.scene_view = false; }
+                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.view.slide = i; self.scene_view = false; }
             }
             return;
         }
@@ -313,13 +309,13 @@ impl App {
             self.tabs = keep.into_iter().collect();
             self.active_tab = if self.tabs.is_empty() { None } else { Some(0) };
             if let Some(id) = self.tabs.first().map(|t| t.slide_id.clone()) {
-                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.slide = i; self.scene_view = false; }
+                if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) { self.view.slide = i; self.scene_view = false; }
             }
         } else if let Some(k) = close { self.close_tab(k); }
         else if go_story { self.scene_view = true; }
         else if let Some(id) = go_slide {
             if let Some(i) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == id)) {
-                self.slide = i;
+                self.view.slide = i;
                 self.scene_view = false;
             }
         }

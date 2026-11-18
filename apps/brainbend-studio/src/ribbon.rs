@@ -1118,9 +1118,9 @@ fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
                 if menu_item(ui, CIRCLE, "Oval").clicked() { a.insert_hotspot(true); ui.close(); }
                 if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
                     a.draw_outline = Some(vec![]);
-                    a.draw_slide = a.slide;
-                    a.selected = None;
-                    a.multi.clear();
+                    a.draw_slide = a.view.slide;
+                    a.view.selected = None;
+                    a.view.multi.clear();
                     a.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
                     ui.close();
                 }
@@ -1197,7 +1197,7 @@ impl App {
         let sel = self.format_targets();
         if sel.is_empty() { return; }
         let slides_before = self.project.as_ref().unwrap().slides.clone();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
         for (li, oi) in sel {
             if let Some(t) = layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                 apply_diff(before, after, t);
@@ -1477,7 +1477,7 @@ impl App {
 
     /// While the Background window shows a gradient, dots on the slide set where it starts, ends and centres: drag them.
     pub(super) fn background_handles(&mut self, ui: &mut egui::Ui, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide_idx: usize) {
-        if !Self::background_bar_open(ui.ctx()) || slide_idx != self.slide { return; }
+        if !Self::background_bar_open(ui.ctx()) || slide_idx != self.view.slide { return; }
         let Some(proj) = self.project.as_ref() else { return };
         let Some(sl) = proj.slides.get(slide_idx) else { return };
         let (w, h) = (sl.width, sl.height);
@@ -1808,7 +1808,7 @@ impl App {
         });
         // Rows and columns, merging and choosing cells: two menus rather than a row of word buttons.
         let mut op = None;
-        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slides[self.slide].layers[self.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
+        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slides[self.view.slide].layers[self.view.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
         let mut merge = false;
         let mut split = false;
         let mut choose: Option<((u16, u16), (u16, u16))> = None;
@@ -1872,7 +1872,7 @@ impl App {
 
     /// The groups of the Properties panel that belong to the selected object: styles, fill and outline, and arrangement.
     fn format_groups(&mut self, ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
-        let has_sel = self.selected.is_some();
+        let has_sel = self.view.selected.is_some();
         let n_sel = self.selection().len();
         let mut style_pick: Option<crate::button_styles::StyleDef> = None;
         let mut pick_captions = false;
@@ -1937,7 +1937,7 @@ impl App {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
                 let id = obj.id.clone();
-                if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
+                if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
                 self.dirty = true;
             }
         }
@@ -2130,9 +2130,9 @@ impl App {
                         if menu_item(ui, CIRCLE, "Oval").clicked() { self.insert_hotspot(true); ui.close(); }
                         if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
                             self.draw_outline = Some(vec![]);
-                            self.draw_slide = self.slide;
-                            self.selected = None;
-                            self.multi.clear();
+                            self.draw_slide = self.view.slide;
+                            self.view.selected = None;
+                            self.view.multi.clear();
                             self.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
                             ui.close();
                         }
@@ -2172,7 +2172,7 @@ impl App {
         let targets = self.format_targets();
         let Some(p) = self.project.as_mut() else { return };
         for (li, oi) in targets {
-            if let Some(o) = p.slides[self.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+            if let Some(o) = p.slides[self.view.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                 if o.rich.is_some() { o.format_range(0, usize::MAX, &brainbend_doc::richtext::Attr::Clear); }
             }
         }
@@ -2510,10 +2510,10 @@ impl App {
 
     /// Link the selected text (or all of the selected object's text) to a web address; `None` removes the link.
     fn link_selected(&mut self, url: Option<String>) {
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             let n = o.text.chars().count();
             o.format_range(a.min(n), b.min(n), &Attr::Link(url));
             let (t, r) = (o.text.clone(), o.rich.clone());
@@ -2565,7 +2565,7 @@ impl App {
         ui.separator();
         if menu_item(ui, STACK, "New scene").on_hover_text("A new scene, with a slide in it").clicked() { pick = Some(Pick::Scene); ui.close(); }
         if let Some(p) = pick {
-            if let Some(&last) = scene.and_then(|si| self.project.as_ref().map(|pr| pr.scene_slides(si))).as_ref().and_then(|v| v.last()) { self.slide = last; }
+            if let Some(&last) = scene.and_then(|si| self.project.as_ref().map(|pr| pr.scene_slides(si))).as_ref().and_then(|v| v.last()) { self.view.slide = last; }
             match p {
                 Pick::Kind(kind) => self.add_slide(kind),
                 Pick::Layout(l) => self.add_slide_with_layout(SlideKind::Normal, l),
@@ -2648,7 +2648,7 @@ impl App {
     }
 
     fn design_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let slide_idx = self.slide;
+        let slide_idx = self.view.slide;
         let Some(proj) = self.project.as_mut() else { return };
         let before = Snap::of(proj);
         let mut changed = false;
@@ -2704,9 +2704,9 @@ impl App {
 
     /// Format the characters selected in the in-place editor (set by the canvas while editing).
     pub(super) fn format_selection(&mut self, attr: Attr) {
-        let (Some((a, b)), Some((li, oi))) = (self.text_sel, self.selected) else { return };
+        let (Some((a, b)), Some((li, oi))) = (self.text_sel, self.view.selected) else { return };
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             o.format_range(a, b, &attr);
             let (t, r) = (o.text.clone(), o.rich.clone());
             for st in o.states.iter_mut() { st.text = t.clone(); st.rich = r.clone(); }
@@ -2718,9 +2718,9 @@ impl App {
     pub(super) fn edit_text_range(&mut self, f: impl Fn(&mut Object, usize, usize, bool)) {
         let targets = self.format_targets();
         if targets.is_empty() { return; }
-        let (part, primary) = (self.text_sel, self.selected);
+        let (part, primary) = (self.text_sel, self.view.selected);
         self.snapshot();
-        let slide = self.slide;
+        let slide = self.view.slide;
         let Some(p) = self.project.as_mut() else { return };
         for (li, oi) in targets {
             let Some(o) = p.slides[slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { continue };
@@ -2741,9 +2741,9 @@ impl App {
             self.align_selected(axis, mode);
             return;
         }
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         let (sw, sh) = (slide.width, slide.height);
         if let Some(o) = slide.layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
             let (pos, len, span) = if axis == 0 { (&mut o.x, o.w, sw) } else { (&mut o.y, o.h, sh) };

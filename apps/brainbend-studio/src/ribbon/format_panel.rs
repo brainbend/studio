@@ -326,7 +326,7 @@ impl App {
     }
 
     fn panel_arrange(&mut self, ui: &mut egui::Ui) {
-        let has_sel = self.selected.is_some();
+        let has_sel = self.view.selected.is_some();
         let n_sel = self.selection().len();
         section(ui, "arrange", "Arrange", false, |ui| {
             ui.add_enabled_ui(has_sel, |ui| {

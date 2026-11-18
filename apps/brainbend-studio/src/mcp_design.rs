@@ -257,7 +257,7 @@ if they say yes, call this again with approved set to true. Otherwise build with
         let which = text_arg(a, "layout")?.ok_or("`layout` must be a layout's name or id.")?;
         let id = find_layout(self.project.as_ref().unwrap(), &which)?;
         self.set_slide_layout(i, Some(id.clone()));
-        self.slide = i;
+        self.view.slide = i;
         self.status = format!("AI tool: changed the layout of slide {}", i + 1);
         let s = &self.project.as_ref().unwrap().slides[i];
         done(json!({ "slide": i + 1, "layout": id, "objects": s.layers[0].objects.iter().map(describe_object).collect::<Vec<_>>() }))

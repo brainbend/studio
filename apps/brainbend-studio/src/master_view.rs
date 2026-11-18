@@ -80,13 +80,13 @@ impl App {
         }
         p.slides = slides;
         p.scenes = vec![Scene { id: MASTER_SCENE.into(), name: "Master".into(), bank: None }];
-        let stash = MasterStash { entry, slide: self.slide, undo: std::mem::take(&mut self.undo), redo: std::mem::take(&mut self.redo), rename: None };
+        let stash = MasterStash { entry, slide: self.view.slide, undo: std::mem::take(&mut self.undo), redo: std::mem::take(&mut self.redo), rename: None };
         self.master_stash = Some(stash);
         self.layout_tab = true;
-        self.slide = 0;
-        self.layer = 0;
-        self.selected = None;
-        self.multi.clear();
+        self.view.slide = 0;
+        self.view.layer = 0;
+        self.view.selected = None;
+        self.view.multi.clear();
         self.scene_view = false;
         self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
@@ -116,10 +116,10 @@ impl App {
                 self.dirty = true;
             }
         }
-        self.slide = stash.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
-        self.layer = 0;
-        self.selected = None;
-        self.multi.clear();
+        self.view.slide = stash.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
+        self.view.layer = 0;
+        self.view.selected = None;
+        self.view.multi.clear();
         self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
     }
@@ -175,9 +175,9 @@ impl App {
         meta.show_master = show_master;
         p.layouts.push(meta);
         p.slides.push(s);
-        self.slide = p.slides.len() - 1;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = p.slides.len() - 1;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
         self.dirty = true;
     }
@@ -190,9 +190,9 @@ impl App {
         let p = self.project.as_mut().unwrap();
         let gone = p.slides.remove(i);
         if let Some(id) = gone.layout { p.layouts.retain(|l| l.id != id); }
-        self.slide = i.min(p.slides.len() - 1);
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = i.min(p.slides.len() - 1);
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
         self.dirty = true;
     }
@@ -200,7 +200,7 @@ impl App {
     pub(super) fn insert_placeholder(&mut self, kind: PlaceholderKind) {
         let id = self.new_id("obj");
         let Some(p) = self.project.as_ref() else { return };
-        let (w, h) = (p.slides[self.slide].width, p.slides[self.slide].height);
+        let (w, h) = (p.slides[self.view.slide].width, p.slides[self.view.slide].height);
         let m = w * 0.06;
         let mut o = brainbend_doc::master::placeholder_object(&id, kind, &p.theme, m, h * 0.3, w - 2.0 * m, h * 0.3);
         o.name = format!("{} placeholder", kind.label());
@@ -215,7 +215,7 @@ impl App {
         if i == 0 || j == 0 || i >= p.slides.len() || j >= p.slides.len() { return; }
         self.snapshot();
         self.project.as_mut().unwrap().slides.swap(i, j);
-        self.slide = j;
+        self.view.slide = j;
         self.dirty = true;
     }
 
@@ -253,7 +253,7 @@ impl App {
                     ui.label(egui::RichText::new("Layouts").weak().size(12.0));
                 }
                 let name = self.project.as_ref().unwrap().slides[i].name.clone();
-                let sel = i == self.slide;
+                let sel = i == self.view.slide;
                 let thumb = self.slide_thumbnail(ui, ctx, i, tw, sel);
                 if thumb.clicked() || thumb.secondary_clicked() { pick = Some(i); }
                 if thumb.double_clicked() && i > 0 { start_rename = Some(i); }
@@ -281,7 +281,7 @@ impl App {
         });
         ui.horizontal(|ui| {
             if ui.button("+ Add layout").clicked() { action = Some((0, 0)); }
-            let cur = self.slide;
+            let cur = self.view.slide;
             ui.menu_button("Layout", |ui| {
                 if ui.add_enabled(cur > 0, egui::Button::new("Duplicate")).clicked() { action = Some((1, cur)); ui.close(); }
                 if ui.add_enabled(cur > 0, egui::Button::new("Rename")).clicked() { start_rename = Some(cur); ui.close(); }
@@ -292,9 +292,9 @@ impl App {
             });
         });
         if let Some(i) = pick {
-            self.slide = i;
-            self.layer = 0;
-            self.selected = None;
+            self.view.slide = i;
+            self.view.layer = 0;
+            self.view.selected = None;
             self.reset_visibility();
         }
         if let Some((i, text)) = rename_to {

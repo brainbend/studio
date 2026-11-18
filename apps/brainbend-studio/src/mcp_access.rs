@@ -89,9 +89,9 @@ impl App {
         slide.layers[0].objects.push(o);
         slide.layers[0].objects.extend(parts);
         slide.triggers.push(trigger);
-        self.selected = Some((0, slide.layers[0].objects.len() - 1 - usize::from(icon.is_some())));
-        self.slide = i;
-        self.layer = 0;
+        self.view.selected = Some((0, slide.layers[0].objects.len() - 1 - usize::from(icon.is_some())));
+        self.view.slide = i;
+        self.view.layer = 0;
         self.dirty = true;
         self.status = format!("AI tool: added the {text} button to slide {}", i + 1);
         done(json!({ "button": described, "does": action, "with_icon": icon.map(|ic| ic.title()), "note": "One object: the words are inside the shape and the click is on it, so it works with the keyboard and screen readers as it is." }))
@@ -147,9 +147,9 @@ impl App {
         let clickable = trigger.is_some();
         if let Some(t) = trigger { slide.triggers.push(t); }
         if clickable { if let Some(t) = &alt { slide.layers[li].objects[found[0].1].alt = t.clone(); } }
-        self.selected = Some((li, found[0].1));
-        self.slide = i;
-        self.layer = li;
+        self.view.selected = Some((li, found[0].1));
+        self.view.slide = i;
+        self.view.layer = li;
         self.dirty = true;
         self.status = format!("AI tool: grouped {} objects on slide {}", found.len(), i + 1);
         let slide = &self.project.as_ref().unwrap().slides[i];

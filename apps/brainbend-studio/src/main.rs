@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use brainbend_doc::*;
 mod equations;
 mod dock;
+mod view;
 mod commands;
 mod panos;
 mod icons;
@@ -95,16 +96,10 @@ fn main() -> eframe::Result {
 struct App {
     project: Option<Project>,
     path: Option<PathBuf>,
-    slide: usize,
-    /// Layer shown on top of the base layer (index into `slide.layers`, 0 = base only).
-    layer: usize,
-    selected: Option<(usize, usize)>, // (layer index, object index)
-    /// Ids of further selected objects on the same layer as `selected` (shift-click / rubber band).
-    multi: Vec<String>,
+    /// The view being edited: the slide, its layer, the selection, the zoom and pan (see `view.rs`).
+    view: view::View,
     /// Rubber-band start in slide coordinates while dragging on empty canvas.
     marquee: Option<egui::Pos2>,
-    /// Which layers of the current slide are drawn (index = layer index; base layer is always drawn).
-    visible: Vec<bool>,
     textures: HashMap<String, egui::TextureHandle>,
     undo: Vec<Snap>,
     redo: Vec<Snap>,
@@ -120,9 +115,6 @@ struct App {
     id_counter: u64,
     new_var_name: String,
     new_var_kind: usize, // 0 = true/false, 1 = number, 2 = text
-    /// Canvas view: `zoom` multiplies the fit-to-window scale; `pan` is a screen-space offset.
-    zoom: f32,
-    pan: egui::Vec2,
     fit_scale: f32,
     theme_colors_open: bool,
     /// A color just picked, to be remembered as recent once the pointer is released.
@@ -152,8 +144,6 @@ struct App {
     check_results: Option<Vec<brainbend_doc::check::Issue>>,
     /// Bottom panel tab: 0 = interactions, 1 = timeline.
     bottom_tab: usize,
-    /// The States tab: (object id, state name) whose look the canvas shows.
-    state_view: Option<(String, String)>,
     /// Dim the other objects while the States tab is open.
     state_dim: bool,
     /// "Try it" in the States tab: press buttons on the canvas to see their states, view only.
@@ -539,11 +529,11 @@ enum DragMode {
 impl Default for App {
     fn default() -> Self {
         Self {
-            project: None, path: None, slide: 0, layer: 0, selected: None, multi: vec![], marquee: None, visible: vec![], textures: HashMap::new(),
+            project: None, path: None, view: view::View::default(), marquee: None, textures: HashMap::new(),
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -760,19 +750,19 @@ impl App {
     /// view back where it was, unless the item moved it (a new slide, a tab of its own).
     fn with_menu_target(&mut self, i: usize, f: impl FnOnce(&mut App)) {
         let Some(p) = &self.project else { return };
-        let cur = self.slide.min(p.slides.len() - 1);
+        let cur = self.view.slide.min(p.slides.len() - 1);
         let (prev, picked) = (p.slides[cur].id.clone(), p.slides[i].id.clone());
-        let (layer, selected, multi) = (self.layer, self.selected, std::mem::take(&mut self.slide_multi));
-        self.slide = i;
-        self.layer = 0;
-        self.selected = None;
+        let (layer, selected, multi) = (self.view.layer, self.view.selected, std::mem::take(&mut self.slide_multi));
+        self.view.slide = i;
+        self.view.layer = 0;
+        self.view.selected = None;
         f(self);
-        let still_there = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).is_some_and(|s| s.id == picked);
+        let still_there = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).is_some_and(|s| s.id == picked);
         if still_there && !self.new_tab_request {
             if let Some(k) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == prev)) {
-                self.slide = k;
-                self.layer = layer;
-                self.selected = selected;
+                self.view.slide = k;
+                self.view.layer = layer;
+                self.view.selected = selected;
                 self.slide_multi = multi;
             }
         }
@@ -1127,11 +1117,11 @@ impl App {
     fn trigger_count(&self, slide_idx: usize) -> usize {
         let owner_id = self.trigger_owner(slide_idx).map(|(id, _, _)| id);
         let sl = &self.project.as_ref().unwrap().slides[slide_idx];
-        let lid = sl.layers[self.layer.min(sl.layers.len() - 1)].id.clone();
+        let lid = sl.layers[self.view.layer.min(sl.layers.len() - 1)].id.clone();
         sl.triggers.iter().filter(|t| match (&t.owner, &owner_id) {
             (Owner::Object(a), Some(b)) => a == b,
-            (Owner::Layer(l), None) => self.layer > 0 && *l == lid,
-            (Owner::Slide, None) => self.layer == 0,
+            (Owner::Layer(l), None) => self.view.layer > 0 && *l == lid,
+            (Owner::Slide, None) => self.view.layer == 0,
             _ => false,
         }).count()
     }
@@ -1173,7 +1163,7 @@ impl App {
             clicked = sel.or(opn);
         });
         if let Some(i) = clicked {
-            self.slide = i; self.layer = 0; self.selected = None;
+            self.view.slide = i; self.view.layer = 0; self.view.selected = None;
             self.reset_visibility();
         }
         if !self.slide_multi.is_empty() {
@@ -1545,9 +1535,9 @@ impl App {
                 self.format_accordion(ui, ctx);
                 return;
             }
-            let Some((li, oi)) = self.selected else {
+            let Some((li, oi)) = self.view.selected else {
                 ui.add_space(2.0);
-                let layer_idx = self.layer;
+                let layer_idx = self.view.layer;
                 // With no object chosen, the panel is about the layer picked in the list below, or the slide when that is the base layer.
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(if layer_idx > 0 { "LAYER" } else { "SLIDE" }).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
@@ -1562,7 +1552,7 @@ impl App {
                 let mut ctr = self.id_counter;
                 let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
                 let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
-                let layer_idx = self.layer;
+                let layer_idx = self.view.layer;
                 let in_layout = self.in_master_view();
                 let proj = self.project.as_mut().unwrap();
                 let before = proj.slides.clone();
@@ -2081,9 +2071,9 @@ impl App {
                     self.sec = slide;
                     self.blk = block;
                 } else {
-                    self.slide = slide;
-                    self.layer = object.map(|o| o.0).unwrap_or(0);
-                    self.selected = object;
+                    self.view.slide = slide;
+                    self.view.layer = object.map(|o| o.0).unwrap_or(0);
+                    self.view.selected = object;
                     self.reset_visibility();
                 }
             }
@@ -2151,9 +2141,9 @@ impl App {
                     self.sec = slide;
                     self.blk = block;
                 } else {
-                    self.slide = slide;
-                    self.layer = object.map(|o| o.0).unwrap_or(0);
-                    self.selected = object;
+                    self.view.slide = slide;
+                    self.view.layer = object.map(|o| o.0).unwrap_or(0);
+                    self.view.selected = object;
                     self.reset_visibility();
                 }
             }
@@ -2197,9 +2187,9 @@ impl App {
                     self.sec = at.slide;
                     self.blk = at.object.map(|o| o.0);
                 } else {
-                    self.slide = at.slide;
-                    self.layer = at.object.map(|o| o.0).unwrap_or(0);
-                    self.selected = at.object;
+                    self.view.slide = at.slide;
+                    self.view.layer = at.object.map(|o| o.0).unwrap_or(0);
+                    self.view.selected = at.object;
                     self.reset_visibility();
                 }
             }
@@ -2602,9 +2592,9 @@ impl App {
                 self.file_page = backstage::FilePage::Info;
                 // Imported files are saved as a new .brainbend; never overwrite the source.
                 self.path = if ext == "story" || ext == "pptx" { None } else { Some(path.clone()) };
-                self.slide = 0;
-                self.layer = 0;
-                self.selected = None;
+                self.view.slide = 0;
+                self.view.layer = 0;
+                self.view.selected = None;
                 self.sec = 0;
                 self.blk = None;
                 self.textures.clear();
@@ -2621,22 +2611,22 @@ impl App {
 
     /// Hide the layer being worked on (its eye was clicked) and go back to the base layer.
     fn hide_selected_layer(&mut self) {
-        if self.layer > 0 {
-            if let Some(v) = self.visible.get_mut(self.layer) { *v = false; }
-            self.layer = 0;
-            self.selected = None;
+        if self.view.layer > 0 {
+            if let Some(v) = self.view.visible.get_mut(self.view.layer) { *v = false; }
+            self.view.layer = 0;
+            self.view.selected = None;
         }
     }
 
     /// The layers drawn on the canvas: the base layer, the selected layer, and any layer whose eye is on.
     fn shown_layers(&self, layers: usize) -> Vec<usize> {
-        (0..layers).filter(|&i| i == 0 || i == self.layer || self.visible.get(i).copied().unwrap_or(false)).collect()
+        (0..layers).filter(|&i| i == 0 || i == self.view.layer || self.view.visible.get(i).copied().unwrap_or(false)).collect()
     }
 
     /// Layers visible when the slide starts: the base layer plus any a slide-start trigger shows.
     fn reset_visibility(&mut self) {
         let Some(p) = &self.project else { return };
-        let Some(slide) = p.slides.get(self.slide) else { return };
+        let Some(slide) = p.slides.get(self.view.slide) else { return };
         let mut vis = vec![false; slide.layers.len()];
         vis[0] = true;
         for t in &slide.triggers {
@@ -2646,7 +2636,7 @@ impl App {
                 }
             }
         }
-        self.visible = vis;
+        self.view.visible = vis;
     }
 
     /// Adds a saved project to the Recent list. Imports (which have no file of their own yet) and the recovery copy are
@@ -2745,7 +2735,7 @@ impl App {
         self.end_state_swap();
         self.leave_master_view();
         let Some(whole) = &self.project else { return };
-        let cur = self.slide.min(whole.slides.len() - 1);
+        let cur = self.view.slide.min(whole.slides.len() - 1);
         let indices: Vec<usize> = match scope {
             PreviewScope::All => (0..whole.slides.len()).collect(),
             PreviewScope::Scene => whole.scene_slides(self.current_scene()),
@@ -2829,8 +2819,8 @@ impl App {
             self.status_issues = (now, self.project.as_ref().map(|p| p.check().len()).unwrap_or(0));
         }
         let info = self.project.as_ref().map(|p| {
-            let s = &p.slides[self.slide.min(p.slides.len().saturating_sub(1))];
-            (self.slide.min(p.slides.len().saturating_sub(1)) + 1, p.slides.len(), s.width as i32, s.height as i32, p.theme.name.clone())
+            let s = &p.slides[self.view.slide.min(p.slides.len().saturating_sub(1))];
+            (self.view.slide.min(p.slides.len().saturating_sub(1)) + 1, p.slides.len(), s.width as i32, s.height as i32, p.theme.name.clone())
         });
         let editing_slide = self.project.is_some() && !self.file_view && !self.scene_view && self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web());
         let mut open_checker = false;
@@ -2854,7 +2844,7 @@ impl App {
                 ui.label(format!("{}{}", self.status, if self.dirty { "   • unsaved changes" } else { "" }));
                 if editing_slide {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let scale = self.fit_scale * self.zoom;
+                        let scale = self.fit_scale * self.view.zoom;
                         if ui.add(egui::Button::new(egui::RichText::new(ribbon::FRAME.to_string()).family(ribbon::icons())).frame(false)).on_hover_text("Fit the slide in the window").clicked() { fit = true; }
                         if ui.add(egui::Button::new("+").frame(false)).on_hover_text("Zoom in").clicked() { zoom_to = Some(scale * 1.25); }
                         let mut pct = (scale * 100.0).clamp(10.0, 800.0);
@@ -2869,10 +2859,10 @@ impl App {
                 }
             });
         });
-        if fit { self.zoom = 1.0; self.pan = egui::Vec2::ZERO; }
+        if fit { self.view.zoom = 1.0; self.view.pan = egui::Vec2::ZERO; }
         if let Some(sc) = zoom_to {
-            self.zoom = (sc / self.fit_scale.max(0.01)).clamp(0.1, 8.0);
-            self.pan = egui::Vec2::ZERO;
+            self.view.zoom = (sc / self.fit_scale.max(0.01)).clamp(0.1, 8.0);
+            self.view.pan = egui::Vec2::ZERO;
         }
         if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
     }
@@ -2916,9 +2906,9 @@ impl App {
         self.file_view = false;
         self.file_page = backstage::FilePage::Info;
         self.path = None;
-        self.slide = 0;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = 0;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.textures.clear();
         self.reset_visibility();
         self.undo.clear();
@@ -2939,9 +2929,9 @@ impl App {
         self.file_view = false;
         self.file_page = backstage::FilePage::Info;
         self.path = None;
-        self.slide = 0;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = 0;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.sec = 0;
         self.blk = None;
         self.textures.clear();
@@ -2955,16 +2945,16 @@ impl App {
     /// Add an object to the active layer (centered on the slide) and select it.
     fn insert(&mut self, mut obj: Object) {
         let Some(p) = &self.project else { return };
-        let slide = &p.slides[self.slide];
-        let li = self.layer.min(slide.layers.len() - 1);
+        let slide = &p.slides[self.view.slide];
+        let li = self.view.layer.min(slide.layers.len() - 1);
         // Centered, then cascaded so consecutive inserts do not hide each other.
         let cascade = (slide.layers[li].objects.len() % 8) as f32 * 36.0;
         obj.x = ((slide.width - obj.w) / 2.0 + cascade - 120.0).round().max(0.0);
         obj.y = ((slide.height - obj.h) / 2.0 + cascade - 120.0).round().max(0.0);
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         slide.layers[li].objects.push(obj);
-        self.selected = Some((li, slide.layers[li].objects.len() - 1));
+        self.view.selected = Some((li, slide.layers[li].objects.len() - 1));
         
     }
 
@@ -2981,8 +2971,8 @@ impl App {
         let tab = self.ribbon_tab;
         self.insert_text();
         self.ribbon_tab = tab;
-        let slide = self.slide;
-        if let Some(o) = self.selected.and_then(|(li, oi)| self.project.as_mut()?.slides[slide].layers.get_mut(li)?.objects.get_mut(oi)) {
+        let slide = self.view.slide;
+        if let Some(o) = self.view.selected.and_then(|(li, oi)| self.project.as_mut()?.slides[slide].layers.get_mut(li)?.objects.get_mut(oi)) {
             o.edit_text(if shown.is_empty() { url } else { shown });
             let n = o.text.chars().count();
             o.format_range(0, n, &Attr::Link(Some(url.to_string())));
@@ -3005,8 +2995,8 @@ impl App {
     /// Insert a table of `rows` x `cols` cells on the active layer.
     fn insert_table(&mut self, rows: u16, cols: u16) {
         let Some(p) = &self.project else { return };
-        let slide = &p.slides[self.slide];
-        let li = self.layer.min(slide.layers.len() - 1);
+        let slide = &p.slides[self.view.slide];
+        let li = self.view.layer.min(slide.layers.len() - 1);
         let w = (slide.width * 0.7).min(cols as f32 * 360.0);
         let h = (rows as f32 * 90.0).min(slide.height * 0.8);
         let origin = ((slide.width - w) / 2.0, (slide.height - h) / 2.0, w, h);
@@ -3016,27 +3006,27 @@ impl App {
         ids.reverse();
         let cells = brainbend_doc::tables::new_table(&group, rows, cols, origin, &theme, &mut || ids.pop().unwrap_or_default());
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let first = layer.objects.len();
         layer.objects.extend(cells);
-        self.layer = li;
-        self.selected = Some((li, first));
+        self.view.layer = li;
+        self.view.selected = Some((li, first));
         
-        self.multi.clear();
+        self.view.multi.clear();
         self.dirty = true;
     }
 
     /// Insert or delete a row or column of the selected table cell's table.
     fn table_edit(&mut self, op: TableOp) {
         use brainbend_doc::tables as t;
-        let Some((li, oi)) = self.selected else { return };
-        let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
+        let Some((li, oi)) = self.view.selected else { return };
+        let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (Some((r, c)), Some(g)) = (o.table, o.group.clone()) else { return };
         let mut ids: Vec<String> = (0..64).map(|_| self.new_id("obj")).collect();
         ids.reverse();
         let mut next = || ids.pop().unwrap_or_default();
         self.snapshot();
-        let objs = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         match op {
             TableOp::RowAbove => t::insert_row(objs, &g, r, false, &mut next),
             TableOp::RowBelow => t::insert_row(objs, &g, r, true, &mut next),
@@ -3046,10 +3036,10 @@ impl App {
             TableOp::DeleteCol => t::delete_col(objs, &g, c),
         }
         // Deleting can remove the selected cell; keep a cell of the same table selected.
-        let objs = &self.project.as_ref().unwrap().slides[self.slide].layers[li].objects;
-        self.selected = objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()) && o.table == Some((r, c)))
+        let objs = &self.project.as_ref().unwrap().slides[self.view.slide].layers[li].objects;
+        self.view.selected = objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()) && o.table == Some((r, c)))
             .or_else(|| objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()))).map(|k| (li, k));
-        self.multi.clear();
+        self.view.multi.clear();
         self.dirty = true;
     }
 
@@ -3190,7 +3180,7 @@ impl App {
     }
 
     fn add_slide(&mut self, kind: SlideKind) {
-        let layout = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layout.clone());
+        let layout = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layout.clone());
         self.add_slide_with_layout(kind, layout);
     }
 
@@ -3200,7 +3190,7 @@ impl App {
         self.snapshot();
         let id = self.new_id("slide");
         let (w, h) = {
-            let s = &self.project.as_ref().unwrap().slides[self.slide];
+            let s = &self.project.as_ref().unwrap().slides[self.view.slide];
             (s.width, s.height)
         };
         let n = self.project.as_ref().unwrap().slides.len() + 1;
@@ -3210,17 +3200,17 @@ impl App {
             SlideKind::Results => "Results".to_string(),
         }, w, h);
         slide.kind = kind;
-        slide.scene = self.project.as_ref().unwrap().slides[self.slide].scene.clone();
-        let at = (self.slide + 1).min(self.project.as_ref().unwrap().slides.len());
+        slide.scene = self.project.as_ref().unwrap().slides[self.view.slide].scene.clone();
+        let at = (self.view.slide + 1).min(self.project.as_ref().unwrap().slides.len());
         let follow = layout.filter(|_| matches!(slide.kind, SlideKind::Normal));
         self.project.as_mut().unwrap().slides.insert(at, slide);
         if let Some(l) = follow {
             let mut ids = (0..8).map(|_| self.new_id("obj")).collect::<Vec<_>>();
             self.project.as_mut().unwrap().apply_layout(at, &l, &mut || ids.pop().unwrap_or_default());
         }
-        self.slide = at;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = at;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3234,14 +3224,14 @@ impl App {
             Some(l) => p.apply_layout(slide_idx, &l, &mut || ids.pop().unwrap_or_default()),
             None => p.slides[slide_idx].layout = None,
         }
-        self.selected = None;
+        self.view.selected = None;
         self.dirty = true;
     }
 
     /// Index (into `scenes`) of the scene the current slide is in.
     fn current_scene(&self) -> usize {
         let Some(p) = &self.project else { return 0 };
-        let sid = &p.slides[self.slide.min(p.slides.len() - 1)].scene;
+        let sid = &p.slides[self.view.slide.min(p.slides.len() - 1)].scene;
         p.scenes.iter().position(|c| c.id == *sid).unwrap_or(0)
     }
 
@@ -3253,9 +3243,9 @@ impl App {
     }
 
     fn open_slide(&mut self, i: usize) {
-        self.slide = i;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = i;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.scene_view = false;
         self.reset_visibility();
     }
@@ -3267,7 +3257,7 @@ impl App {
         let sid = self.new_id("scene");
         let id = self.new_id("slide");
         let p = self.project.as_mut().unwrap();
-        let cur = self.slide.min(p.slides.len() - 1);
+        let cur = self.view.slide.min(p.slides.len() - 1);
         let ci = p.scenes.iter().position(|c| c.id == p.slides[cur].scene).unwrap_or(0);
         let mut slide = Slide::new(&id, "Slide 1", p.slides[cur].width, p.slides[cur].height);
         slide.scene = sid.clone();
@@ -3293,9 +3283,9 @@ impl App {
             sl.triggers.retain(|t| !matches!(&t.action, Action::JumpToSlide(id) if gone.contains(id)));
         }
         let next = p.scene_slides(si.min(p.scenes.len() - 1)).first().copied().unwrap_or(0);
-        self.slide = next;
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = next;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3306,10 +3296,10 @@ impl App {
         if sj >= n { return; }
         self.snapshot();
         let p = self.project.as_mut().unwrap();
-        let keep = p.slides[self.slide.min(p.slides.len() - 1)].id.clone();
+        let keep = p.slides[self.view.slide.min(p.slides.len() - 1)].id.clone();
         p.scenes.swap(si, sj);
         p.normalize_scenes();
-        self.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
+        self.view.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
     }
 
     /// Move a slide to the end of another scene.
@@ -3329,9 +3319,9 @@ impl App {
         let s = p.slides.remove(i);
         p.slides.push(s);
         p.normalize_scenes();
-        self.slide = p.slides.iter().position(|s| s.id == id).unwrap_or(0);
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = p.slides.iter().position(|s| s.id == id).unwrap_or(0);
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3480,8 +3470,8 @@ impl App {
             let r = by_slide[&i];
             ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                let marked = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id) || self.menu_pick.as_ref().is_some_and(|mp| mp.picked == self.project.as_ref().unwrap().slides[i].id);
-                let in_selection = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id);
+                let marked = i == self.view.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id) || self.menu_pick.as_ref().is_some_and(|mp| mp.picked == self.project.as_ref().unwrap().slides[i].id);
+                let in_selection = i == self.view.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id);
                 let resp = self.slide_thumbnail(ui, ctx, i, tw, marked);
                 // Pressing on a slide gives the slide list (or Scene View) the keyboard.
                 if resp.hovered() && ctx.input(|inp| inp.pointer.any_pressed()) { self.slides_focus = true; self.slide_hit = true; }
@@ -3492,7 +3482,7 @@ impl App {
                     // In the Scene View there is no tab, so the slide is simply selected.
                     self.slide_multi.clear();
                     select = Some(i);
-                    self.slide = i;
+                    self.view.slide = i;
                 }
                 resp.context_menu(|ui| {
                     if !in_selection && !self.scene_view { self.with_menu_target(i, |a| a.slide_context_menu(ui)); } else { self.slide_context_menu(ui); }
@@ -3501,14 +3491,14 @@ impl App {
                 else if resp.clicked() {
                     let (cmd, shift) = ctx.input(|inp| (inp.modifiers.command, inp.modifiers.shift));
                     let id = self.project.as_ref().unwrap().slides[i].id.clone();
-                    if cmd && i != self.slide {
+                    if cmd && i != self.view.slide {
                         // Add or remove this slide from the selection.
                         if let Some(k) = self.slide_multi.iter().position(|m| *m == id) { self.slide_multi.remove(k); } else { self.slide_multi.push(id); }
                     } else if shift {
                         // Everything between the current slide and this one.
-                        let (a, b) = (self.slide.min(i), self.slide.max(i));
+                        let (a, b) = (self.view.slide.min(i), self.view.slide.max(i));
                         let ids: Vec<String> = self.project.as_ref().unwrap().slides[a..=b].iter().map(|s| s.id.clone()).collect();
-                        let cur_id = self.project.as_ref().unwrap().slides[self.slide].id.clone();
+                        let cur_id = self.project.as_ref().unwrap().slides[self.view.slide].id.clone();
                         self.slide_multi = ids.into_iter().filter(|x| *x != cur_id).collect();
                     } else {
                         self.slide_multi.clear();
@@ -3644,7 +3634,7 @@ impl App {
             }
         });
         if rename.is_some() { self.snapshot(); self.scene_rename = rename; }
-        if let Some(i) = select { self.slide = i; self.layer = 0; self.selected = None; self.reset_visibility(); }
+        if let Some(i) = select { self.view.slide = i; self.view.layer = 0; self.view.selected = None; self.reset_visibility(); }
         if let Some(i) = open {
             self.scene_open(i);
         }
@@ -3660,7 +3650,7 @@ impl App {
     /// The current slide plus every slide selected with ⌘/⇧-click, as indices in lesson order.
     fn slide_selection(&self) -> Vec<usize> {
         let Some(p) = &self.project else { return vec![] };
-        let cur = self.slide.min(p.slides.len().saturating_sub(1));
+        let cur = self.view.slide.min(p.slides.len().saturating_sub(1));
         (0..p.slides.len()).filter(|&i| i == cur || self.slide_multi.contains(&p.slides[i].id)).collect()
     }
 
@@ -3682,9 +3672,9 @@ impl App {
             }
         }
         self.slide_multi.clear();
-        self.slide = self.slide.min(p.slides.len() - 1);
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = self.view.slide.min(p.slides.len() - 1);
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3695,7 +3685,7 @@ impl App {
         if j >= n || self.project.as_ref().unwrap().slides[i].scene != self.project.as_ref().unwrap().slides[j].scene { return; }
         self.snapshot();
         self.project.as_mut().unwrap().slides.swap(i, j);
-        self.slide = j;
+        self.view.slide = j;
     }
 
     /// Copy a slide, giving the copy fresh ids; its triggers are re-pointed at the copied layers/objects.
@@ -3756,10 +3746,10 @@ impl App {
         let p = self.project.as_mut().unwrap();
         let ids: Vec<String> = fresh.iter().map(|c| c.id.clone()).collect();
         for (k, c) in fresh.into_iter().enumerate() { p.slides.insert(last + 1 + k, c); }
-        self.slide = last + 1;
+        self.view.slide = last + 1;
         self.slide_multi = ids.into_iter().skip(1).collect();
-        self.layer = 0;
-        self.selected = None;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3777,9 +3767,9 @@ impl App {
             if !self.slide_multi.contains(&id) { self.slide_multi.push(id); }
         } else {
             self.slide_multi.clear();
-            self.slide = to;
-            self.layer = 0;
-            self.selected = None;
+            self.view.slide = to;
+            self.view.layer = 0;
+            self.view.selected = None;
             self.reset_visibility();
         }
     }
@@ -3788,10 +3778,10 @@ impl App {
         let Some(copy) = self.copy_of_slide(i) else { return };
         self.snapshot();
         self.project.as_mut().unwrap().slides.insert(i + 1, copy);
-        self.slide = i + 1;
+        self.view.slide = i + 1;
         self.slide_multi.clear();
-        self.layer = 0;
-        self.selected = None;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3812,10 +3802,10 @@ impl App {
             for (k, c) in group.into_iter().enumerate() { new_ids.push(c.id.clone()); p.slides.insert(last + 1 + k, c); }
         }
         let first = p.slides.iter().position(|s| new_ids.contains(&s.id)).unwrap_or(0);
-        self.slide = first;
+        self.view.slide = first;
         self.slide_multi = new_ids.into_iter().filter(|id| *id != self.project.as_ref().unwrap().slides[first].id).collect();
-        self.layer = 0;
-        self.selected = None;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
@@ -3833,7 +3823,7 @@ impl App {
     fn move_slides(&mut self, down: bool) {
         if !self.can_move_slides(down) { return; }
         self.snapshot();
-        let keep = self.project.as_ref().unwrap().slides[self.slide].id.clone();
+        let keep = self.project.as_ref().unwrap().slides[self.view.slide].id.clone();
         let mut sel = self.slide_selection();
         if down { sel.reverse(); }
         let p = self.project.as_mut().unwrap();
@@ -3846,7 +3836,7 @@ impl App {
                 now[k] = j;
             }
         }
-        self.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
+        self.view.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
     }
 
     /// Move every selected slide to the end of scene `si`.
@@ -3865,7 +3855,7 @@ impl App {
         }
         self.snapshot();
         let p = self.project.as_mut().unwrap();
-        let keep = p.slides[self.slide].id.clone();
+        let keep = p.slides[self.view.slide].id.clone();
         let ids: Vec<String> = moving.iter().map(|&i| p.slides[i].id.clone()).collect();
         for id in &ids {
             let i = p.slides.iter().position(|s| s.id == *id).unwrap();
@@ -3874,15 +3864,15 @@ impl App {
             p.slides.push(s);
         }
         p.normalize_scenes();
-        self.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
-        self.layer = 0;
-        self.selected = None;
+        self.view.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
     }
 
     /// Right-click menu on the slide canvas.
     fn object_context_menu(&mut self, ui: &mut egui::Ui) {
-        let has_sel = self.selected.is_some();
+        let has_sel = self.view.selected.is_some();
         let n = self.selection().len();
         let normal = self.project.is_some();
         ui.add_enabled_ui(has_sel, |ui| {
@@ -3920,7 +3910,7 @@ impl App {
                 if ui.button("Send backward").clicked() { self.reorder_step(false); ui.close(); }
                 if ui.button("Send to back").clicked() { self.reorder_selected(false); ui.close(); }
             });
-            let can_restore = self.project.as_ref().is_some_and(|p| self.selection().iter().any(|&(li, oi)| p.slides.get(self.slide).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| natural_ratio(p, o).is_some())));
+            let can_restore = self.project.as_ref().is_some_and(|p| self.selection().iter().any(|&(li, oi)| p.slides.get(self.view.slide).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| natural_ratio(p, o).is_some())));
             if can_restore && ui.button("Restore Aspect Ratio").on_hover_text("Put a stretched picture or video back to the proportions of its file").clicked() { self.restore_aspect_ratio(); ui.close(); }
             ui.menu_button(if n > 1 { "Align to each other" } else { "Align to the slide" }, |ui| {
                 for (label, axis, mode) in [("Left", 0u8, 0u8), ("Center", 0, 1), ("Right", 0, 2), ("Top", 1, 0), ("Middle", 1, 1), ("Bottom", 1, 2)] {
@@ -3950,14 +3940,14 @@ impl App {
 
     /// Move the selected object one step in front of, or behind, its neighbour in its layer.
     fn reorder_step(&mut self, forward: bool) {
-        let Some((li, oi)) = self.selected else { return };
-        let n = self.project.as_ref().map(|p| p.slides[self.slide].layers[li].objects.len()).unwrap_or(0);
+        let Some((li, oi)) = self.view.selected else { return };
+        let n = self.project.as_ref().map(|p| p.slides[self.view.slide].layers[li].objects.len()).unwrap_or(0);
         let to = if forward { oi + 1 } else { oi.wrapping_sub(1) };
         if to >= n { return; }
-        self.multi.clear();
+        self.view.multi.clear();
         self.snapshot();
-        self.project.as_mut().unwrap().slides[self.slide].layers[li].objects.swap(oi, to);
-        self.selected = Some((li, to));
+        self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects.swap(oi, to);
+        self.view.selected = Some((li, to));
     }
 
     /// The "new slide" choices shared by every menu that adds one: a slide, a question slide, a results slide and a
@@ -3979,12 +3969,12 @@ impl App {
             }
         });
         // The slide that is showing in the tab already has it.
-        let open_here = !self.scene_view && self.active_tab.and_then(|k| self.tabs.get(k)).zip(self.project.as_ref().and_then(|p| p.slides.get(self.slide))).is_some_and(|(t, s)| t.slide_id == s.id);
+        let open_here = !self.scene_view && self.active_tab.and_then(|k| self.tabs.get(k)).zip(self.project.as_ref().and_then(|p| p.slides.get(self.view.slide))).is_some_and(|(t, s)| t.slide_id == s.id);
         if ui.add_enabled(!open_here, egui::Button::new("Open in new tab")).on_disabled_hover_text("This slide is open in the tab that is showing").clicked() {
             self.new_tab_request = true;
             self.scene_view = false;
-            self.layer = 0;
-            self.selected = None;
+            self.view.layer = 0;
+            self.view.selected = None;
             self.reset_visibility();
             ui.close();
         }
@@ -3999,24 +3989,24 @@ impl App {
         if self.project.is_none() { return; }
         self.snapshot();
         let id = self.new_id("layer");
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         let name = format!("Layer {}", slide.layers.len());
         slide.layers.push(Layer { id, name, objects: vec![], duration_ms: None, modal: true, hide_others: false, pause_base: false, group_names: Default::default(), focus_order: vec![] });
-        self.layer = slide.layers.len() - 1;
-        self.selected = None;
+        self.view.layer = slide.layers.len() - 1;
+        self.view.selected = None;
         self.reset_visibility_keep();
     }
 
     /// Keep current visibility flags, growing the list for new layers (shown by default).
     fn reset_visibility_keep(&mut self) {
-        let n = self.project.as_ref().map(|p| p.slides[self.slide].layers.len()).unwrap_or(0);
-        self.visible.resize(n, true);
+        let n = self.project.as_ref().map(|p| p.slides[self.view.slide].layers.len()).unwrap_or(0);
+        self.view.visible.resize(n, true);
     }
 
     fn delete_layer(&mut self, li: usize) {
         if li == 0 { return; }
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         let removed = slide.layers.remove(li);
         // Drop triggers that live on, or point at, the removed layer or its objects.
         let gone: std::collections::HashSet<String> = removed.objects.iter().map(|o| o.id.clone()).collect();
@@ -4029,9 +4019,9 @@ impl App {
             let target_gone = matches!(&t.action, Action::ShowLayer(l) | Action::HideLayer(l) if *l == removed.id);
             !owner_gone && !target_gone
         });
-        self.layer = self.layer.min(slide.layers.len() - 1);
-        self.selected = None;
-        self.visible.remove(li.min(self.visible.len().saturating_sub(1)));
+        self.view.layer = self.view.layer.min(slide.layers.len() - 1);
+        self.view.selected = None;
+        self.view.visible.remove(li.min(self.view.visible.len().saturating_sub(1)));
         self.reset_visibility_keep();
     }
 
@@ -4124,7 +4114,7 @@ impl App {
     fn insert_radio_look(&mut self, look: usize) {
         let group = self.selected_object().and_then(|o| o.check.as_ref().and_then(|c| c.radio.clone()))
             .unwrap_or_else(|| {
-                let used: Vec<String> = self.project.as_ref().map(|p| p.slides[self.slide].layers.iter().flat_map(|l| l.objects.iter()).filter_map(|o| o.check.as_ref().and_then(|c| c.radio.clone())).collect()).unwrap_or_default();
+                let used: Vec<String> = self.project.as_ref().map(|p| p.slides[self.view.slide].layers.iter().flat_map(|l| l.objects.iter()).filter_map(|o| o.check.as_ref().and_then(|c| c.radio.clone())).collect()).unwrap_or_default();
                 (1..).map(|n| format!("Choices{n}")).find(|g| !used.contains(g)).unwrap_or_default()
             });
         let mut o = blank_object(self.new_id("obj"), "Radio Button", Kind::Text, 0.0, 0.0, 800.0, 96.0);
@@ -4148,9 +4138,9 @@ impl App {
         o.alt = if numeric { "Number entry" } else { "Text entry" }.into();
         // The insert records the undo step, so the variable added after it is part of the same step.
         self.insert(o);
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         let Some(var) = (if numeric { self.new_variable("Number", Value::Num(0.0)) } else { self.new_variable("Text", Value::Text(String::new())) }) else { return };
-        if let Some(Kind::Input(f)) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)).map(|o| &mut o.kind) { f.variable = var; }
+        if let Some(Kind::Input(f)) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)).map(|o| &mut o.kind) { f.variable = var; }
     }
 
     /// A new number variable for a dial or a slider, named `{base}1`, `{base}2`... (the next free one).
@@ -4184,31 +4174,31 @@ impl App {
         // Insert snapshots; the variable is added after, so it is part of the same undo step.
         let first = if style == DialStyle::Needle { pointer.clone() } else { face.clone() };
         self.insert(first);
-        let Some((li, at)) = self.selected else { return };
+        let Some((li, at)) = self.view.selected else { return };
         let gid = self.new_id("group");
         let var = self.new_number_variable("Dial", 5.0).unwrap_or_default();
         pointer.dial = Some(Dial { variable: var, min: 0.0, max: 10.0, step: 1.0, sweep: 270.0, pivot: (0.0, 0.0) });
         if style == DialStyle::Needle { face.w = 80.0; face.h = 80.0; }
-        let (x, y, w, h) = { let o = &self.project.as_ref().unwrap().slides[self.slide].layers[li].objects[at]; (o.x, o.y, o.w, o.h) };
+        let (x, y, w, h) = { let o = &self.project.as_ref().unwrap().slides[self.view.slide].layers[li].objects[at]; (o.x, o.y, o.w, o.h) };
         face.x = x + (w - face.w) / 2.0; face.y = y + (h - face.h) / 2.0;
         pointer.x = x; pointer.y = y;
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let rest: Vec<Object> = if style == DialStyle::Needle { vec![face] } else { vec![pointer.clone()] };
         if style == DialStyle::Needle { layer.objects[at].dial = pointer.dial.clone(); }
         layer.objects.extend(rest);
         let n = layer.objects.len();
         for o in layer.objects[at..].iter_mut() { o.group = Some(gid.clone()); }
         // Select the pointer: it is the part the properties belong to.
-        self.selected = Some((li, if style == DialStyle::Needle { at } else { n - 1 }));
+        self.view.selected = Some((li, if style == DialStyle::Needle { at } else { n - 1 }));
     }
 
     /// Make the selected object a dial, with a new number variable of its own.
     fn convert_to_dial(&mut self) {
-        let Some((li, oi)) = self.selected else { return };
-        if self.project.as_ref().and_then(|p| p.slides[self.slide].layers.get(li)?.objects.get(oi)).is_none_or(|o| o.dial.is_some()) { return; }
+        let Some((li, oi)) = self.view.selected else { return };
+        if self.project.as_ref().and_then(|p| p.slides[self.view.slide].layers.get(li)?.objects.get(oi)).is_none_or(|o| o.dial.is_some()) { return; }
         self.snapshot();
         let var = self.new_number_variable("Dial", 5.0).unwrap_or_default();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             o.dial = Some(Dial { variable: var, min: 0.0, max: 10.0, step: 1.0, sweep: 270.0, pivot: (0.0, 0.0) });
         }
         self.dirty = true;
@@ -4217,17 +4207,17 @@ impl App {
     /// Put `s` (a symbol) into the selected object's text: replacing the chosen text, else at the cursor where the last
     /// in-place edit left it, else at the end. The characters around it keep their formatting.
     fn insert_symbol(&mut self, s: &str) {
-        if self.selected.is_none() && self.project.is_some() {
+        if self.view.selected.is_none() && self.project.is_some() {
             // Nothing chosen: the symbol starts a new text box (and the ribbon stays on Insert).
             let tab = self.ribbon_tab;
             self.insert_text();
             self.ribbon_tab = tab;
-            if let Some(o) = self.selected.and_then(|(li, oi)| self.project.as_mut()?.slides[self.slide].layers.get_mut(li)?.objects.get_mut(oi)) { o.edit_text(""); }
+            if let Some(o) = self.view.selected.and_then(|(li, oi)| self.project.as_mut()?.slides[self.view.slide].layers.get_mut(li)?.objects.get_mut(oi)) { o.edit_text(""); }
         }
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         let (part, caret) = (self.text_sel, self.caret);
         self.snapshot();
-        let slide = self.slide;
+        let slide = self.view.slide;
         let mut at = 0;
         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             if matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)) { return; }
@@ -4251,7 +4241,7 @@ impl App {
 
     /// A slide number: a text box at the bottom right whose text follows the slide ("3", or "3 of 12").
     fn insert_slide_number(&mut self, of_total: bool) {
-        let (sw, sh) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
+        let (sw, sh) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
         let mut o = blank_object(self.new_id("obj"), "Slide number", Kind::Text, sw - 360.0, sh - 110.0, 320.0, 70.0);
         o.text = if of_total { "%Slide.Number% of %Slide.Total%" } else { "%Slide.Number%" }.into();
         o.style = plain_style(32.0, self.project.as_ref().and_then(|p| p.theme.colors.first().copied()).unwrap_or(Rgba(34, 34, 34, 255)), false, Align::Right);
@@ -4310,7 +4300,7 @@ impl App {
     /// The States tab body: the cards and toolbar of the selected object's states. Edits made anywhere in the
     /// editor while a state is viewed go to that state (see `begin_state_swap`).
     fn states_tab(&mut self, ui: &mut egui::Ui, slide_idx: usize) {
-        let Some((li, oi)) = self.selected else {
+        let Some((li, oi)) = self.view.selected else {
             ui.horizontal(|ui| {
                 if ui.button("DONE").clicked() { self.show_panel_tab(P_TIMELINE); }
                 ui.weak("Select an object to see its states.");
@@ -4327,13 +4317,13 @@ impl App {
             });
             return;
         }
-        let mut viewed = match &self.state_view {
+        let mut viewed = match &self.view.state_view {
             Some((id, name)) if *id == obj.id => name.clone(),
             _ => obj.initial_state.clone(),
         };
         let id = obj.id.clone();
         let out = states_panel::editor(ui, obj, &mut viewed, &mut self.state_dim);
-        self.state_view = Some((id, viewed.clone()));
+        self.view.state_view = Some((id, viewed.clone()));
         if out.changed {
             let mut before = before;
             self.unswapped(&mut before);
@@ -4342,7 +4332,7 @@ impl App {
         }
         if out.done {
             self.show_panel_tab(P_TIMELINE);
-            self.state_view = None;
+            self.view.state_view = None;
         }
         if out.want_picture {
             if let Some((key, _, _, _)) = self.load_image_asset() {
@@ -4362,7 +4352,7 @@ impl App {
         let snap_ms: f32 = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 100.0 };
         let Some(proj) = self.project.as_ref() else { return };
         let slide = &proj.slides[slide_idx];
-        let li = self.layer.min(slide.layers.len() - 1);
+        let li = self.view.layer.min(slide.layers.len() - 1);
         let layer = &slide.layers[li];
         // Front to back. A group is one row (folded unless opened), with its members under it when it is open.
         enum TlRow {
@@ -4482,12 +4472,12 @@ impl App {
                             }
                             self.dirty = true;
                         } else if name_resp.clicked() {
-                            self.selected = Some((li, top));
-                            self.multi.clear();
+                            self.view.selected = Some((li, top));
+                            self.view.multi.clear();
                         }
-                        if name_resp.double_clicked() { self.snapshot(); self.selected = Some((li, top)); self.multi.clear(); self.group_edit = Some(gid.clone()); }
-                        if name_resp.drag_started() { self.obj_drag = Some(top); self.obj_drag_group = true; self.selected = Some((li, top)); self.multi.clear(); }
-                        if name_resp.secondary_clicked() && !selected { self.selected = Some((li, top)); self.multi.clear(); }
+                        if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, top)); self.view.multi.clear(); self.group_edit = Some(gid.clone()); }
+                        if name_resp.drag_started() { self.obj_drag = Some(top); self.obj_drag_group = true; self.view.selected = Some((li, top)); self.view.multi.clear(); }
+                        if name_resp.secondary_clicked() && !selected { self.view.selected = Some((li, top)); self.view.multi.clear(); }
                         name_resp.context_menu(|ui| {
                             if ui.button(if open { "Fold" } else { "Show members" }).clicked() { if !self.tl_open.remove(&gid) { self.tl_open.insert(gid.clone()); } ui.close(); }
                             if ui.button("Rename").clicked() { self.snapshot(); self.group_edit = Some(gid.clone()); ui.close(); }
@@ -4518,10 +4508,10 @@ impl App {
                         let body_resp = ui.interact(bar, gid_id.with("body"), egui::Sense::click_and_drag());
                         if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
                 let edge_resp = edge_resp.on_hover_text("Drag to set when it leaves (hold Shift for fine steps). An exit effect plays just before");
-                        if body_resp.clicked() || edge_resp.clicked() { self.selected = Some((li, top)); self.multi.clear(); }
+                        if body_resp.clicked() || edge_resp.clicked() { self.view.selected = Some((li, top)); self.view.multi.clear(); }
                         let begun = if edge_resp.drag_started() { Some(1u8) } else if body_resp.drag_started() { Some(0u8) } else { None };
                         if let Some(kind) = begun {
-                            self.selected = Some((li, top));
+                            self.view.selected = Some((li, top));
                             self.snapshot();
                             self.tl_gdrag = Some((gid.clone(), kind, timings.clone(), 0.0));
                         }
@@ -4584,16 +4574,16 @@ impl App {
                 } else if name_resp.clicked() {
                     let cmd = ui.input(|i| i.modifiers.command || i.modifiers.shift);
                     let id = self.project.as_ref().unwrap().slides[slide_idx].layers[li].objects[oi].id.clone();
-                    if cmd && self.selected.is_some_and(|sel| sel.0 == li) && self.selected != Some((li, oi)) {
-                        if let Some(k) = self.multi.iter().position(|m| *m == id) { self.multi.remove(k); } else { self.multi.push(id); }
+                    if cmd && self.view.selected.is_some_and(|sel| sel.0 == li) && self.view.selected != Some((li, oi)) {
+                        if let Some(k) = self.view.multi.iter().position(|m| *m == id) { self.view.multi.remove(k); } else { self.view.multi.push(id); }
                     } else {
-                        self.selected = Some((li, oi));
-                        self.multi.clear();
+                        self.view.selected = Some((li, oi));
+                        self.view.multi.clear();
                     }
                 }
-                if name_resp.double_clicked() { self.snapshot(); self.selected = Some((li, oi)); self.multi.clear(); self.obj_edit = Some((li, oi)); }
+                if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, oi)); self.view.multi.clear(); self.obj_edit = Some((li, oi)); }
                 if name_resp.drag_started() && self.obj_edit.is_none() { self.obj_drag = Some(oi); self.obj_drag_group = false; }
-                if name_resp.secondary_clicked() && !selected { self.selected = Some((li, oi)); self.multi.clear(); }
+                if name_resp.secondary_clicked() && !selected { self.view.selected = Some((li, oi)); self.view.multi.clear(); }
                 name_resp.context_menu(|ui| {
                     if ui.button("Rename").clicked() { self.snapshot(); self.obj_edit = Some((li, oi)); ui.close(); }
                     if ui.button("Duplicate").clicked() { row_action = Some((oi, 1)); ui.close(); }
@@ -4616,7 +4606,7 @@ impl App {
                 let body_resp = ui.interact(bar, id.with("body"), egui::Sense::click_and_drag());
                 let edge_resp = ui.interact(edge, id.with("edge"), egui::Sense::drag());
                 if edge_resp.hovered() || edge_resp.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
-                if body_resp.clicked() || edge_resp.clicked() || body_resp.secondary_clicked() { self.selected = Some((li, oi)); }
+                if body_resp.clicked() || edge_resp.clicked() || body_resp.secondary_clicked() { self.view.selected = Some((li, oi)); }
                 let timed_now = timing.is_some();
                 body_resp.context_menu(|ui| {
                     if timed_now {
@@ -4633,11 +4623,11 @@ impl App {
                     ui.separator();
                     let hidden_now = hidden;
                     if ui.button(if hidden_now { "Show when the slide starts" } else { "Hide when the slide starts" }).clicked() { self.snapshot(); if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.hidden = !o.hidden; } self.dirty = true; ui.close(); }
-                    if ui.button("Delete").clicked() { self.selected = Some((li, oi)); self.multi.clear(); self.delete_selected(); ui.close(); }
+                    if ui.button("Delete").clicked() { self.view.selected = Some((li, oi)); self.view.multi.clear(); self.delete_selected(); ui.close(); }
                 });
                 let begun = if edge_resp.drag_started() { Some(1u8) } else if body_resp.drag_started() { Some(0u8) } else { None };
                 if let Some(kind) = begun {
-                    self.selected = Some((li, oi));
+                    self.view.selected = Some((li, oi));
                     self.snapshot();
                     self.tl_drag = Some((oi, kind, start as u32, dur.map(|d| d as u32), 0.0));
                 }
@@ -4680,8 +4670,8 @@ impl App {
                 }
             }
             if let Some((oi, what)) = row_action {
-                self.selected = Some((li, oi));
-                self.multi.clear();
+                self.view.selected = Some((li, oi));
+                self.view.multi.clear();
                 match what {
                     0 => self.delete_selected(),
                     1 => self.duplicate_selected(),
@@ -4707,12 +4697,12 @@ impl App {
 
     /// Move the group that object `src` of layer `li` belongs to so it sits just in front of (or behind) object `dst`.
     fn move_group(&mut self, li: usize, src: usize, dst: usize) {
-        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)) else { return };
+        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)) else { return };
         let (Some(gid), Some(target)) = (layer.objects.get(src).and_then(|o| o.group.clone()), layer.objects.get(dst)) else { return };
         if target.group.as_ref() == Some(&gid) { return; }
         let target_id = target.id.clone();
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let mut block = vec![];
         let mut k = 0;
         while k < layer.objects.len() {
@@ -4722,16 +4712,16 @@ impl App {
         let at = if dst > src { t + 1 } else { t };
         let first = at;
         for (n, o) in block.into_iter().enumerate() { layer.objects.insert(at + n, o); }
-        self.selected = Some((li, first));
-        self.multi.clear();
+        self.view.selected = Some((li, first));
+        self.view.multi.clear();
         self.dirty = true;
     }
 
     /// Bring the group of object `oi` to the very front, or send it to the very back.
     fn move_group_to_edge(&mut self, li: usize, oi: usize, front: bool) {
-        let Some(gid) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).and_then(|o| o.group.clone()) else { return };
+        let Some(gid) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).and_then(|o| o.group.clone()) else { return };
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let mut block = vec![];
         let mut k = 0;
         while k < layer.objects.len() {
@@ -4739,16 +4729,16 @@ impl App {
         }
         let first = if front { layer.objects.len() } else { 0 };
         for (n, o) in block.into_iter().enumerate() { layer.objects.insert(first + n, o); }
-        self.selected = Some((li, first));
-        self.multi.clear();
+        self.view.selected = Some((li, first));
+        self.view.multi.clear();
         self.dirty = true;
     }
 
     /// Objects that formatting (font, fill, outline, alignment, lists) applies to: the chosen block of
     /// cells when a table cell is current, otherwise the whole selection.
     fn format_targets(&self) -> Vec<(usize, usize)> {
-        let (Some((g, blk)), Some((li, _))) = (self.cell_block(), self.selected) else { return self.selection() };
-        let Some(objs) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).map(|l| &l.objects) else { return vec![] };
+        let (Some((g, blk)), Some((li, _))) = (self.cell_block(), self.view.selected) else { return self.selection() };
+        let Some(objs) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).map(|l| &l.objects) else { return vec![] };
         let mut v: Vec<(usize, usize)> = brainbend_doc::tables::cells_in(objs, &g, blk).into_iter().map(|k| (li, k)).collect();
         v.sort();
         v
@@ -4756,20 +4746,20 @@ impl App {
 
     /// Choose the block of table cells between grid positions `a` and `b` of the selected table.
     fn select_cells(&mut self, a: (u16, u16), b: (u16, u16)) {
-        let Some((li, _)) = self.selected else { return };
+        let Some((li, _)) = self.view.selected else { return };
         let Some(g) = self.selected_object().filter(|o| o.table.is_some()).and_then(|o| o.group.clone()) else { return };
-        let objs = &self.project.as_ref().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &self.project.as_ref().unwrap().slides[self.view.slide].layers[li].objects;
         let Some(k) = brainbend_doc::tables::cell_at(objs, &g, a.0, a.1) else { return };
-        self.selected = Some((li, k));
+        self.view.selected = Some((li, k));
         self.range_end = Some((g, b));
     }
 
     /// Set borders on the chosen block of cells.
     fn set_cell_borders(&mut self, set: brainbend_doc::tables::BorderSet, line: Option<Stroke>) {
         let Some((g, blk)) = self.cell_block() else { return };
-        let Some((li, _)) = self.selected else { return };
+        let Some((li, _)) = self.view.selected else { return };
         self.snapshot();
-        let objs = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         brainbend_doc::tables::set_borders(objs, &g, blk, set, line);
         self.dirty = true;
     }
@@ -4779,7 +4769,7 @@ impl App {
     fn cell_block(&self) -> Option<(String, (u16, u16, u16, u16))> {
         let o = self.selected_object()?;
         let (g, a) = (o.group.clone()?, o.table?);
-        let objs = &self.project.as_ref()?.slides.get(self.slide)?.layers.get(self.selected?.0)?.objects;
+        let objs = &self.project.as_ref()?.slides.get(self.view.slide)?.layers.get(self.view.selected?.0)?.objects;
         let b = self.range_end.as_ref().filter(|(rg, _)| *rg == g).map(|(_, rc)| *rc).unwrap_or(a);
         Some((g.clone(), brainbend_doc::tables::expand_range(objs, &g, a, b)))
     }
@@ -4787,38 +4777,38 @@ impl App {
     /// Merge the chosen block of table cells into one cell.
     fn merge_cells(&mut self) {
         let Some((g, (r0, c0, r1, c1))) = self.cell_block() else { return };
-        let Some((li, _)) = self.selected else { return };
+        let Some((li, _)) = self.view.selected else { return };
         if (r0, c0) == (r1, c1) { return; }
         self.snapshot();
-        let objs = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         brainbend_doc::tables::merge(objs, &g, (r0, c0), (r1, c1));
-        self.selected = objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()) && o.table == Some((r0, c0))).map(|k| (li, k));
-        self.multi.clear();
+        self.view.selected = objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()) && o.table == Some((r0, c0))).map(|k| (li, k));
+        self.view.multi.clear();
         self.range_end = None;
         self.dirty = true;
     }
 
     /// Split the selected merged cell back into separate cells.
     fn split_cell(&mut self) {
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         let Some(o) = self.selected_object() else { return };
         let (Some(rc), Some(g), true) = (o.table, o.group.clone(), o.table_span.is_some()) else { return };
         let mut ids: Vec<String> = (0..256).map(|_| self.new_id("obj")).collect();
         self.snapshot();
-        let objs = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         brainbend_doc::tables::split(objs, &g, rc, &mut || ids.pop().unwrap_or_default());
-        self.selected = Some((li, oi.min(objs.len() - 1)));
+        self.view.selected = Some((li, oi.min(objs.len() - 1)));
         self.range_end = None;
         self.dirty = true;
     }
 
     /// Give the selected table a look (and remember it as the one the Table panel shows).
     fn restyle_table(&mut self, style: brainbend_doc::tables::TableStyle, opts: brainbend_doc::tables::StyleOptions) {
-        let Some((li, _)) = self.selected else { return };
+        let Some((li, _)) = self.view.selected else { return };
         let Some(g) = self.selected_object().filter(|o| o.table.is_some()).and_then(|o| o.group.clone()) else { return };
         self.snapshot();
         let theme = self.project.as_ref().unwrap().theme.clone();
-        let objs = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li].objects;
+        let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         brainbend_doc::tables::apply_style(objs, &g, style, opts, &theme);
         self.table_style = style;
         self.table_opts = opts;
@@ -4851,8 +4841,8 @@ impl App {
     }
 
     fn selected_object(&self) -> Option<&Object> {
-        let (li, oi) = self.selected?;
-        self.project.as_ref()?.slides.get(self.slide)?.layers.get(li)?.objects.get(oi)
+        let (li, oi) = self.view.selected?;
+        self.project.as_ref()?.slides.get(self.view.slide)?.layers.get(li)?.objects.get(oi)
     }
 
     /// Every selected object (primary plus shift-selected), in stacking order, all on one layer.
@@ -4862,16 +4852,16 @@ impl App {
         let Some(proj) = self.project.as_ref() else { return };
         let sel = self.selection();
         let fixes: Vec<(usize, usize, f32)> = sel.iter().filter_map(|&(li, oi)| {
-            let o = proj.slides.get(self.slide)?.layers.get(li)?.objects.get(oi)?;
+            let o = proj.slides.get(self.view.slide)?.layers.get(li)?.objects.get(oi)?;
             let ratio = natural_ratio(proj, o)?;
             ((o.w / o.h - ratio).abs() > 0.0005 && o.w > 0.0).then_some((li, oi, ratio))
         }).collect();
         if fixes.is_empty() {
-            self.status = if sel.iter().any(|&(li, oi)| self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| matches!(o.kind, Kind::Image | Kind::Video))) { "Already the original proportions, or they cannot be measured".into() } else { "Select a picture or video".into() };
+            self.status = if sel.iter().any(|&(li, oi)| self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| matches!(o.kind, Kind::Image | Kind::Video))) { "Already the original proportions, or they cannot be measured".into() } else { "Select a picture or video".into() };
             return;
         }
         self.snapshot();
-        let slide = self.slide;
+        let slide = self.view.slide;
         let n = fixes.len();
         if let Some(p) = self.project.as_mut() {
             for (li, oi, ratio) in fixes {
@@ -4887,10 +4877,10 @@ impl App {
     }
 
     fn selection(&self) -> Vec<(usize, usize)> {
-        let Some((li, oi)) = self.selected else { return vec![] };
-        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)) else { return vec![] };
+        let Some((li, oi)) = self.view.selected else { return vec![] };
+        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)) else { return vec![] };
         let mut v: Vec<(usize, usize)> = layer.objects.iter().enumerate()
-            .filter(|(k, o)| *k == oi || self.multi.contains(&o.id))
+            .filter(|(k, o)| *k == oi || self.view.multi.contains(&o.id))
             .map(|(k, _)| (li, k)).collect();
         // Choosing one member of a group chooses all of them.
         let groups: Vec<&String> = v.iter().filter_map(|&(_, k)| layer.objects[k].group.as_ref()).collect();
@@ -4908,7 +4898,7 @@ impl App {
         let sel = self.format_targets();
         if sel.is_empty() { return; }
         self.snapshot();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
         for (l, k) in sel { layers[l].objects[k].set_list(style); }
         self.dirty = true;
     }
@@ -4919,16 +4909,16 @@ impl App {
         if sel.len() < 2 { return; }
         self.snapshot();
         let gid = self.new_id("group");
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
         for (l, k) in sel { layers[l].objects[k].group = Some(gid.clone()); }
         self.dirty = true;
     }
 
     fn ungroup_selected(&mut self) {
         let sel = self.selection();
-        if !sel.iter().any(|&(l, k)| self.project.as_ref().unwrap().slides[self.slide].layers[l].objects[k].group.is_some()) { return; }
+        if !sel.iter().any(|&(l, k)| self.project.as_ref().unwrap().slides[self.view.slide].layers[l].objects[k].group.is_some()) { return; }
         self.snapshot();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
         for (l, k) in sel { layers[l].objects[k].group = None; }
         self.dirty = true;
     }
@@ -4936,7 +4926,7 @@ impl App {
     /// The hotspot being edited, mutably, found by id (it may no longer be the selection).
     fn outline_object_mut(&mut self) -> Option<&mut Object> {
         let id = self.outline_mode.clone()?;
-        self.project.as_mut()?.slides.get_mut(self.slide)?.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)
+        self.project.as_mut()?.slides.get_mut(self.view.slide)?.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)
     }
 
     /// Start editing the selected hotspot's outline (it gets the frame's four corners if it had none).
@@ -5013,19 +5003,19 @@ impl App {
         let mut o = blank_object(self.new_id("obj"), "Freeform hotspot", Kind::Hotspot, x, y, w, h);
         o.hit_area = Some(area);
         self.snapshot();
-        let li = self.layer.min(self.project.as_ref().unwrap().slides[self.slide].layers.len() - 1);
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let li = self.view.layer.min(self.project.as_ref().unwrap().slides[self.view.slide].layers.len() - 1);
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         slide.layers[li].objects.push(o);
-        self.selected = Some((li, slide.layers[li].objects.len() - 1));
+        self.view.selected = Some((li, slide.layers[li].objects.len() - 1));
         
-        self.multi.clear();
+        self.view.multi.clear();
         self.dirty = true;
         self.status = "Freeform hotspot added. Double-click it to move its corners.".into();
     }
 
     /// Slide the picture being cropped by (`dx`, `dy`) screen-aligned slide units, under its frame.
     fn pan_cropped(&mut self, dx: f32, dy: f32) {
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         let Some(cur) = self.selected_object().cloned() else { return };
         let a = cur.rotation.to_radians();
         let local = (dx * a.cos() + dy * a.sin(), -dx * a.sin() + dy * a.cos());
@@ -5033,23 +5023,23 @@ impl App {
         crop::pan(&mut next, local);
         if next.crop == cur.crop { return; }
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.crop = next.crop; }
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.crop = next.crop; }
         self.dirty = true;
     }
 
     /// Crop the selected picture to a shape (or back to its whole frame).
     fn set_picture_shape(&mut self, shape: Option<brainbend_doc::PictureShape>) {
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         if !self.selected_object().is_some_and(|o| matches!(o.kind, Kind::Image) && o.mask != shape) { return; }
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.mask = shape; }
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.mask = shape; }
         self.dirty = true;
     }
 
     /// Width over height of the source picture of the object `id` on the current slide.
     fn picture_ratio(&self, id: &str) -> Option<f32> {
         let p = self.project.as_ref()?;
-        let o = p.slides.get(self.slide)?.layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == id)?;
+        let o = p.slides.get(self.view.slide)?.layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == id)?;
         let a = p.assets.get(o.asset.as_deref()?)?;
         let (w, h) = image::ImageReader::new(std::io::Cursor::new(&a.bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
         (h > 0).then(|| w as f32 / h as f32)
@@ -5059,9 +5049,9 @@ impl App {
     fn set_crop_aspect(&mut self, ratio: Option<f32>) {
         self.crop_aspect = ratio;
         let Some(r) = ratio else { return };
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { crop::fit_aspect(o, r); }
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { crop::fit_aspect(o, r); }
         self.dirty = true;
     }
 
@@ -5069,8 +5059,8 @@ impl App {
     fn reset_crop(&mut self) {
         if !self.selected_object().is_some_and(|o| o.crop.is_some()) { return; }
         self.snapshot();
-        let Some((li, oi)) = self.selected else { return };
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { crop::reset(o); }
+        let Some((li, oi)) = self.view.selected else { return };
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { crop::reset(o); }
         self.crop_mode = None;
     }
 
@@ -5078,13 +5068,13 @@ impl App {
         let sel = self.selection();
         if sel.is_empty() { return; }
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         for &(li, oi) in sel.iter().rev() {
             let id = slide.layers[li].objects.remove(oi).id;
             slide.triggers.retain(|t| !matches!(&t.owner, Owner::Object(o) if *o == id));
         }
-        self.selected = None;
-        self.multi.clear();
+        self.view.selected = None;
+        self.view.multi.clear();
     }
 
     /// Align the selection to its bounding box (or space it out evenly). `axis`: 0 = horizontal, 1 = vertical;
@@ -5093,7 +5083,7 @@ impl App {
         let sel = self.selection();
         if sel.len() < 2 || (mode == 3 && sel.len() < 3) { return; }
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[sel[0].0];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[sel[0].0];
         let pos = |o: &Object| if axis == 0 { (o.x, o.w) } else { (o.y, o.h) };
         let lo = sel.iter().map(|&(_, k)| pos(&layer.objects[k]).0).fold(f32::MAX, f32::min);
         let hi = sel.iter().map(|&(_, k)| { let (p, l) = pos(&layer.objects[k]); p + l }).fold(f32::MIN, f32::max);
@@ -5124,7 +5114,7 @@ impl App {
         let mut copies = vec![];
         let mut gmap: HashMap<String, String> = HashMap::new();
         for &(l, k) in &sel {
-            let mut o = self.project.as_ref().unwrap().slides[self.slide].layers[l].objects[k].clone();
+            let mut o = self.project.as_ref().unwrap().slides[self.view.slide].layers[l].objects[k].clone();
             o.id = self.new_id("obj");
             if let Some(g) = o.group.take() {
                 let n = gmap.len();
@@ -5137,11 +5127,11 @@ impl App {
             copies.push(o);
         }
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let first = layer.objects.len();
-        self.multi = copies.iter().skip(1).map(|o| o.id.clone()).collect();
+        self.view.multi = copies.iter().skip(1).map(|o| o.id.clone()).collect();
         layer.objects.extend(copies);
-        self.selected = Some((li, first));
+        self.view.selected = Some((li, first));
         
     }
 
@@ -5161,27 +5151,27 @@ impl App {
         o.x += 24.0;
         o.y += 24.0;
         self.clipboard = Some(o.clone());
-        let slide = &self.project.as_ref().unwrap().slides[self.slide];
-        let li = self.layer.min(slide.layers.len() - 1);
+        let slide = &self.project.as_ref().unwrap().slides[self.view.slide];
+        let li = self.view.layer.min(slide.layers.len() - 1);
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         layer.objects.push(o);
-        self.selected = Some((li, layer.objects.len() - 1));
+        self.view.selected = Some((li, layer.objects.len() - 1));
         
     }
 
     fn reorder_selected(&mut self, to_front: bool) {
-        let Some((li, oi)) = self.selected else { return };
-        self.multi.clear();
+        let Some((li, oi)) = self.view.selected else { return };
+        self.view.multi.clear();
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let o = layer.objects.remove(oi);
         if to_front {
             layer.objects.push(o);
-            self.selected = Some((li, layer.objects.len() - 1));
+            self.view.selected = Some((li, layer.objects.len() - 1));
         } else {
             layer.objects.insert(0, o);
-            self.selected = Some((li, 0));
+            self.view.selected = Some((li, 0));
         }
     }
 
@@ -5190,7 +5180,7 @@ impl App {
         if sel.is_empty() { return; }
         self.snapshot_if_new_edit();
         for (li, oi) in sel {
-            if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+            if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
                 o.x += dx;
                 o.y += dy;
             }
@@ -5226,16 +5216,16 @@ impl App {
     fn begin_state_swap(&mut self) {
         self.swap = None;
         if !self.states_showing() || self.try_mode { return; }
-        let Some((li, oi)) = self.selected else { return };
-        let slide_idx = self.slide;
+        let Some((li, oi)) = self.view.selected else { return };
+        let slide_idx = self.view.slide;
         let Some(proj) = self.project.as_mut() else { return };
         let Some(o) = proj.slides.get(slide_idx).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (id, init) = (o.id.clone(), o.initial_state.clone());
-        let viewed = match &self.state_view {
+        let viewed = match &self.view.state_view {
             Some((vid, name)) if *vid == id && o.states.iter().any(|s| &s.name == name) => name.clone(),
             _ => init,
         };
-        self.state_view = Some((id.clone(), viewed.clone()));
+        self.view.state_view = Some((id.clone(), viewed.clone()));
         self.swap = states_panel::begin(&mut proj.slides, slide_idx, &id, &viewed);
     }
 
@@ -5272,7 +5262,7 @@ impl App {
         if let (Some(p), Some(prev)) = (self.project.as_mut(), self.undo.pop()) {
             let cur = prev.swap_into(p);
             self.redo.push(cur);
-            self.selected = None;
+            self.view.selected = None;
             self.dirty = true;
         }
     }
@@ -5282,7 +5272,7 @@ impl App {
         if let (Some(p), Some(next)) = (self.project.as_mut(), self.redo.pop()) {
             let cur = next.swap_into(p);
             self.undo.push(cur);
-            self.selected = None;
+            self.view.selected = None;
             self.dirty = true;
         }
     }
@@ -5334,7 +5324,7 @@ impl App {
     /// The object whose triggers the Triggers tab shows for the selection: the selected object, or for a part of a
     /// clickable group the group's owner (a click trigger on one part speaks for the whole group).
     fn trigger_owner(&self, slide_idx: usize) -> Option<(String, String, bool)> {
-        let (li, oi) = self.selected?;
+        let (li, oi) = self.view.selected?;
         let slide = self.project.as_ref()?.slides.get(slide_idx)?;
         let o = slide.layers.get(li)?.objects.get(oi)?;
         if let Some(gid) = o.group.as_deref().filter(|_| o.table.is_none()) {
@@ -5348,8 +5338,8 @@ impl App {
             (Owner::Object(id), if grouped { format!("Triggers: group (kept on {name}); a click on any part runs them") } else { format!("Triggers: {name}") })
         } else {
             let slide = &self.project.as_ref().unwrap().slides[slide_idx];
-            let l = &slide.layers[self.layer.min(slide.layers.len() - 1)];
-            if self.layer == 0 { (Owner::Slide, "Triggers: slide (runs when the slide starts or a variable changes)".to_string()) }
+            let l = &slide.layers[self.view.layer.min(slide.layers.len() - 1)];
+            if self.view.layer == 0 { (Owner::Slide, "Triggers: slide (runs when the slide starts or a variable changes)".to_string()) }
             else { (Owner::Layer(l.id.clone()), format!("Triggers: layer {}", l.name)) }
         };
         ui.horizontal(|ui| {
@@ -5399,7 +5389,7 @@ impl App {
                     changed |= triggers_ui(ui, &mut proj.slides[slide_idx], &slide_list, &vars, o, None, &mut gen);
                 });
                 if h.header_response.clicked() {
-                    let already = match at { Some((li, oi)) if *oi != usize::MAX => self.selected == Some((*li, *oi)), _ => false };
+                    let already = match at { Some((li, oi)) if *oi != usize::MAX => self.view.selected == Some((*li, *oi)), _ => false };
                     pick = Some(at.unwrap_or((0, usize::MAX)));
                     // The first click on a group selects its owner and leaves it open; a click on the one already chosen folds it.
                     if !already {
@@ -5415,7 +5405,7 @@ impl App {
         if let Some((li, oi)) = pick {
             // Clicking a group's heading selects its owner. That is a move made inside the Triggers tab, so it stays there.
             self.trigger_select = true;
-            if oi == usize::MAX { self.layer = li; self.selected = None; } else { self.layer = li; self.selected = Some((li, oi)); }
+            if oi == usize::MAX { self.view.layer = li; self.view.selected = None; } else { self.view.layer = li; self.view.selected = Some((li, oi)); }
         }
         if changed {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
@@ -5445,7 +5435,7 @@ impl App {
     fn focus_order_window(&mut self, ui: &mut egui::Ui) {
         if !self.focus_open { return; }
         let Some(p) = self.project.as_ref() else { self.focus_open = false; return };
-        let (si, li) = (self.slide, self.layer);
+        let (si, li) = (self.view.slide, self.view.layer);
         let Some(layer) = p.slides.get(si).and_then(|s| s.layers.get(li)) else { self.focus_open = false; return };
         let rows: Vec<(usize, String, char, Option<u8>, bool, bool)> = layer.focus_indices().into_iter().map(|i| { let o = &layer.objects[i]; (i, o.name.clone(), objects_panel::kind_icon(o), o.role.level().filter(|_| matches!(o.kind, Kind::Text)), o.decorative, o.hidden) }).collect();
         let (title, custom) = (layer.name.clone(), !layer.focus_order.is_empty());
@@ -5470,7 +5460,7 @@ impl App {
                         let dim = *decorative || *hidden;
                         let mut t = egui::RichText::new(name);
                         if dim { t = t.weak(); }
-                        if ui.selectable_label(self.selected == Some((li, *i)), t).clicked() { pick = Some(*i); }
+                        if ui.selectable_label(self.view.selected == Some((li, *i)), t).clicked() { pick = Some(*i); }
                         if *decorative { ui.weak("skipped by screen readers"); } else if *hidden { ui.weak("hidden"); }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_enabled_ui(pos < last, |ui| { if ui.small_button(egui::RichText::new(ribbon::ARROW_DOWN.to_string()).family(ribbon::icons())).on_hover_text("Later").clicked() { mv = Some((*i, 1)); } });
@@ -5484,7 +5474,7 @@ impl App {
             ui.add_enabled_ui(custom, |ui| { if ui.button("Reset Order").on_hover_text("Reach objects back to front, as they are stacked on the slide").clicked() { reset = true; } });
         });
         if !open { self.focus_open = false; }
-        if let Some(i) = pick { self.selected = Some((li, i)); self.multi.clear(); }
+        if let Some(i) = pick { self.view.selected = Some((li, i)); self.view.multi.clear(); }
         if mv.is_some() || skip.is_some() || reset {
             self.snapshot();
             if let Some(layer) = self.project.as_mut().and_then(|p| p.slides.get_mut(si)).and_then(|s| s.layers.get_mut(li)) {
@@ -5708,7 +5698,7 @@ impl App {
         use ribbon::icons;
         let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
         let n = slide.layers.len();
-        if self.visible.len() != n { self.visible = vec![true; n]; }
+        if self.view.visible.len() != n { self.view.visible = vec![true; n]; }
         // Docked, the panel has its tab (with the buttons that pop it out and hide it); in a window of its own the window's tab does.
         if !in_window { doc_tabs::panel_tabs_movable(ui, &[(0, "Slide Layers".to_string())], &mut 0, "layers"); }
         // The buttons under the list always fit in the room there is; the list takes what is left (and scrolls).
@@ -5719,17 +5709,17 @@ impl App {
             ui.add_space((list_h - n as f32 * 34.0).max(0.0));
             let mut rows: Vec<(usize, egui::Rect)> = Vec::new();
             for li in (0..n).rev() {
-                let selected = li == self.layer;
+                let selected = li == self.view.layer;
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click_and_drag());
                 rows.push((li, rect));
-                if resp.secondary_clicked() { self.layer = li; self.selected = None; }
+                if resp.secondary_clicked() { self.view.layer = li; self.view.selected = None; }
                 resp.context_menu(|ui| {
                     if ui.button("New layer").clicked() { self.add_layer(); ui.close(); }
                     ui.separator();
-                    if ui.button("Rename").clicked() { self.snapshot(); self.layer = li; self.layer_edit = Some(li); ui.close(); }
+                    if ui.button("Rename").clicked() { self.snapshot(); self.view.layer = li; self.layer_edit = Some(li); ui.close(); }
                     ui.add_enabled_ui(li > 0, |ui| {
-                        let shown = self.visible.get(li).copied().unwrap_or(true);
-                        if ui.button(if shown { "Hide" } else { "Show" }).clicked() { if let Some(v) = self.visible.get_mut(li) { *v = !*v; } ui.close(); }
+                        let shown = self.view.visible.get(li).copied().unwrap_or(true);
+                        if ui.button(if shown { "Hide" } else { "Show" }).clicked() { if let Some(v) = self.view.visible.get_mut(li) { *v = !*v; } ui.close(); }
                         if ui.button("Duplicate").clicked() { self.duplicate_layer(li); ui.close(); }
                         ui.add_enabled_ui(li + 1 < n, |ui| { if ui.button("Bring forward").clicked() { self.move_layer(li, li + 1); ui.close(); } });
                         ui.add_enabled_ui(li > 1, |ui| { if ui.button("Send backward").clicked() { self.move_layer(li, li - 1); ui.close(); } });
@@ -5740,9 +5730,9 @@ impl App {
                 if resp.drag_started() && li > 0 && self.layer_edit.is_none() { self.layer_drag = Some(li); }
                 if resp.double_clicked() {
                     self.snapshot();
-                    self.layer = li;
+                    self.view.layer = li;
                     self.layer_edit = Some(li);
-                    self.selected = None;
+                    self.view.selected = None;
                 }
                 let blue = ui.visuals().selection.bg_fill;
                 if selected {
@@ -5780,7 +5770,7 @@ impl App {
                 // Eye at the right edge; the base layer is always shown.
                 let eye_pos = egui::pos2(rect.right() - 20.0, rect.center().y);
                 let eye_rect = egui::Rect::from_center_size(eye_pos, egui::vec2(24.0, 24.0));
-                let on = li == 0 || self.visible[li] || li == self.layer;
+                let on = li == 0 || self.view.visible[li] || li == self.view.layer;
                 if li == 0 {
                     ui.painter().text(egui::pos2(rect.right() - 38.0, rect.center().y), egui::Align2::RIGHT_CENTER, "(Base Layer)", egui::FontId::proportional(11.5), fg.gamma_multiply(0.75));
                 }
@@ -5788,12 +5778,12 @@ impl App {
                 let eye = ui.interact(eye_rect, egui::Id::new(("layer-eye", li)), egui::Sense::click());
                 if eye.clicked() && li > 0 {
                     // The eye on the layer being worked on hides it and goes back to the base layer; on any other it keeps the layer showing or not.
-                    if li == self.layer { self.hide_selected_layer(); } else { self.visible[li] = !self.visible[li]; }
+                    if li == self.view.layer { self.hide_selected_layer(); } else { self.view.visible[li] = !self.view.visible[li]; }
                 }
                 else if resp.clicked() {
                     // Selecting a layer shows it while it is selected; only its eye keeps it showing afterwards.
-                    self.layer = li;
-                    self.selected = None;
+                    self.view.layer = li;
+                    self.view.selected = None;
                 }
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, if li == 0 { "Base layer" } else { "Layer" }));
             }
@@ -5819,20 +5809,20 @@ impl App {
         });
         ui.add_space(6.0);
         // Footer: new, duplicate, delete, Dim, and layer settings.
-        let can_delete = self.layer > 0;
+        let can_delete = self.view.layer > 0;
         ui.horizontal(|ui| {
             let btn = |ui: &mut egui::Ui, icon: char, tip: &str, enabled: bool| {
                 ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(icon.to_string()).family(icons()).size(17.0)).min_size(egui::vec2(30.0, 28.0))).on_hover_text(tip)
             };
             if btn(ui, '\u{e236}', "New layer", true).clicked() { self.add_layer(); }
-            if btn(ui, '\u{e1ca}', "Duplicate layer", can_delete).clicked() { self.duplicate_layer(self.layer); }
-            if btn(ui, '\u{e4a6}', "Delete layer", can_delete).clicked() { self.delete_layer(self.layer); }
+            if btn(ui, '\u{e1ca}', "Duplicate layer", can_delete).clicked() { self.duplicate_layer(self.view.layer); }
+            if btn(ui, '\u{e4a6}', "Delete layer", can_delete).clicked() { self.delete_layer(self.view.layer); }
             ui.checkbox(&mut self.dim_base, "Dim").on_hover_text("Dim the base layer while you work on another layer");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let gear = btn(ui, '\u{e270}', "Layer settings", true);
                 egui::Popup::from_toggle_button_response(&gear).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
                     ui.set_min_width(220.0);
-                    let li = self.layer.min(n - 1);
+                    let li = self.view.layer.min(n - 1);
                     ui.strong(if li == 0 { "Base layer" } else { "Layer settings" });
                     if li > 0 {
                         ui.horizontal(|ui| {
@@ -5868,25 +5858,25 @@ impl App {
     /// Move layer `from` to index `to` (both above the base layer), keeping the selection and visibility with it.
     fn move_layer(&mut self, from: usize, to: usize) {
         if from == 0 || to == 0 || from == to || self.project.is_none() { return; }
-        let n = self.project.as_ref().unwrap().slides[self.slide].layers.len();
+        let n = self.project.as_ref().unwrap().slides[self.view.slide].layers.len();
         if from >= n || to >= n { return; }
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         let l = slide.layers.remove(from);
         slide.layers.insert(to, l);
-        if self.visible.len() == n {
-            let v = self.visible.remove(from);
-            self.visible.insert(to, v);
+        if self.view.visible.len() == n {
+            let v = self.view.visible.remove(from);
+            self.view.visible.insert(to, v);
         }
-        self.layer = to;
-        self.selected = None;
+        self.view.layer = to;
+        self.view.selected = None;
         self.dirty = true;
     }
 
     /// Copy a layer (above the original), giving the copy fresh ids; triggers owned by the layer or its objects are copied too.
     fn duplicate_layer(&mut self, li: usize) {
         if li == 0 || self.project.is_none() { return; }
-        let Some(mut copy) = self.project.as_ref().and_then(|p| p.slides[self.slide].layers.get(li).cloned()) else { return };
+        let Some(mut copy) = self.project.as_ref().and_then(|p| p.slides[self.view.slide].layers.get(li).cloned()) else { return };
         let mut map: HashMap<String, String> = HashMap::new();
         let nid = self.new_id("layer");
         map.insert(std::mem::replace(&mut copy.id, nid), copy.id.clone());
@@ -5897,7 +5887,7 @@ impl App {
         }
         self.snapshot();
         let counter = self.id_counter;
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
         let extra: Vec<Trigger> = slide.triggers.iter().filter_map(|t| {
             let owner = match &t.owner {
                 Owner::Layer(l) => Owner::Layer(map.get(l)?.clone()),
@@ -5915,8 +5905,8 @@ impl App {
         }).collect();
         slide.triggers.extend(extra);
         slide.layers.insert(li + 1, copy);
-        self.layer = li + 1;
-        self.selected = None;
+        self.view.layer = li + 1;
+        self.view.selected = None;
         self.reset_visibility_keep();
     }
 
@@ -6115,7 +6105,7 @@ impl App {
     /// puts it.
     fn paint_marker_card(&self, painter: &egui::Painter, origin: egui::Pos2, scale: f32, o: &Object) {
         let Some(m) = &o.marker else { return };
-        let Some(slide) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)) else { return };
+        let Some(slide) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)) else { return };
         let (cw, ch) = (m.card_w.max(120.0), m.card_h.max(80.0));
         let (left, top, notch, above) = MarkerInfo::card_at((o.x, o.y, o.w, o.h), (slide.width, slide.height), (cw, ch));
         let card = egui::Rect::from_min_size(origin + egui::vec2(left, top) * scale, egui::vec2(cw, ch) * scale);
@@ -7484,7 +7474,7 @@ impl App {
         // Fonts asked for during the last frame reach egui now; a font asked for during this frame reaches it at the start of the next.
         font_store::apply_pending(root.ctx());
         // While trying, nothing is selected, so no panel keeps showing an object the author is no longer working on.
-        if self.try_mode { self.selected = None; self.multi.clear(); }
+        if self.try_mode { self.view.selected = None; self.view.multi.clear(); }
         self.menu_pick_clear(root.ctx());
         self.sync_tabs();
         self.begin_state_swap();
@@ -7546,7 +7536,7 @@ impl App {
                 if left || up { self.step_slide_selection(false, shift); }
                 if right || down { self.step_slide_selection(true, shift); }
                 if enter {
-                    if self.scene_view { let i = self.slide; self.scene_open(i); } else { self.slides_focus = false; }
+                    if self.scene_view { let i = self.view.slide; self.scene_open(i); } else { self.slides_focus = false; }
                 }
             } else {
             if copy { self.run_cmd(commands::Cmd::Copy); }
@@ -7557,8 +7547,8 @@ impl App {
                 if self.clipboard.is_some() && text == self.clip_text { self.paste(); }
                 else if !text.trim().is_empty() {
                     self.insert_text();
-                    if let (Some((li, oi)), Some(p)) = (self.selected, self.project.as_mut()) {
-                        if let Some(o) = p.slides[self.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) { o.text = text; }
+                    if let (Some((li, oi)), Some(p)) = (self.view.selected, self.project.as_mut()) {
+                        if let Some(o) = p.slides[self.view.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) { o.text = text; }
                     }
                 }
             }
@@ -7690,7 +7680,7 @@ impl App {
             return;
         }
         let slide_count = proj.slides.len();
-        let _slide_idx = self.slide.min(slide_count - 1);
+        let _slide_idx = self.view.slide.min(slide_count - 1);
 
         if self.pano_edit_ui(root, ctx) { return; }
         if self.scene_view {
@@ -7738,11 +7728,11 @@ impl App {
 
         // Inspector
         // The left panel can add or delete slides; re-read the index before anything else uses it.
-        let slide_idx = self.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
+        let slide_idx = self.view.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
         let mut wants = SideWants::default();
         // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and staying on it hid
         // the Properties from anyone who did not know to look. Picking an owner from the Triggers tab stays put.
-        let seen = (self.selected, self.layer, self.slide);
+        let seen = (self.view.selected, self.view.layer, self.view.slide);
         let from_triggers = std::mem::take(&mut self.trigger_select);
         if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab == P_TRIGGERS { self.show_panel_tab(0); }
         self.inspector_seen = Some(seen);
@@ -7750,7 +7740,7 @@ impl App {
         let window = ctx.content_rect();
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
         // The slide list can add or delete slides, so each edge reads the index again after the one before it.
-        let current = |a: &App| a.slide.min(a.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
+        let current = |a: &App| a.view.slide.min(a.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
         self.dock_edge(root, ctx, dock::Edge::Left, slide_idx, &mut wants);
         self.dock_edge(root, ctx, dock::Edge::Right, current(self), &mut wants);
         self.panel_windows(ctx, current(self), &mut wants);
@@ -7829,23 +7819,23 @@ impl App {
                 let (scroll, zd, pointer) = ctx.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
                 if zd != 1.0 {
                     if let Some(p) = pointer {
-                        let old_scale = fit * self.zoom;
-                        let old_origin = area.center() - egui::vec2(slide.width, slide.height) * old_scale / 2.0 + self.pan;
+                        let old_scale = fit * self.view.zoom;
+                        let old_origin = area.center() - egui::vec2(slide.width, slide.height) * old_scale / 2.0 + self.view.pan;
                         let q = (p - old_origin) / old_scale;
-                        self.zoom = (self.zoom * zd).clamp(0.1, 8.0);
-                        let new_scale = fit * self.zoom;
-                        self.pan = p - q * new_scale - area.center() + egui::vec2(slide.width, slide.height) * new_scale / 2.0;
+                        self.view.zoom = (self.view.zoom * zd).clamp(0.1, 8.0);
+                        let new_scale = fit * self.view.zoom;
+                        self.view.pan = p - q * new_scale - area.center() + egui::vec2(slide.width, slide.height) * new_scale / 2.0;
                     }
                 } else if scroll != egui::Vec2::ZERO {
-                    self.pan += scroll;
+                    self.view.pan += scroll;
                 }
             }
             if resp.dragged_by(egui::PointerButton::Middle) {
-                self.pan += resp.drag_delta();
+                self.view.pan += resp.drag_delta();
             }
-            let scale = fit * self.zoom;
+            let scale = fit * self.view.zoom;
             let size = egui::vec2(slide.width * scale, slide.height * scale);
-            let origin = area.center() - size / 2.0 + self.pan;
+            let origin = area.center() - size / 2.0 + self.view.pan;
             self.canvas_frame = Some((origin, scale));
             self.paint_backdrop(ctx, &painter, origin, scale, &slide);
             let to_screen = |x: f32, y: f32, w: f32, h: f32| {
@@ -8001,7 +7991,7 @@ impl App {
                 _ => slide,
             };
             // The States tab shows its object alone and brightly, with everything else faded behind it.
-            let state_object = if self.states_showing() && self.state_dim && self.swap.is_some() && !try_on { self.selected } else { None };
+            let state_object = if self.states_showing() && self.state_dim && self.swap.is_some() && !try_on { self.view.selected } else { None };
             if let Some((sli, soi)) = state_object.filter(|&(l, o)| slide.layers.get(l).is_some_and(|ly| o < ly.objects.len())) {
                 let mut rest = slide.clone();
                 let one = rest.layers[sli].objects.remove(soi);
@@ -8012,14 +8002,14 @@ impl App {
                 for l in only.layers.iter_mut() { l.objects.clear(); }
                 only.layers[sli].objects.push(one);
                 self.paint_slide(ctx, &painter, origin, scale, &only, &[sli], Some((sli, 0)));
-            } else if self.dim_base && self.layer > 0 && shown.len() > 1 && !try_on {
+            } else if self.dim_base && self.view.layer > 0 && shown.len() > 1 && !try_on {
                 // Working on a layer: show the base layer faded behind it.
                 self.paint_slide(ctx, &painter, origin, scale, &slide, &[0], None);
                 let bg = self.project.as_ref().and_then(|p| p.resolved_background(&slide)).map(|b| color(b.base_color())).unwrap_or(egui::Color32::WHITE);
                 painter.rect_filled(egui::Rect::from_min_size(origin, egui::vec2(slide.width, slide.height) * scale), 0.0, bg.gamma_multiply(0.7));
-                self.paint_slide(ctx, &painter, origin, scale, &slide, &shown[1..], self.selected);
+                self.paint_slide(ctx, &painter, origin, scale, &slide, &shown[1..], self.view.selected);
             } else {
-                self.paint_slide(ctx, &painter, origin, scale, &slide, &shown, if try_on { None } else { self.selected });
+                self.paint_slide(ctx, &painter, origin, scale, &slide, &shown, if try_on { None } else { self.view.selected });
             }
 
             if !try_on { self.background_handles(ui, &painter, origin, scale, slide_idx); }
@@ -8106,9 +8096,9 @@ impl App {
                 // The box around a multi-selection or group.
                 sel_all.iter().filter_map(|&(l, k)| slide.layers.get(l)?.objects.get(k)).map(|o| to_screen(o.x, o.y, o.w, o.h)).reduce(|a, b| a.union(b))
             } else {
-                self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)).map(|o| to_screen(o.x, o.y, o.w, o.h))
+                self.view.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)).map(|o| to_screen(o.x, o.y, o.w, o.h))
             };
-            let sel_rot = if sel_all.len() > 1 { 0.0 } else { self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)).map(|o| o.rotation).unwrap_or(0.0).to_radians() };
+            let sel_rot = if sel_all.len() > 1 { 0.0 } else { self.view.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)).map(|o| o.rotation).unwrap_or(0.0).to_radians() };
             let turn = |r: egui::Rect, p: egui::Pos2| {
                 let d = p - r.center();
                 r.center() + egui::vec2(d.x * sel_rot.cos() - d.y * sel_rot.sin(), d.x * sel_rot.sin() + d.y * sel_rot.cos())
@@ -8149,7 +8139,7 @@ impl App {
                 }
             }
             // The selected object's motion path: a line through draggable points.
-            let motion_pts: Vec<egui::Pos2> = match (sel_all.len(), self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi))) {
+            let motion_pts: Vec<egui::Pos2> = match (sel_all.len(), self.view.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi))) {
                 (1, Some(o)) => o.motion.as_ref().map(|m| {
                     let c = egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0);
                     m.points.iter().map(|p| origin + (c + egui::vec2(p.0, p.1)) * scale).collect()
@@ -8157,7 +8147,7 @@ impl App {
                 _ => vec![],
             };
             if motion_pts.len() >= 2 {
-                if let Some(o) = self.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)) {
+                if let Some(o) = self.view.selected.and_then(|(li, oi)| slide.layers.get(li)?.objects.get(oi)) {
                     let c = egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0);
                     let line: Vec<egui::Pos2> = o.motion.as_ref().map(|m| m.sampled(12).into_iter().map(|p| origin + (c + egui::vec2(p.0, p.1)) * scale).collect()).unwrap_or_default();
                     let purple = ribbon::PURPLE;
@@ -8238,13 +8228,13 @@ impl App {
                 // Right-clicking an object outside the selection selects it (or clears the selection on empty canvas).
                 if let Some(pos) = resp.interact_pointer_pos() {
                     match hit_object(&slide, &shown, to_slide(pos), scale) {
-                        Some(h) if sel_all.contains(&h) && self.selected != Some(h) && slide.layers[h.0].objects[h.1].table.is_some() && self.selected_object().is_some_and(|s| s.group == slide.layers[h.0].objects[h.1].group) => {
+                        Some(h) if sel_all.contains(&h) && self.view.selected != Some(h) && slide.layers[h.0].objects[h.1].table.is_some() && self.selected_object().is_some_and(|s| s.group == slide.layers[h.0].objects[h.1].group) => {
                             // Right-clicking another cell of the selected table: table commands act on that cell.
-                            self.selected = Some(h);
+                            self.view.selected = Some(h);
                             self.range_end = None;
                         }
-                        Some(h) if !sel_all.contains(&h) => { self.selected = Some(h); self.multi.clear(); }
-                        None => { self.selected = None; self.multi.clear(); }
+                        Some(h) if !sel_all.contains(&h) => { self.view.selected = Some(h); self.view.multi.clear(); }
+                        None => { self.view.selected = None; self.view.multi.clear(); }
                         _ => {}
                     }
                 }
@@ -8345,29 +8335,29 @@ impl App {
                         let in_sel = hit.is_some_and(|h| sel_all.contains(&h));
                         let same_table = hit.and_then(|(hl, ho)| {
                             let h = &slide.layers[hl].objects[ho];
-                            let s = slide.layers.get(self.selected?.0)?.objects.get(self.selected?.1)?;
+                            let s = slide.layers.get(self.view.selected?.0)?.objects.get(self.view.selected?.1)?;
                             (h.table.is_some() && s.table.is_some() && h.group == s.group).then(|| (h.group.clone().unwrap_or_default(), h.table.unwrap_or_default()))
                         });
                         if let (true, Some(end)) = (shift, same_table) {
                             // Shift-click in a table chooses a block of cells.
                             self.range_end = Some(end);
                             self.drag = None;
-                        } else if shift && hit.is_some() && self.selected.is_some() {
+                        } else if shift && hit.is_some() && self.view.selected.is_some() {
                             // Toggle membership (same layer only).
                             let (h_li, h_oi) = hit.unwrap();
-                            if self.selected.map(|s| s.0) == Some(h_li) {
+                            if self.view.selected.map(|s| s.0) == Some(h_li) {
                                 let id = slide.layers[h_li].objects[h_oi].id.clone();
-                                if self.selected == hit {
+                                if self.view.selected == hit {
                                     // Promote another member to primary, if any.
                                     if let Some(next) = sel_all.iter().find(|s| **s != hit.unwrap()).copied() {
-                                        self.selected = Some(next);
+                                        self.view.selected = Some(next);
                                         let nid = slide.layers[next.0].objects[next.1].id.clone();
-                                        self.multi.retain(|m| *m != nid && *m != id);
+                                        self.view.multi.retain(|m| *m != nid && *m != id);
                                     }
-                                } else if let Some(pos_) = self.multi.iter().position(|m| *m == id) {
-                                    self.multi.remove(pos_);
+                                } else if let Some(pos_) = self.view.multi.iter().position(|m| *m == id) {
+                                    self.view.multi.remove(pos_);
                                 } else {
-                                    self.multi.push(id);
+                                    self.view.multi.push(id);
                                 }
                             }
                             self.drag = None;
@@ -8375,18 +8365,18 @@ impl App {
                             // Grabbing a member of a multi-selection moves the whole group.
                             if let Some(h) = hit.filter(|h| slide.layers[h.0].objects[h.1].table.is_some() && self.selected_object().is_some_and(|s| s.group == slide.layers[h.0].objects[h.1].group)) {
                                 // Within a table the clicked cell becomes the current cell.
-                                if self.selected != Some(h) { self.selected = Some(h); self.range_end = None; }
+                                if self.view.selected != Some(h) { self.view.selected = Some(h); self.range_end = None; }
                             }
                             self.drag = Some(DragMode::Move);
                         } else {
-                            self.selected = hit;
-                            self.multi.clear();
+                            self.view.selected = hit;
+                            self.view.multi.clear();
                             self.range_end = None;
                             self.drag = Some(if hit.is_some() { DragMode::Move } else { DragMode::Marquee });
                             if hit.is_none() { self.marquee = Some(p.to_pos2()); }
                         }
                         self.drag_accum = egui::Vec2::ZERO;
-                        if let Some((li, oi)) = self.selected.filter(|_| matches!(self.drag, Some(DragMode::Move))) {
+                        if let Some((li, oi)) = self.view.selected.filter(|_| matches!(self.drag, Some(DragMode::Move))) {
                             let o = &slide.layers[li].objects[oi];
                             self.drag_origin = (o.x, o.y);
                         }
@@ -8394,7 +8384,7 @@ impl App {
                 }
             }
             if resp.double_clicked() {
-                if let Some((li, oi)) = self.selected {
+                if let Some((li, oi)) = self.view.selected {
                     if let Some(o) = slide.layers.get(li).and_then(|l| l.objects.get(oi)) {
                         if o.equation.is_some() {
                             self.open_equation_dialog(Some((li, oi)));
@@ -8413,7 +8403,7 @@ impl App {
                     if let Some(pos) = resp.interact_pointer_pos().or(ctx.pointer_interact_pos()) {
                         let at = to_slide(pos);
                         self.insert_text();
-                        if let (Some((li, oi)), Some(p)) = (self.selected, self.project.as_mut()) {
+                        if let (Some((li, oi)), Some(p)) = (self.view.selected, self.project.as_mut()) {
                             let (sw, sh) = (p.slides[slide_idx].width, p.slides[slide_idx].height);
                             if let Some(o) = p.slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                                 o.x = at.x.min(sw - o.w).max(0.0).round();
@@ -8429,7 +8419,7 @@ impl App {
             }
             self.guides.clear();
             if resp.dragged_by(egui::PointerButton::Primary) {
-                if let (Some(mode), Some((li, oi))) = (self.drag, self.selected) {
+                if let (Some(mode), Some((li, oi))) = (self.drag, self.view.selected) {
                     let d = resp.drag_delta() / scale;
                     if d != egui::Vec2::ZERO && !self.drag_changed && !matches!(mode, DragMode::Marquee | DragMode::Crop(..) | DragMode::CropPan) {
                         // One undo step per drag, taken at the first actual movement.
@@ -8594,8 +8584,8 @@ impl App {
                             }
                             if !found.is_empty() { break; }
                         }
-                        self.selected = found.last().copied();
-                        self.multi = found.iter().rev().skip(1).map(|&(l, k)| slide.layers[l].objects[k].id.clone()).collect();
+                        self.view.selected = found.last().copied();
+                        self.view.multi = found.iter().rev().skip(1).map(|&(l, k)| slide.layers[l].objects[k].id.clone()).collect();
                     }
                 }
                 if resp.drag_stopped() || !resp.dragged() { self.marquee = None; }
@@ -8808,7 +8798,7 @@ impl App {
                             if empty {
                                 self.snapshot();
                                 if let Some(l) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)).and_then(|s| s.layers.get_mut(li)) { l.objects.remove(oi); }
-                                if self.selected == Some((li, oi)) { self.selected = None; }
+                                if self.view.selected == Some((li, oi)) { self.view.selected = None; }
                                 self.dirty = true;
                             }
                         }
@@ -8897,7 +8887,7 @@ mod tests {
         let mut a = App::default();
         a.open(&std::path::PathBuf::from(file));
         assert!(a.project.is_some(), "the file opens");
-        a.slide = std::env::var("BRAINBEND_OPEN_SLIDE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        a.view.slide = std::env::var("BRAINBEND_OPEN_SLIDE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("open-story.png")).unwrap();
@@ -9212,7 +9202,7 @@ mod tests {
         assert_eq!(v["result"]["isError"], false, "{v}");
         assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects[0].text, "From an AI tool");
         assert!(h.state().dirty && h.state().status.starts_with("AI tool:"), "{}", h.state().status);
-        assert_eq!(h.state().slide, 1, "the slide it worked on is on screen");
+        assert_eq!(h.state().view.slide, 1, "the slide it worked on is on screen");
         let (_, v) = ask(&mut h, bearer.clone(), tool(5, "undo", serde_json::json!({})));
         assert_eq!(v["result"]["isError"], false);
         assert!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.is_empty(), "undone");
@@ -9677,9 +9667,9 @@ mod tests {
                 p.slides[0].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| !o.states.is_empty()).map(|oi| (li, oi)))
             };
             if let Some((li, oi)) = found {
-                h.state_mut().layer = li;
-                h.state_mut().visible[li] = true;
-                h.state_mut().selected = Some((li, oi));
+                h.state_mut().view.layer = li;
+                h.state_mut().view.visible[li] = true;
+                h.state_mut().view.selected = Some((li, oi));
                 shot(&mut h, "2-sample-button-selected.png");
             }
         }
@@ -9698,7 +9688,7 @@ mod tests {
                 a.open(&p);
                 let found = a.project.as_ref().unwrap().slides[0].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.crop.is_some()).map(|oi| (li, oi)));
                 if let Some((li, oi)) = found {
-                    a.selected = Some((li, oi));
+                    a.view.selected = Some((li, oi));
                     let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
                     let mut h = harness(a);
                     shot(&mut h, "9-picture-selected.png");
@@ -9715,19 +9705,19 @@ mod tests {
                 a.import_report.clear();
                 let (li, oi) = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().position(|o| o.name == "Button 01").map(|oi| (0, oi)).unwrap();
                 let oi_btn = oi;
-                a.selected = Some((li, oi));
+                a.view.selected = Some((li, oi));
                 a.bottom_tab = P_STATES;
-                a.state_view = Some((a.project.as_ref().unwrap().slides[0].layers[0].objects[oi].id.clone(), "Hover".into()));
+                a.view.state_view = Some((a.project.as_ref().unwrap().slides[0].layers[0].objects[oi].id.clone(), "Hover".into()));
                 let mut h = harness(a);
                 // Editing Layer 1: the base body text and character it replaces are not drawn.
                 h.state_mut().try_mode = false;
                 h.state_mut().bottom_tab = P_TIMELINE;
-                h.state_mut().selected = None;
-                h.state_mut().layer = 1;
+                h.state_mut().view.selected = None;
+                h.state_mut().view.layer = 1;
                 shot(&mut h, "hide-on-layers.png");
-                h.state_mut().layer = 0;
+                h.state_mut().view.layer = 0;
                 h.state_mut().bottom_tab = P_STATES;
-                h.state_mut().selected = Some((0, oi_btn));
+                h.state_mut().view.selected = Some((0, oi_btn));
                 shot(&mut h, "states-tab.png");
                 // Try it: the second tab has been pressed, so it is Selected and the first is back to Normal.
                 let id2 = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().find(|o| o.name == "Button 02").map(|o| o.id.clone()).unwrap();
@@ -9774,7 +9764,7 @@ mod tests {
                 a.import_report.clear();
                 let mut h = harness(a);
                 for i in [0usize, 4, 7] {
-                    h.state_mut().slide = i;
+                    h.state_mut().view.slide = i;
                     h.state_mut().scene_view = false;
                     h.run_steps(3);
                 }
@@ -9795,7 +9785,7 @@ mod tests {
                 let mut a = App::default();
                 a.open(&p);
                 a.import_report.clear();
-                a.layer = 1;
+                a.view.layer = 1;
                 let mut h = harness(a);
                 shot(&mut h, "video-poster.png");
             }
@@ -9837,17 +9827,17 @@ mod tests {
         shot(&mut h, "3-question-slide.png");
         h.state_mut().add_slide(SlideKind::Results);
         shot(&mut h, "4-results-slide.png");
-        h.state_mut().slide = 0;
-        h.state_mut().layer = 0;
+        h.state_mut().view.slide = 0;
+        h.state_mut().view.layer = 0;
         h.state_mut().reset_visibility();
-        h.state_mut().selected = Some((0, 3));
+        h.state_mut().view.selected = Some((0, 3));
         shot(&mut h, "5-new-project-button-selected.png");
         {
             let ids: Vec<String> = h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect();
-            h.state_mut().selected = Some((0, 0));
-            h.state_mut().multi = ids[1..].to_vec();
+            h.state_mut().view.selected = Some((0, 0));
+            h.state_mut().view.multi = ids[1..].to_vec();
             shot(&mut h, "5b-multi-selected.png");
-            h.state_mut().multi.clear();
+            h.state_mut().view.multi.clear();
         }
         for (tab, name) in [(0usize, "5b2-ribbon-file.png"), (2, "5c-ribbon-insert.png"), (3, "5d-ribbon-slides.png"), (4, "5e-ribbon-design.png"), (5, "5g-ribbon-animations.png")] {
             h.state_mut().ribbon_tab = tab;
@@ -9873,10 +9863,10 @@ mod tests {
         h.run_steps(3);
         shot(&mut h, "5o-scene-view.png");
         h.state_mut().scene_view = false;
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.run_steps(2);
         shot(&mut h, "5p-scene-dropdown.png");
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.state_mut().right_tab = 1;
         h.state_mut().bottom_tab = P_NOTES;
         h.run_steps(3);
@@ -9911,8 +9901,8 @@ mod tests {
         h.run_steps(3);
         shot(&mut h, "5l2-layer-rename.png");
         h.state_mut().layer_edit = None;
-        h.state_mut().layer = 0;
-        h.state_mut().selected = None;
+        h.state_mut().view.layer = 0;
+        h.state_mut().view.selected = None;
         h.state_mut().file_view = true;
         h.state_mut().file_page = backstage::FilePage::New;
         shot(&mut h, "6c-file-new.png");
@@ -9955,8 +9945,8 @@ mod tests {
                 Err(_) => vec![0, 1.min(n - 1)],
             };
             for i in picks {
-                h.state_mut().slide = i;
-                h.state_mut().layer = 0;
+                h.state_mut().view.slide = i;
+                h.state_mut().view.layer = 0;
                 h.state_mut().reset_visibility();
                 h.run_steps(3);
                 let name = format!("in-{}-{i}.png", stem.chars().take(24).collect::<String>());
@@ -9985,14 +9975,14 @@ mod tests {
             if let Ok(v) = std::env::var("BRAINBEND_MASTER") {
                 // Layout Builder view on layout number `v` (1-based), instead of the slides.
                 h.state_mut().enter_master_view();
-                h.state_mut().slide = v.parse().unwrap_or(1);
+                h.state_mut().view.slide = v.parse().unwrap_or(1);
                 h.run_steps(3);
                 h.render().expect("renderer").save(std::path::Path::new(&dir).join(format!("pptx-{}-master.png", stem.chars().filter(|c| c.is_alphanumeric()).take(20).collect::<String>()))).unwrap();
                 continue;
             }
             for i in picks {
-                h.state_mut().slide = i;
-                h.state_mut().layer = 0;
+                h.state_mut().view.slide = i;
+                h.state_mut().view.layer = 0;
                 h.state_mut().reset_visibility();
                 h.run_steps(3);
                 let name = format!("pptx-{}-{i}.png", stem.chars().filter(|c| c.is_alphanumeric()).take(20).collect::<String>());
@@ -10017,14 +10007,14 @@ mod tests {
         h.run_steps(3);
         let layers = h.state().project.as_ref().unwrap().slides[0].layers.len();
         for li in 0..layers.min(12) {
-            h.state_mut().layer = li;
-            if li > 0 { h.state_mut().visible[li] = true; }
+            h.state_mut().view.layer = li;
+            if li > 0 { h.state_mut().view.visible[li] = true; }
             let n = h.state().project.as_ref().unwrap().slides[0].layers[li].objects.len();
             for oi in 0..n.min(4) {
-                h.state_mut().selected = Some((li, oi));
+                h.state_mut().view.selected = Some((li, oi));
                 h.run_steps(2);
             }
-            h.state_mut().selected = None;
+            h.state_mut().view.selected = None;
             h.run_steps(2);
         }
     }
@@ -10061,14 +10051,14 @@ mod tests {
                 slide.triggers.push(Trigger { id: format!("t{i}"), owner: Owner::Object(id.clone()), event: Event::Click, action: a,
                     conditions: vec![Condition { variable: "none".into(), cmp: Cmp::Eq, value: Value::Bool(true), or_with_previous: i % 2 == 0 }] });
             }
-            h.state_mut().selected = Some((0, 0));
+            h.state_mut().view.selected = Some((0, 0));
         }
         h.run_steps(4);
         h.state_mut().editing = Some((0, 0));
         h.run_steps(3);
         // Delete the slide the UI is looking at; the next frames must not index past the end.
         let last = h.state().project.as_ref().unwrap().slides.len() - 1;
-        h.state_mut().slide = last;
+        h.state_mut().view.slide = last;
         h.state_mut().delete_slide(last);
         h.run_steps(3);
         h.state_mut().undo();
@@ -10088,7 +10078,7 @@ mod tests {
             o.fill = Some(Rgba(10, 20, 30, 255));
         }
         let src = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
-        a.selected = Some((0, 1));
+        a.view.selected = Some((0, 1));
         a.painter = Some((src.id.clone(), Box::new(src)));
         let mut h = harness(a);
         h.run_steps(4);
@@ -10126,7 +10116,7 @@ mod tests {
             let c = at(&t, "• Another");
             o.format_range(c, c + 3, &Attr::Indent(1));
         }
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(4);
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0];
@@ -10156,8 +10146,8 @@ mod tests {
         a.new_project();
         a.insert_text();
         a.insert_text();
-        a.selected = Some((0, 0));
-        a.multi = vec![a.project.as_ref().unwrap().slides[0].layers[0].objects[1].id.clone()];
+        a.view.selected = Some((0, 0));
+        a.view.multi = vec![a.project.as_ref().unwrap().slides[0].layers[0].objects[1].id.clone()];
         a.edit_text_range(|o, s, e, whole| { assert!(whole); o.format_range(s, e, &brainbend_doc::richtext::Attr::ToggleStrike); });
         for o in &a.project.as_ref().unwrap().slides[0].layers[0].objects {
             assert!(o.char_fmts().iter().all(|(_, f)| f.strike == Some(true)), "{} is struck through", o.name);
@@ -10178,7 +10168,7 @@ mod tests {
             o.format_range(0, 4, &Attr::ToggleBold);
             o.format_range(5, 10, &Attr::Size(99.0));
         }
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.apply_text_style(TextRole::H1);
         let theme = a.project.as_ref().unwrap().theme.clone();
         let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
@@ -10200,7 +10190,7 @@ mod tests {
         let mut a = App::default();
         a.new_project();
         a.insert_shape("rect");
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         open_bars(&h, 0, &["fill-line"]);
@@ -10290,7 +10280,7 @@ mod tests {
             let objs = &mut p.slides[0].layers[0].objects;
             for (i, o) in objs.iter_mut().enumerate() { o.x = 60.0 + (i % 4) as f32 * 240.0; o.y = 100.0 + (i / 4) as f32 * 260.0; }
         }
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
@@ -10330,7 +10320,7 @@ mod tests {
         a.new_project();
         a.add_slide(SlideKind::Normal);
         a.add_slide(SlideKind::Normal);
-        a.slide = 1;
+        a.view.slide = 1;
         a.insert_slide_number(true);
         let o = a.selected_object().unwrap().clone();
         assert_eq!(o.text, "%Slide.Number% of %Slide.Total%");
@@ -10356,7 +10346,7 @@ mod tests {
         a.new_project();
         for style in [DialStyle::Teardrop, DialStyle::Dot, DialStyle::Needle] { a.insert_dial(style); }
         for (i, o) in a.project.as_mut().unwrap().slides[0].layers[0].objects.iter_mut().enumerate() { o.x = 120.0 + (i / 2) as f32 * 420.0; o.y = 260.0; }
-        a.selected = None;
+        a.view.selected = None;
         a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
@@ -10447,7 +10437,7 @@ mod tests {
             let objs = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects;
             for (i, o) in objs.iter_mut().enumerate().skip(1) { o.x = 60.0 + ((i - 1) % 4) as f32 * 180.0; o.y = 60.0 + ((i - 1) / 4) as f32 * 170.0; }
         }
-        a.selected = None;
+        a.view.selected = None;
         a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
@@ -10458,17 +10448,17 @@ mod tests {
             o.x = 700.0; o.y = 640.0;
             if let Some(m) = o.marker.as_mut() { m.title = "Testing".into(); m.description = "Testing testing testing".into(); }
         }
-        h.state_mut().selected = Some((0, 8));
+        h.state_mut().view.selected = Some((0, 8));
         h.run_steps(3);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("marker-card.png")).unwrap();
-        h.state_mut().selected = None;
+        h.state_mut().view.selected = None;
         h.run_steps(2);
         { use egui_kittest::kittest::Queryable; h.get_by_label("Marker").click(); }
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::Path::new(&dir).join("marker-gallery.png")).unwrap();
         h.key_press(egui::Key::Escape);
         h.run_steps(3);
-        h.state_mut().selected = Some((0, 0));
+        h.state_mut().view.selected = Some((0, 0));
         h.run_steps(2);
         { use egui_kittest::kittest::Queryable; h.get_by_label("Ω").click(); }
         h.run_steps(4);
@@ -10492,7 +10482,7 @@ mod tests {
                 let objs = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects;
                 for (i, o) in objs.iter_mut().enumerate() { o.w = 400.0; o.h = 240.0; o.x = 40.0 + (i % 4) as f32 * 450.0; o.y = 40.0 + (i / 4) as f32 * 300.0; o.margins[3] = if i % 2 == 0 { 12.0 + 0.26 * 240.0 } else { 12.0 }; }
             }
-            a.selected = None;
+            a.view.selected = None;
             a.ribbon_tab = ribbon::OBJECTS_TAB;
             let mut h = harness(a);
             h.run_steps(4);
@@ -10518,7 +10508,7 @@ mod tests {
             let objs = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects;
             for (i, o) in objs.iter_mut().enumerate() { o.x = 100.0; o.y = 100.0 + i as f32 * 150.0; if i == 2 { o.initial_state = "Selected".into(); } if i == 0 { o.initial_state = "Selected".into(); } }
         }
-        a.selected = None;
+        a.view.selected = None;
         a.ribbon_tab = ribbon::OBJECTS_TAB;
         let mut h = harness(a);
         h.run_steps(4);
@@ -10569,7 +10559,7 @@ mod tests {
         let mut a = App::default();
         a.new_project();
         a.insert_text();
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         { let o = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects[0]; o.text = "abcd".into(); o.format_range(0, 2, &Attr::ToggleBold); }
         a.insert_symbol("Ω");
         assert_eq!(a.selected_object().unwrap().text, "abcdΩ", "with no cursor known it goes at the end");
@@ -10582,12 +10572,12 @@ mod tests {
         assert_eq!(a.selected_object().unwrap().text, "aπ≤dΩ", "it replaces the chosen text");
         a.undo();
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].text, "aπbcdΩ", "one undo step");
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         // Pictures take no text.
         a.insert_web_object();
         a.insert_symbol("x");
         assert_eq!(a.selected_object().unwrap().text, "");
-        a.selected = None;
+        a.view.selected = None;
         a.insert_symbol("€");
         assert_eq!(a.selected_object().unwrap().text, "€", "with nothing selected a symbol makes a text box");
     }
@@ -10616,7 +10606,7 @@ mod tests {
         }
         let mut h = harness(a);
         h.run_steps(3);
-        let show = |h: &mut egui_kittest::Harness<'static, App>, i: usize| { h.state_mut().selected = Some((0, i)); h.run_steps(3); };
+        let show = |h: &mut egui_kittest::Harness<'static, App>, i: usize| { h.state_mut().view.selected = Some((0, i)); h.run_steps(3); };
         // Text: nothing to describe.
         show(&mut h, 0);
         assert!(h.query_by_label("Alt text").is_none() && h.query_by_label_contains("Decorative").is_none() && h.query_by_label_contains("Use the").is_none(), "plain text has no alt text control");
@@ -10634,7 +10624,7 @@ mod tests {
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].alt.is_empty(), "and nothing is stored until something is typed");
         // An alt text already on a button with text keeps the box showing, and ticking the choice clears it.
         h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[2].alt = "Next: Fire exits".into();
-        h.state_mut().selected = Some((0, 3));
+        h.state_mut().view.selected = Some((0, 3));
         h.run_steps(3);
         show(&mut h, 2);
         assert!(h.query_by_label("Alt text").is_some(), "an alt text of its own shows the box");
@@ -10669,7 +10659,7 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         // Selecting the group shows its panel: one name for screen readers, from the words of its parts.
-        h.state_mut().selected = Some((0, 2));
+        h.state_mut().view.selected = Some((0, 2));
         h.run_steps(3);
         assert!(h.query_by_label_contains("Group of 3 objects").is_some(), "choosing a part chooses the group");
         assert!(h.query_by_label_contains("Use the group's text").is_some(), "its words name it unless it has alt text of its own");
@@ -10784,7 +10774,7 @@ mod tests {
         assert!(a.insert_equation(r"\SI{5}{m}", true).is_err(), "unsupported LaTeX is refused");
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), 1, "nothing was added");
         // Resize it, then change the LaTeX: it keeps the size the author gave it (the same scale).
-        let pos = a.selected.unwrap();
+        let pos = a.view.selected.unwrap();
         { let q = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects[pos.1]; q.w *= 2.0; q.h *= 2.0; }
         let before = a.selected_object().unwrap().w;
         a.update_equation(pos, r"\frac{a}{b}+\frac{c}{d}", true).unwrap();
@@ -10821,7 +10811,7 @@ mod tests {
         assert_eq!(o.asset.as_deref(), Some("pano"));
         assert!(o.w > 600.0 && (o.w / o.h - 16.0 / 9.0).abs() < 0.05, "a 16:9 viewer, {} by {}", o.w, o.h);
         assert!(a.status.starts_with("Added lab.png"), "{}", a.status);
-        let at = a.selected.unwrap();
+        let at = a.view.selected.unwrap();
         let undo_before = a.undo.len();
         // A visit that changes nothing leaves no undo step.
         a.open_pano_dialog(at);
@@ -10938,7 +10928,7 @@ mod tests {
         let o = h.state().selected_object().unwrap();
         assert_eq!(o.equation.as_ref().unwrap().latex, r"x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}");
         // Edit it again from the object.
-        let at = h.state().selected.unwrap();
+        let at = h.state().view.selected.unwrap();
         h.state_mut().open_equation_dialog(Some(at));
         h.run_steps(3);
         assert_eq!(h.state().eq_dialog.as_ref().unwrap().latex, r"x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}", "the window opens on the equation's own LaTeX");
@@ -10987,10 +10977,10 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         // Visit both slides so each has a tab, then delete the last one through the ribbon's path.
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.run_steps(3);
-        h.state_mut().slide = 1;
-        h.state_mut().selected = Some((0, 0));
+        h.state_mut().view.slide = 1;
+        h.state_mut().view.selected = Some((0, 0));
         h.run_steps(3);
         h.state_mut().ribbon_tab = ribbon::SLIDES_TAB;
         h.run_steps(2);
@@ -11008,12 +10998,12 @@ mod tests {
             let mut h = harness(app);
             h.run_steps(2);
             let n = h.state().project.as_ref().unwrap().slides.len();
-            for k in 0..n.min(4) { h.state_mut().slide = k; h.state_mut().selected = Some((0, 0)); h.run_steps(2); }
+            for k in 0..n.min(4) { h.state_mut().view.slide = k; h.state_mut().view.selected = Some((0, 0)); h.run_steps(2); }
             h.state_mut().bottom_tab = bottom;
             while h.state().project.as_ref().unwrap().slides.len() > 1 {
                 let last = h.state().project.as_ref().unwrap().slides.len() - 1;
-                h.state_mut().slide = last;
-                h.state_mut().selected = Some((0, 0));
+                h.state_mut().view.slide = last;
+                h.state_mut().view.selected = Some((0, 0));
                 h.run_steps(2);
                 let sel = h.state().slide_selection();
                 h.state_mut().delete_slides(sel);
@@ -11031,15 +11021,15 @@ mod tests {
         a.insert_shape("Rectangle");
         a.insert_button();
         a.add_layer();
-        let slide = &a.project.as_ref().unwrap().slides[a.slide];
+        let slide = &a.project.as_ref().unwrap().slides[a.view.slide];
         assert!(matches!(slide.kind, SlideKind::Question(_)));
         assert_eq!(slide.layers[0].objects.len(), 3, "the question slide holds objects like any slide");
         assert_eq!(slide.layers.len(), 2);
         if let SlideKind::Question(q) = &mut a.project.as_mut().unwrap().slides[1].kind { q.area = Some(QuestionArea { x: 60.0, y: 150.0, w: 1100.0, h: 800.0 }); }
         let mut h = harness(a);
         h.run_steps(4);
-        h.state_mut().layer = 0;
-        h.state_mut().selected = Some((0, 1));
+        h.state_mut().view.layer = 0;
+        h.state_mut().view.selected = Some((0, 1));
         h.run_steps(3);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("question-with-objects.png")).unwrap();
@@ -11085,18 +11075,18 @@ mod tests {
         a.insert_ellipse();
         let names = |a: &App| a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.name.clone()).collect::<Vec<_>>();
         let before = names(&a);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.reorder_step(true);
-        assert_eq!(a.selected, Some((0, 1)), "it moved forward by one");
+        assert_eq!(a.view.selected, Some((0, 1)), "it moved forward by one");
         assert_eq!(names(&a)[1], before[0]);
         a.reorder_step(false);
         a.reorder_step(false); // already at the back: nothing happens
         assert_eq!(names(&a), before);
-        a.selected = Some((0, 2));
+        a.view.selected = Some((0, 2));
         a.reorder_step(true); // already in front
         assert_eq!(names(&a), before);
         // Align one object to the slide through the same call the menu makes.
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.align_selected_or_slide(0, 2);
         let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
         assert_eq!(o.x + o.w, a.project.as_ref().unwrap().slides[0].width);
@@ -11109,11 +11099,11 @@ mod tests {
         a.add_scene();
         let scenes = a.project.as_ref().unwrap().scenes.len();
         assert_eq!(scenes, 2);
-        a.slide = 0;
+        a.view.slide = 0;
         let before = a.project.as_ref().unwrap().slides.len();
         // The same steps the "New slide here" menu takes for the second scene.
         let last = *a.project.as_ref().unwrap().scene_slides(1).last().unwrap();
-        a.slide = last;
+        a.view.slide = last;
         a.add_slide(SlideKind::Normal);
         let p = a.project.as_ref().unwrap();
         assert_eq!(p.slides.len(), before + 1);
@@ -11143,7 +11133,7 @@ mod tests {
         a.insert_rect();
         let id = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].id.clone();
         a.project.as_mut().unwrap().slides[0].triggers.push(Trigger { id: "t1".into(), owner: Owner::Object(id), event: Event::Click, action: Action::CompleteCourse, conditions: vec![] });
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.right_tab = 1;
         let mut h = harness(a);
         h.run_steps(4);
@@ -11175,8 +11165,8 @@ mod tests {
         a.insert_rect();
         a.insert_ellipse();
         a.add_layer();
-        a.layer = 0;
-        a.selected = Some((0, 0));
+        a.view.layer = 0;
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(4);
         h.state_mut().right_tab = 1;
@@ -11188,7 +11178,7 @@ mod tests {
     #[test]
     fn picking_another_object_shows_its_properties_instead_of_staying_on_triggers() {
         let mut h = on_the_triggers_tab();
-        h.state_mut().selected = Some((0, 1));
+        h.state_mut().view.selected = Some((0, 1));
         h.run_steps(3);
         assert_eq!(h.state().right_tab, 0, "Properties, so the object's settings are not missed");
         // Going back to Triggers is a choice, and it sticks until something else is picked.
@@ -11242,7 +11232,7 @@ mod tests {
         let mut a = App::default();
         a.new_project();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "You scored %Score% points".into();
         a.project.as_mut().unwrap().variables.extend(sample_variables());
         a
@@ -11296,7 +11286,7 @@ mod tests {
     fn editing_placeholder_text() -> egui_kittest::Harness<'static, App> {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = PLACEHOLDER_TEXT.into();
         let mut h = harness(a);
         h.run_steps(3);
@@ -11320,7 +11310,7 @@ mod tests {
     }
 
     fn box_text(h: &egui_kittest::Harness<'static, App>) -> String {
-        let (li, oi) = h.state().selected.unwrap();
+        let (li, oi) = h.state().view.selected.unwrap();
         h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text.clone()
     }
 
@@ -11489,12 +11479,12 @@ mod tests {
         let mut h = on_the_triggers_tab();
         h.state_mut().add_slide(SlideKind::Normal);
         h.run_steps(3);
-        assert_eq!(h.state().slide, 1, "the new slide is showing");
+        assert_eq!(h.state().view.slide, 1, "the new slide is showing");
         assert_eq!(h.state().right_tab, 0, "a new slide shows its own Properties");
         h.state_mut().right_tab = 1;
         h.run_steps(3);
         assert_eq!(h.state().right_tab, 1, "Triggers stays when it is chosen");
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.run_steps(3);
         assert_eq!(h.state().right_tab, 0, "going back to the first slide too, even with nothing selected on either");
     }
@@ -11502,13 +11492,13 @@ mod tests {
     #[test]
     fn picking_a_layer_or_clearing_the_selection_also_shows_properties() {
         let mut h = on_the_triggers_tab();
-        h.state_mut().selected = None;
-        h.state_mut().layer = 1;
+        h.state_mut().view.selected = None;
+        h.state_mut().view.layer = 1;
         h.run_steps(3);
         assert_eq!(h.state().right_tab, 0, "a layer was picked");
         h.state_mut().right_tab = 1;
         h.run_steps(3);
-        h.state_mut().layer = 0;
+        h.state_mut().view.layer = 0;
         h.run_steps(3);
         assert_eq!(h.state().right_tab, 0, "back to the base layer");
     }
@@ -11526,7 +11516,7 @@ mod tests {
         let name1 = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[1].name.clone();
         h.get_by_label(&format!("{name1}  (1)")).click();
         h.run_steps(4);
-        assert_eq!(h.state().selected, Some((0, 1)), "the heading picked its object");
+        assert_eq!(h.state().view.selected, Some((0, 1)), "the heading picked its object");
         assert_eq!(h.state().right_tab, 1, "and the panel stayed on Triggers, where the click was made");
     }
 
@@ -11543,7 +11533,7 @@ mod tests {
         slide.triggers.push(Trigger { id: "o1".into(), owner: Owner::Object(ids[0].clone()), event: Event::Click, action: Action::CompleteCourse, conditions: vec![] });
         slide.triggers.push(Trigger { id: "o2".into(), owner: Owner::Object(ids[1].clone()), event: Event::Hover, action: Action::ExitCourse, conditions: vec![] });
         slide.triggers.push(Trigger { id: "o3".into(), owner: Owner::Object(ids[1].clone()), event: Event::Click, action: Action::RestartCourse, conditions: vec![] });
-        a.selected = None;
+        a.view.selected = None;
         a.right_tab = 1;
         a.trig_all = true;
         let name0 = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].name.clone();
@@ -11556,7 +11546,7 @@ mod tests {
         // A group's heading selects its object.
         h.get_by_label(&format!("{name1}  (2)")).click();
         h.run_steps(3);
-        assert_eq!(h.state().selected, Some((0, 1)));
+        assert_eq!(h.state().view.selected, Some((0, 1)));
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("triggers-all.png")).unwrap();
         }
@@ -11763,7 +11753,7 @@ mod tests {
         h.run_steps(3);
         h.state_mut().add_slide(SlideKind::Results);
         h.run_steps(2); // a slide kind with no timeline
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.state_mut().bottom_tab = P_TIMELINE;
         h.state_mut().insert_rect();
         h.state_mut().insert_button();
@@ -11776,8 +11766,8 @@ mod tests {
         h.state_mut().right_tab = 0;
         h.state_mut().bottom_tab = P_TIMELINE;
         h.run_steps(2);
-        h.state_mut().zoom = 3.0;
-        h.state_mut().pan = egui::vec2(200.0, -100.0);
+        h.state_mut().view.zoom = 3.0;
+        h.state_mut().view.pan = egui::vec2(200.0, -100.0);
         h.run_steps(2);
         h.state_mut().reorder_selected(false);
         h.state_mut().duplicate_selected();
@@ -11798,12 +11788,12 @@ mod tests {
     fn editing_while_a_state_is_viewed_changes_that_state_and_undo_puts_it_back() {
         let mut a = app();
         a.insert_button();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         let hover_before = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().find(|s| s.name == "Hover").unwrap().fill;
         let own_before = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].fill;
         a.bottom_tab = P_STATES;
         let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
-        a.state_view = Some((id, "Hover".into()));
+        a.view.state_view = Some((id, "Hover".into()));
         // One frame: the state goes on the object, an edit (what the ribbon does) snapshots then recolors, the frame ends.
         a.begin_state_swap();
         assert!(a.swap.is_some());
@@ -11841,7 +11831,7 @@ mod tests {
         a.sync_tabs();
         assert_eq!((a.tabs.len(), a.active_tab), (1, Some(0)), "the slide being edited has a tab");
         a.add_layer();
-        a.layer = 1;
+        a.view.layer = 1;
         a.save_active_tab();
         a.new_tab_request = true;
         a.add_slide(SlideKind::Normal);
@@ -11849,29 +11839,29 @@ mod tests {
         assert_eq!((a.tabs.len(), a.active_tab), (2, Some(1)), "a second slide, asked for in a tab of its own, opens a second tab");
         a.save_active_tab();
         // Back to the first slide: its layer comes back.
-        a.slide = 0;
-        a.layer = 0;
+        a.view.slide = 0;
+        a.view.layer = 0;
         a.sync_tabs();
-        assert_eq!((a.active_tab, a.layer), (Some(0), 1), "the first tab remembers its layer");
+        assert_eq!((a.active_tab, a.view.layer), (Some(0), 1), "the first tab remembers its layer");
         // The Scene View is no tab of a slide.
         a.scene_view = true;
         a.sync_tabs();
         assert_eq!((a.active_tab, a.tabs.len()), (None, 2));
         // Closing the active tab goes to its neighbour; closing the last goes to the Scene View.
         a.scene_view = false;
-        a.slide = 1;
+        a.view.slide = 1;
         a.sync_tabs();
         a.close_tab(1);
         a.sync_tabs();
-        assert_eq!((a.tabs.len(), a.slide, a.scene_view), (1, 0, false), "closing the second tab lands on the first slide");
+        assert_eq!((a.tabs.len(), a.view.slide, a.scene_view), (1, 0, false), "closing the second tab lands on the first slide");
         a.close_tab(0);
         assert!(a.scene_view && a.tabs.is_empty(), "closing the last tab shows the Scene View");
         // A deleted slide takes its tab with it.
         a.scene_view = false;
-        a.slide = 1;
+        a.view.slide = 1;
         a.sync_tabs();
         a.new_tab_request = true;
-        a.slide = 0;
+        a.view.slide = 0;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 2);
         a.delete_slide(1);
@@ -11906,22 +11896,22 @@ mod tests {
     fn choosing_slides_replaces_the_slide_in_the_tab_and_a_new_tab_only_when_asked_for() {
         let mut a = app();
         for _ in 0..4 { a.add_slide(SlideKind::Normal); }
-        a.slide = 0;
+        a.view.slide = 0;
         a.sync_tabs();
         let n = a.project.as_ref().unwrap().slides.len();
         assert!(n >= 5);
         assert_eq!(a.tabs.len(), 1, "a project opens with the one slide tab");
         // Clicking slide 2 shows it in that tab, and so does every other slide after it.
-        for i in 1..n { a.slide = i; a.sync_tabs(); assert_eq!(a.tabs.len(), 1, "slide {} replaced the slide in the tab", i + 1); }
+        for i in 1..n { a.view.slide = i; a.sync_tabs(); assert_eq!(a.tabs.len(), 1, "slide {} replaced the slide in the tab", i + 1); }
         assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[n - 1].id);
         // Asking for a tab of its own opens a second one, and the slides chosen after that replace the slide in the one showing.
         a.new_tab_request = true;
-        a.slide = 0;
+        a.view.slide = 0;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 2);
-        a.slide = 1;
+        a.view.slide = 1;
         a.sync_tabs();
-        a.slide = 2;
+        a.view.slide = 2;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 2, "still two tabs");
         assert_eq!(a.tabs[a.active_tab.unwrap()].slide_id, a.project.as_ref().unwrap().slides[2].id);
@@ -11934,13 +11924,13 @@ mod tests {
         a.scene_view = true;
         a.sync_tabs();
         a.new_tab_request = true;
-        a.slide = 3;
+        a.view.slide = 3;
         a.scene_view = false;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 3);
         // The setting: every slide chosen gets a tab.
         a.new_tab_each = true;
-        a.slide = 1;
+        a.view.slide = 1;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 4, "with the setting on, a slide chosen in the list opens in a new tab");
     }
@@ -12020,13 +12010,13 @@ mod tests {
     fn the_bottom_panel_keeps_its_height_when_the_tab_or_the_rows_change() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         let top = |h: &egui_kittest::Harness<'_, App>| h.get_by_label("Slide Notes").rect().top();
         let before = top(&h);
         for _ in 0..8 { h.state_mut().insert_rect(); }
-        h.state_mut().selected = None;
+        h.state_mut().view.selected = None;
         h.run_steps(4);
         assert_eq!(top(&h), before, "eight more timeline rows do not make the panel taller");
         h.state_mut().show_panel_tab(P_STATES);
@@ -12062,8 +12052,8 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         for _ in 0..3 { a.add_slide(SlideKind::Normal); }
-        a.slide = 0;
-        a.selected = None;
+        a.view.slide = 0;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         let count = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().slides.len();
@@ -12072,13 +12062,13 @@ mod tests {
         let at = thumb(&h, "1.2 Slide 2");
         click_at(&mut h, at);
         h.run_steps(3);
-        assert_eq!(h.state().slide, 1);
+        assert_eq!(h.state().view.slide, 1);
         h.key_press(egui::Key::ArrowDown);
         h.run_steps(2);
-        assert_eq!(h.state().slide, 2, "the down arrow goes to the next slide");
+        assert_eq!(h.state().view.slide, 2, "the down arrow goes to the next slide");
         h.key_press(egui::Key::ArrowUp);
         h.run_steps(2);
-        assert_eq!(h.state().slide, 1, "and the up arrow back");
+        assert_eq!(h.state().view.slide, 1, "and the up arrow back");
         h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
         h.run_steps(2);
         assert_eq!(count(&h), 5, "Command-D duplicates the slide");
@@ -12105,7 +12095,7 @@ mod tests {
     fn keys_act_on_the_slides_in_the_scene_view() {
         let mut a = app();
         for _ in 0..3 { a.add_slide(SlideKind::Normal); }
-        a.slide = 1;
+        a.view.slide = 1;
         a.scene_view = true;
         let mut h = harness(a);
         h.run_steps(4);
@@ -12115,7 +12105,7 @@ mod tests {
         h.key_press(egui::Key::Delete);
         h.run_steps(2);
         assert_eq!(h.state().project.as_ref().unwrap().slides.len(), 2, "Delete removes both");
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.key_press(egui::Key::Enter);
         h.run_steps(3);
         assert!(!h.state().scene_view, "Enter opens the slide");
@@ -12264,7 +12254,7 @@ mod tests {
     fn a_tab_pulled_out_of_its_row_becomes_a_window_at_once_and_docks_where_it_is_let_go() {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         let tab = h.get_by_label("Slide Notes").rect().center();
@@ -12301,7 +12291,7 @@ mod tests {
         for (name, light) in [("dark", false), ("light", true)] {
             let mut a = app();
             a.add_slide(SlideKind::Normal);
-            a.selected = None;
+            a.view.selected = None;
             a.new_tab_request = true;
             let mut h = harness(a);
             h.ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
@@ -12315,7 +12305,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
         let mut a = app();
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         h.get_by_label("+ Add slide").click();
@@ -12331,10 +12321,10 @@ mod tests {
         let mut a = app();
         a.insert_rect();
         a.add_slide(SlideKind::Normal);
-        a.slide = 0;
-        a.selected = None;
+        a.view.slide = 0;
+        a.view.selected = None;
         assert!(!a.cmd_enabled(Cmd::Delete) && !a.cmd_enabled(Cmd::Copy) && !a.cmd_enabled(Cmd::Paste), "nothing is chosen on the slide");
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         assert!(a.cmd_enabled(Cmd::Delete) && a.cmd_enabled(Cmd::Duplicate) && !a.cmd_enabled(Cmd::Paste));
         a.run_cmd(Cmd::Copy);
         assert!(a.cmd_enabled(Cmd::Paste));
@@ -12351,7 +12341,7 @@ mod tests {
         assert_eq!(a.selection().len(), n + 1, "Select All takes every object on the layer");
         // With the slide list in front the same commands are about slides.
         a.slides_focus = true;
-        a.slide = 0;
+        a.view.slide = 0;
         let slides = |a: &App| a.project.as_ref().unwrap().slides.len();
         let count = slides(&a);
         assert!(!a.cmd_enabled(Cmd::Paste), "no slide has been copied");
@@ -12391,7 +12381,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.show_menu_bar = true;
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         for m in ["Edit", "View", "Window"] { assert!(h.query_all_by_label(m).next().is_some(), "{m} menu is in the bar"); }
@@ -12453,7 +12443,7 @@ mod tests {
         let count = |show: bool| {
             let mut a = app();
             a.show_insert_bar = show;
-            a.selected = None;
+            a.view.selected = None;
             let mut h = harness(a);
             h.run_steps(4);
             names.iter().map(|n| h.query_all_by_label_contains(n).count()).collect::<Vec<_>>()
@@ -12462,7 +12452,7 @@ mod tests {
         for (i, n) in names.iter().enumerate() { assert_eq!(with[i], without[i] + 1, "{n} has a button on the bar"); }
         let mut a = app();
         a.show_insert_bar = true;
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("insert-bar.png")).unwrap(); }
@@ -12493,7 +12483,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.show_menu_bar = true;
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         h.get_all_by_label("Insert").next().unwrap().click();
@@ -12510,7 +12500,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.show_menu_bar = true;
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(4);
         h.get_all_by_label("Insert").next().unwrap().click();
@@ -12539,7 +12529,7 @@ mod tests {
         a.show_menu_bar = true;
         a.show_insert_bar = true;
         a.file_view = false;
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(5);
         for tab in ["Objects", "Slides", "Help"] { assert!(h.query_all_by_label(tab).next().is_none() || tab == "Help", "{tab} tab is gone with the ribbon"); }
@@ -12575,6 +12565,40 @@ mod tests {
         a.run_cmd(Cmd::New);
         assert!(a.file_view && a.file_page == backstage::FilePage::New);
         assert!(a.project.is_some(), "going to the page does not start a project by itself");
+    }
+
+    #[test]
+    fn a_tab_keeps_its_whole_view_while_another_slide_is_showing() {
+        let mut a = app();
+        a.insert_rect();
+        a.insert_rect();
+        a.add_slide(SlideKind::Normal);
+        a.view.slide = 0;
+        a.new_tab_request = true;
+        a.sync_tabs();
+        // The first slide: the first object chosen, another with it, zoomed and moved.
+        let second = a.project.as_ref().unwrap().slides[0].layers[0].objects[1].id.clone();
+        a.view.selected = Some((0, 0));
+        a.view.multi = vec![second.clone()];
+        a.view.zoom = 2.5;
+        a.view.pan = egui::vec2(12.0, -7.0);
+        a.save_active_tab();
+        // Another slide, in a tab of its own, with a view of its own.
+        a.view.slide = 1;
+        a.view.selected = None;
+        a.view.multi.clear();
+        a.view.zoom = 1.0;
+        a.view.pan = egui::Vec2::ZERO;
+        a.new_tab_request = true;
+        a.sync_tabs();
+        assert_eq!((a.view.selected, a.view.zoom), (None, 1.0), "the new tab starts with a view of its own");
+        // Back to the first: its view is back, all of it.
+        a.view.slide = 0;
+        a.sync_tabs();
+        assert_eq!(a.view.selected, Some((0, 0)));
+        assert_eq!(a.view.multi, vec![second]);
+        assert_eq!((a.view.zoom, a.view.pan), (2.5, egui::vec2(12.0, -7.0)));
+        assert_eq!(a.view.slide, 0);
     }
 
     #[test]
@@ -12635,17 +12659,17 @@ mod tests {
     fn right_clicking_a_slide_does_not_move_the_editor() {
         let mut a = app();
         a.add_slide(SlideKind::Normal);
-        a.slide = 0;
+        a.view.slide = 0;
         a.sync_tabs();
         assert_eq!(a.tabs.len(), 1);
         // An item that does nothing to the slide: the editor is still on slide 1 afterwards, with one tab.
-        a.with_menu_target(1, |a| assert_eq!(a.slide, 1, "the menu works on the right-clicked slide"));
+        a.with_menu_target(1, |a| assert_eq!(a.view.slide, 1, "the menu works on the right-clicked slide"));
         a.sync_tabs();
-        assert_eq!((a.slide, a.tabs.len()), (0, 1));
+        assert_eq!((a.view.slide, a.tabs.len()), (0, 1));
         // Open in new tab: the slide opens in a tab of its own, and the first tab keeps its slide.
         a.with_menu_target(1, |a| { a.new_tab_request = true; a.scene_view = false; });
         a.sync_tabs();
-        assert_eq!((a.slide, a.tabs.len()), (1, 2));
+        assert_eq!((a.view.slide, a.tabs.len()), (1, 2));
         assert_eq!(a.tabs[0].slide_id, a.project.as_ref().unwrap().slides[0].id, "the first tab still shows slide 1");
     }
 
@@ -12655,9 +12679,9 @@ mod tests {
     fn tabs_can_be_moved_and_the_side_panel_keeps_the_order() {
         let mut a = app();
         for _ in 0..2 { a.add_slide(SlideKind::Normal); }
-        a.slide = 0;
+        a.view.slide = 0;
         a.sync_tabs();
-        for i in 1..3 { a.new_tab_request = true; a.slide = i; a.sync_tabs(); }
+        for i in 1..3 { a.new_tab_request = true; a.view.slide = i; a.sync_tabs(); }
         let ids: Vec<String> = a.tabs.iter().map(|t| t.slide_id.clone()).collect();
         assert_eq!(ids.len(), 3);
         assert_eq!(a.active_tab, Some(2));
@@ -12690,18 +12714,18 @@ mod tests {
         let mut a = app();
         a.add_layer();
         a.add_layer();
-        a.visible = vec![true, false, false];
-        a.layer = 1;
+        a.view.visible = vec![true, false, false];
+        a.view.layer = 1;
         assert_eq!(a.shown_layers(3), vec![0, 1], "selecting a hidden layer shows it");
-        a.layer = 2;
+        a.view.layer = 2;
         assert_eq!(a.shown_layers(3), vec![0, 2], "moving to another layer hides the first again");
-        a.visible[1] = true;
+        a.view.visible[1] = true;
         assert_eq!(a.shown_layers(3), vec![0, 1, 2], "a layer whose eye is on stays");
-        a.layer = 0;
+        a.view.layer = 0;
         assert_eq!(a.shown_layers(3), vec![0, 1], "an unselected layer without an eye goes away");
-        a.layer = 1;
+        a.view.layer = 1;
         a.hide_selected_layer();
-        assert_eq!((a.layer, a.visible[1], a.shown_layers(3)), (0, false, vec![0]), "the eye on the selected layer hides it and selects the base layer");
+        assert_eq!((a.view.layer, a.view.visible[1], a.shown_layers(3)), (0, false, vec![0]), "the eye on the selected layer hides it and selects the base layer");
     }
 
     fn trig(id: &str, owner: Owner, action: Action) -> Trigger {
@@ -12715,9 +12739,9 @@ mod tests {
         a.add_slide(SlideKind::Results);
         let kinds = |a: &App| a.project.as_ref().unwrap().slides.iter().map(|s| matches!(s.kind, SlideKind::Normal) as u8).collect::<Vec<_>>();
         assert_eq!(kinds(&a), vec![1, 0, 0]);
-        assert_eq!(a.slide, 2);
+        assert_eq!(a.view.slide, 2);
         a.move_slide(2, false);
-        assert_eq!(a.slide, 1);
+        assert_eq!(a.view.slide, 1);
         a.delete_slide(1);
         assert_eq!(a.project.as_ref().unwrap().slides.len(), 2);
         a.delete_slide(0);
@@ -12782,7 +12806,7 @@ mod tests {
         use button_styles::{Corners, Look};
         let mut a = app();
         a.insert_button();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         { let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi]; o.text = "Start".into(); for s in o.states.iter_mut() { s.text = "Start".into(); } }
         let def = style_of("Orange", Look::Gradient, Corners::Rounded);
         a.apply_button_style(&def);
@@ -12805,7 +12829,7 @@ mod tests {
         assert!(a.selected_object().unwrap().radius >= 100.0, "a pill is as round as it can be");
         a.undo();
         a.undo();
-        a.selected = Some((li, oi));
+        a.view.selected = Some((li, oi));
         assert_eq!(a.selected_object().unwrap().fill, Some(def.fill), "undo steps go back through the styles");
     }
 
@@ -13015,7 +13039,7 @@ mod tests {
     fn gui_double_clicking_blank_space_makes_a_text_box_to_type_in() {
         let mut a = app();
         a.insert_rect();
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness_fast(a);
         h.run_steps(4);
         let count = |h: &egui_kittest::Harness<'static, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
@@ -13049,7 +13073,7 @@ mod tests {
         a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.insert_rect();
         assert_eq!(a.ribbon_tab, ribbon::OBJECTS_TAB, "adding an object opens Home");
-        assert!(a.selected.is_some(), "and keeps it selected");
+        assert!(a.view.selected.is_some(), "and keeps it selected");
         a.ribbon_tab = ribbon::OBJECTS_TAB;
         a.duplicate_selected();
         assert_eq!(a.ribbon_tab, ribbon::OBJECTS_TAB, "duplicating opens Home");
@@ -13072,9 +13096,9 @@ mod tests {
         assert_eq!(a.format_title(), Some("TEXT BOX"));
         a.insert(Object::new("pic", "Pic", Kind::Image, 0.0, 0.0, 100.0, 100.0));
         assert_eq!(a.format_title(), Some("PICTURE"), "a selected picture has its own tab");
-        a.selected = None;
+        a.view.selected = None;
         assert_eq!(a.format_title(), None, "nothing selected: no contextual tab");
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let before = a.selected_object().unwrap().clone();
         let mut after = before.clone();
         after.x = 123.0; after.y = 45.0; after.w = 300.0; after.h = 90.0;
@@ -13085,7 +13109,7 @@ mod tests {
         let o = h.state().selected_object().unwrap().clone();
         assert_eq!((o.x, o.y, o.w, o.h), (123.0, 45.0, 300.0, 90.0), "the Size and Position fields write the frame");
         h.state_mut().undo();
-        h.state_mut().selected = Some((0, 0));
+        h.state_mut().view.selected = Some((0, 0));
         assert_eq!(h.state().selected_object().unwrap().x, before.x);
     }
 
@@ -13131,7 +13155,7 @@ mod tests {
         let mut a = app();
         let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(5);
         assert!(h.query_by_label("Read as").is_some() && h.query_by_label("Width").is_none(), "Settings starts open");
@@ -13149,7 +13173,7 @@ mod tests {
         let mut a = app();
         let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.one_section = false;
         let mut h = harness(a);
         h.run_steps(5);
@@ -13185,12 +13209,12 @@ mod tests {
         two.text = "Two".into();
         two.format_range(0, 1, &brainbend_doc::richtext::Attr::ToggleItalic);
         a.project.as_mut().unwrap().slides[0].layers[0].objects.extend([one, two]);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(5);
         h.get_by_label("Copy Style").click();
         h.run_steps(3);
-        h.state_mut().selected = Some((0, 1));
+        h.state_mut().view.selected = Some((0, 1));
         h.run_steps(4);
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[1].fill.is_none());
         h.get_by_label("Paste Style").click();
@@ -13209,7 +13233,7 @@ mod tests {
         o.text = "Visit us".into();
         o.format_range(0, 8, &brainbend_doc::richtext::Attr::Link(Some("https://brainbend.org".into())));
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         h.get_by_label("Text Formatting").click();
@@ -13226,7 +13250,7 @@ mod tests {
         let mut a = app();
         let o = Object::new("s", "S", Kind::Rect, 100.0, 100.0, 300.0, 100.0);
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         assert!(h.query_by_label("Make Interactive").is_some(), "one bar for both");
@@ -13257,7 +13281,7 @@ mod tests {
         let mut a = app();
         let o = Object::new("t", "Title", Kind::Text, 100.0, 100.0, 600.0, 120.0);
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         assert!(h.query_by_label("Animation").is_some(), "the object has an Animation bar");
@@ -13268,7 +13292,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].hidden, "hidden at the start, set in the panel");
         // The slide's transition, with nothing selected.
-        h.state_mut().selected = None;
+        h.state_mut().view.selected = None;
         h.state_mut().project.as_mut().unwrap().slides[0].fade_ms = 400;
         h.run_steps(3);
         assert!(h.query_by_label("Transition").is_some(), "the slide has a Transition bar");
@@ -13387,12 +13411,12 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.add_layer();
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
-        h.state_mut().layer = 0;
+        h.state_mut().view.layer = 0;
         h.run_steps(5);
         assert!(h.query_by_label("Navigation").is_some() && h.query_by_label("When This Layer Shows").is_none(), "the base layer is the slide: its bars, no layer bar");
-        h.state_mut().layer = 1;
+        h.state_mut().view.layer = 1;
         h.run_steps(5);
         assert!(h.query_by_label("When This Layer Shows").is_some() && h.query_by_label("Navigation").is_none(), "another layer shows what it does to the slide");
         assert!(h.query_by_label("Delete layer").is_none(), "deleting is in the layers list");
@@ -13405,7 +13429,7 @@ mod tests {
         let mut o = Object::new("b", "Button", Kind::Rect, 100.0, 100.0, 400.0, 120.0);
         o.fill = Some(Rgba(3, 83, 158, 255));
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         open_bars(&h, 0, &["effects"]);
@@ -13447,7 +13471,7 @@ mod tests {
         o.stroke = Some(Stroke { color: Rgba(255, 140, 0, 255), width: 8.0 });
         o.shadow = Some(Shadow { dx: 10.0, dy: 10.0, blur: 10.0, spread: 0.0, color: Rgba(0, 0, 0, 120) });
         a.insert(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         assert_eq!(h.state().format_title(), Some("PICTURE"));
@@ -13469,7 +13493,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = app();
         a.insert_table(3, 3);
-        assert_eq!(a.selected.map(|s| s.0), Some(0));
+        assert_eq!(a.view.selected.map(|s| s.0), Some(0));
         let mut h = harness(a);
         h.run_steps(3);
         assert_eq!(h.state().format_title(), Some("TABLE"), "a selected table cell has the Table tab");
@@ -13510,7 +13534,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.state().selected_object().unwrap().media.looped, "the Loop checkbox in the Playback bar sets the video's loop");
         // A hotspot has its own tab with the outline tools.
-        { let st = h.state_mut(); let sl = st.slide; st.insert(Object::new("spot", "Hotspot", Kind::Hotspot, 50.0, 50.0, 200.0, 100.0)); let _ = sl; }
+        { let st = h.state_mut(); let sl = st.view.slide; st.insert(Object::new("spot", "Hotspot", Kind::Hotspot, 50.0, 50.0, 200.0, 100.0)); let _ = sl; }
         h.run_steps(3);
         assert_eq!(h.state().format_title(), Some("HOTSPOT"));
         open_bars(&h, 0, &["Hotspot"]);
@@ -13522,7 +13546,7 @@ mod tests {
     fn gui_editing_text_in_place_stays_inside_the_object_and_shows_the_text() {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
         let mut h = harness(a);
         h.run_steps(3);
@@ -13542,7 +13566,7 @@ mod tests {
     fn editing_text_box() -> egui_kittest::Harness<'static, App> {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
         let mut h = harness(a);
         h.run_steps(3);
@@ -13557,7 +13581,7 @@ mod tests {
     fn pressing_a_button_in_try_it_says_when_it_would_jump_to_another_slide() {
         let mut a = app();
         a.insert_button();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         let (id, name) = ("Quiz time".to_string(), "Quiz time");
         let target = {
             let p = a.project.as_mut().unwrap();
@@ -13578,7 +13602,7 @@ mod tests {
         click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
         let note = h.state().try_note.clone().expect("the press says what Try It did not do");
         assert!(note.contains("jumps to Quiz time") && note.contains("Preview"), "{note}");
-        assert_eq!(h.state().slide, 0, "Try It stays on the slide: the jump is explained, not followed");
+        assert_eq!(h.state().view.slide, 0, "Try It stays on the slide: the jump is explained, not followed");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("try-it-jump-note.png")).unwrap(); }
         use egui_kittest::kittest::Queryable;
         // It is a dialog with an OK button; OK dismisses it and leaves Try It on.
@@ -13605,7 +13629,7 @@ mod tests {
     fn try_it_over_a_layer(modal: bool) -> (egui_kittest::Harness<'static, App>, Object) {
         let mut a = app();
         a.insert_button();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.add_layer();
         let layer_id = {
             let p = a.project.as_mut().unwrap();
@@ -13614,7 +13638,7 @@ mod tests {
             l.modal = modal;
             l.id.clone()
         };
-        a.layer = 0;
+        a.view.layer = 0;
         let o = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
         a.try_mode = true;
         let mut h = harness(a);
@@ -13646,7 +13670,7 @@ mod tests {
     #[test]
     fn dragging_the_rotate_handle_while_editing_text_ends_the_edit_and_turns_the_box() {
         let mut h = editing_text_box();
-        let (li, oi) = h.state().selected.unwrap();
+        let (li, oi) = h.state().view.selected.unwrap();
         let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
         let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
         let knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
@@ -13662,7 +13686,7 @@ mod tests {
     fn turning_a_text_box_from_properties_or_the_ribbon_also_ends_the_edit() {
         for change in [|o: &mut Object| o.rotation = 40.0, |o: &mut Object| o.text_rotation = 270] {
             let mut h = editing_text_box();
-            let (li, oi) = h.state().selected.unwrap();
+            let (li, oi) = h.state().view.selected.unwrap();
             change(&mut h.state_mut().project.as_mut().unwrap().slides[0].layers[li].objects[oi]);
             h.run_steps(3);
             assert!(h.state().editing.is_none(), "turning the object ends the edit");
@@ -13673,7 +13697,7 @@ mod tests {
     fn editing_a_turned_text_box() -> egui_kittest::Harness<'static, App> {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         {
             let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
             o.text = "Hello there".into();
@@ -13690,7 +13714,7 @@ mod tests {
     #[test]
     fn a_turned_box_is_edited_upright_and_keeps_its_rotation() {
         let mut h = editing_a_turned_text_box();
-        let (li, oi) = h.state().selected.unwrap();
+        let (li, oi) = h.state().view.selected.unwrap();
         assert!(h.state().editing.is_some(), "a rotation that was already there does not end the edit");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("turned-box-editing.png")).unwrap(); }
         h.event(egui::Event::Text("!".into()));
@@ -13707,7 +13731,7 @@ mod tests {
     #[test]
     fn while_a_turned_box_is_edited_its_handles_are_drawn_upright_with_the_edit_box() {
         let mut h = editing_a_turned_text_box();
-        let (li, oi) = h.state().selected.unwrap();
+        let (li, oi) = h.state().view.selected.unwrap();
         let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
         let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
         // Where the rotate handle is when the frame is upright: straight above the middle of the top edge.
@@ -13722,7 +13746,7 @@ mod tests {
     fn editing_a_text_box_that_is_already_turned_is_not_cut_short() {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].rotation = 30.0;
         let mut h = harness(a);
         h.run_steps(3);
@@ -13767,7 +13791,7 @@ mod tests {
         let p = a.project.as_ref().unwrap();
         assert_eq!((p.pass_mark, p.show_menu, p.variables.len()), (55, true, 1));
         // A slide edit afterwards still undoes cleanly without disturbing the settings.
-        a.selected = Some((0, 0)); // undo/redo clear the selection
+        a.view.selected = Some((0, 0)); // undo/redo clear the selection
         a.delete_selected();
         a.undo();
         let p = a.project.as_ref().unwrap();
@@ -13816,13 +13840,13 @@ mod tests {
     fn three_rects(a: &mut App) {
         for (x, y, w) in [(10.0, 20.0, 100.0), (300.0, 80.0, 50.0), (500.0, 40.0, 200.0)] {
             a.insert_rect();
-            let (li, oi) = a.selected.unwrap();
+            let (li, oi) = a.view.selected.unwrap();
             let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
             o.x = x; o.y = y; o.w = w; o.h = 30.0;
         }
         let ids: Vec<String> = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect();
-        a.selected = Some((0, 0));
-        a.multi = ids[1..].to_vec();
+        a.view.selected = Some((0, 0));
+        a.view.multi = ids[1..].to_vec();
     }
 
     #[test]
@@ -13834,8 +13858,8 @@ mod tests {
         let objs = a.project.as_ref().unwrap().slides[0].layers[0].objects.clone();
         assert!(objs.iter().all(|o| (o.x + o.w - 700.0).abs() < 0.01));
         a.undo();
-        a.selected = Some((0, 0)); // undo clears the selection; reselect the group
-        a.multi = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().skip(1).map(|o| o.id.clone()).collect();
+        a.view.selected = Some((0, 0)); // undo clears the selection; reselect the group
+        a.view.multi = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().skip(1).map(|o| o.id.clone()).collect();
         a.align_selected(0, 3); // equal gaps: widths 350 over span 10..700 leaves 340, 170 each
         let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects;
         assert!((o[1].x - (10.0 + 100.0 + 170.0)).abs() < 0.01);
@@ -13858,14 +13882,14 @@ mod tests {
         assert_eq!(a.selection().len(), 3);
         a.delete_selected();
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), 3);
-        assert!(a.selected.is_none());
+        assert!(a.view.selected.is_none());
     }
 
     #[test]
     fn gui_in_place_editor_renders_mixed_formatting_without_panicking() {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         {
             let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
             o.edit_text("Hello bold world");
@@ -13883,7 +13907,7 @@ mod tests {
     fn ribbon_text_buttons_format_only_the_selected_characters() {
         let mut a = app();
         a.insert_text();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].edit_text("Hello world");
         a.text_sel = Some((0, 5));
         a.format_selection(Attr::ToggleBold);
@@ -14165,7 +14189,7 @@ mod tests {
         let mut a = app();
         a.file_view = false;
         a.project.as_mut().unwrap().slides[0].layers[0].objects.push(Object::new("o1", "Box", Kind::Rect, 100.0, 100.0, 200.0, 100.0));
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(3);
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("format-bar-open", 0u8)), vec!["animation".to_string()]));
@@ -14286,9 +14310,9 @@ mod tests {
         h.get_by_label_contains("Sequencing").click();
         h.run_steps(4);
         assert_eq!(h.state().project.as_ref().unwrap().slides.len(), before + 1);
-        assert!(matches!(h.state().project.as_ref().unwrap().slides[h.state().slide].kind, SlideKind::Question(_)));
+        assert!(matches!(h.state().project.as_ref().unwrap().slides[h.state().view.slide].kind, SlideKind::Question(_)));
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
-            h.state_mut().selected = None;
+            h.state_mut().view.selected = None;
             h.run_steps(3);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("slides-tab.png")).unwrap();
         }
@@ -14668,7 +14692,7 @@ mod tests {
         assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Try It").is_some(), "shown outside the Layout Builder");
         assert!(h.query_by_label("Placeholder").is_some(), "Placeholder is in the Objects tab outside the Layout Builder");
         h.state_mut().enter_master_view();
-        h.state_mut().slide = 1;
+        h.state_mut().view.slide = 1;
         h.run_steps(4);
         assert!(h.query_by_label("Placeholder").is_some(), "and inside it");
         assert!(h.query_all_by_label("Close").next().is_none() && h.query_all_by_label_contains("Insert Layout").next().is_none(), "no builder-only ribbon controls");
@@ -14685,11 +14709,11 @@ mod tests {
         h.state_mut().undo();
         h.run_steps(2);
         assert!(h.state().project.as_ref().unwrap().layouts[0].show_master, "and it can be undone");
-        h.state_mut().slide = 0;
+        h.state_mut().view.slide = 0;
         h.run_steps(4);
         assert!(h.query_all_by_label_contains("appear on every layout").next().is_some(), "the master explains itself instead");
         // Placeholder puts a placeholder on the layout.
-        h.state_mut().slide = 1;
+        h.state_mut().view.slide = 1;
         h.run_steps(2);
         let before = h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len();
         h.state_mut().insert_placeholder(PlaceholderKind::Heading2);
@@ -14704,7 +14728,7 @@ mod tests {
         let mut a = app();
         a.file_view = false;
         a.add_slide(SlideKind::Normal);
-        a.slide = 1;
+        a.view.slide = 1;
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("LAYOUT BUILDER").is_none(), "no Layout Builder tab until it is open");
@@ -14722,7 +14746,7 @@ mod tests {
         assert!(h.state().in_master_view() && !h.state().scene_view, "clicking its tab opens it again");
         h.get_by_label_contains("Slide 2").click();
         h.run_steps(4);
-        assert!(!h.state().in_master_view() && !h.state().scene_view && h.state().slide == 1, "a slide's tab leaves it and shows that slide");
+        assert!(!h.state().in_master_view() && !h.state().scene_view && h.state().view.slide == 1, "a slide's tab leaves it and shows that slide");
         assert!(h.query_by_label("LAYOUT BUILDER").is_some(), "and its tab is still there");
         h.get_by_label("LAYOUT BUILDER").click();
         h.run_steps(4);
@@ -14741,7 +14765,7 @@ mod tests {
         a.new_project();
         a.project.as_mut().unwrap().assets.insert("pano".into(), Asset { name: "lab.png".into(), mime: "image/png".into(), bytes: test_panorama(), file: None });
         a.add_pano("pano".into(), "lab.png", 512.0, 256.0);
-        let at = a.selected.unwrap();
+        let at = a.view.selected.unwrap();
         a.open_pano_dialog(at);
         let name = a.pano_tab_name().expect("named");
         let mut h = harness(a);
@@ -14829,7 +14853,7 @@ mod tests {
         assert_eq!(objects.len(), before + 1, "one picture was added");
         let o = objects.last().unwrap();
         assert!(matches!(o.kind, Kind::Image) && o.asset.as_ref().is_some_and(|k| p.assets.contains_key(k)));
-        assert_eq!(h.state().selected.map(|(_, i)| i), Some(objects.len() - 1), "the new picture is selected");
+        assert_eq!(h.state().view.selected.map(|(_, i)| i), Some(objects.len() - 1), "the new picture is selected");
         assert!(h.state().status.contains("Added the dropped file"), "{}", h.state().status);
         let _ = std::fs::remove_file(png);
     }
@@ -15177,9 +15201,9 @@ mod tests {
         assert_eq!(a.current_scene(), 1);
         assert_eq!(a.project.as_ref().unwrap().slides.len(), 3);
         // Slides stay in scene order and moving never crosses a scene boundary.
-        a.slide = 1;
+        a.view.slide = 1;
         a.move_slide(1, true);
-        assert_eq!(a.slide, 1);
+        assert_eq!(a.view.slide, 1);
         a.move_slide_to_scene(1, 1);
         let p = a.project.as_ref().unwrap();
         assert_eq!(p.scene_slides(0).len(), 1);
@@ -15203,7 +15227,7 @@ mod tests {
         let n_layouts = a.project.as_ref().unwrap().layouts.len();
         assert_eq!(a.project.as_ref().unwrap().slides.len(), n_layouts + 1, "master + one stand-in per layout");
         // A logo on the master, and a new layout.
-        a.slide = 0;
+        a.view.slide = 0;
         a.insert_rect();
         a.insert_layout(None);
         assert_eq!(a.project.as_ref().unwrap().layouts.len(), n_layouts + 1);
@@ -15218,12 +15242,12 @@ mod tests {
         assert_eq!(p.layouts.len(), n_layouts + 1);
         // New slides follow a chosen layout and get its placeholders.
         a.add_slide_with_layout(SlideKind::Normal, Some("layout-content".into()));
-        let s = &a.project.as_ref().unwrap().slides[a.slide];
+        let s = &a.project.as_ref().unwrap().slides[a.view.slide];
         assert_eq!(s.layout.as_deref(), Some("layout-content"));
         assert_eq!(s.layers[0].objects.len(), 2);
         // The master shape is part of the published slide, below the content.
         let flat = a.project.as_ref().unwrap().flattened();
-        assert!(flat.slides[a.slide].layers[0].objects[0].id.starts_with("bd-"));
+        assert!(flat.slides[a.view.slide].layers[0].objects[0].id.starts_with("bd-"));
         // The whole visit is one undo step.
         a.undo();
         assert_eq!(a.project.as_ref().unwrap().slides.len(), real_slides);
@@ -15237,7 +15261,7 @@ mod tests {
         let mut a = app();
         a.add_slide_with_layout(SlideKind::Normal, Some("layout-content".into()));
         a.add_slide_with_layout(SlideKind::Normal, Some("layout-content".into()));
-        let (s1, s2) = (a.slide - 1, a.slide);
+        let (s1, s2) = (a.view.slide - 1, a.view.slide);
         // The second slide's title is restyled by the author.
         let t = a.project.as_mut().unwrap().slides[s2].layers[0].objects.iter_mut().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap();
         t.style.size = 33.0;
@@ -15258,11 +15282,11 @@ mod tests {
         let n = a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
         assert!(n >= 3);
         // Select the first two and group them.
-        a.selected = Some((0, 0));
-        a.multi = vec![a.project.as_ref().unwrap().slides[0].layers[0].objects[1].id.clone()];
+        a.view.selected = Some((0, 0));
+        a.view.multi = vec![a.project.as_ref().unwrap().slides[0].layers[0].objects[1].id.clone()];
         a.group_selected();
-        a.multi.clear();
-        a.selected = Some((0, 1));
+        a.view.multi.clear();
+        a.view.selected = Some((0, 1));
         assert_eq!(a.selection().len(), 2, "choosing one member chooses the group");
         // Duplicating gives the copies their own group.
         a.duplicate_selected();
@@ -15270,8 +15294,8 @@ mod tests {
         let groups: std::collections::HashSet<_> = objs.iter().filter_map(|o| o.group.clone()).collect();
         assert_eq!(groups.len(), 2);
         a.ungroup_selected();
-        a.multi.clear();
-        a.selected = Some((0, 0));
+        a.view.multi.clear();
+        a.view.selected = Some((0, 0));
         assert_eq!(a.selection().len(), 2, "the original group is intact");
         a.undo();
         a.undo();
@@ -15290,7 +15314,7 @@ mod tests {
         for _ in 0..4 { a.add_slide(SlideKind::Normal); }
         let ids: Vec<String> = a.project.as_ref().unwrap().slides.iter().map(|s| s.id.clone()).collect();
         assert_eq!(ids.len(), 5);
-        a.slide = 1;
+        a.view.slide = 1;
         a.slide_multi = vec![ids[3].clone()];
         assert_eq!(a.slide_selection(), vec![1, 3]);
         let part = a.project.as_ref().unwrap().subset(&a.slide_selection());
@@ -15310,7 +15334,7 @@ mod tests {
     fn gui_slide_multi_selection_renders() {
         let mut a = app();
         for _ in 0..3 { a.add_slide(SlideKind::Normal); }
-        a.slide = 0;
+        a.view.slide = 0;
         let id = a.project.as_ref().unwrap().slides[2].id.clone();
         a.slide_multi = vec![id];
         let mut h = harness(a);
@@ -15327,7 +15351,7 @@ mod tests {
         let ids = |a: &App| a.project.as_ref().unwrap().slides.iter().map(|s| s.id.clone()).collect::<Vec<_>>();
         let start = ids(&a);
         // Move the middle two down together.
-        a.slide = 1;
+        a.view.slide = 1;
         a.slide_multi = vec![start[2].clone()];
         assert!(a.can_move_slides(true) && a.can_move_slides(false));
         a.move_slides(true);
@@ -15338,7 +15362,7 @@ mod tests {
         a.undo();
         assert_eq!(ids(&a), start);
         // Duplicate two slides: the copies follow the last selected one, in order.
-        a.slide = 0;
+        a.view.slide = 0;
         a.slide_multi = vec![start[1].clone()];
         a.duplicate_slides();
         let after = ids(&a);
@@ -15349,7 +15373,7 @@ mod tests {
         assert_eq!(ids(&a), start, "one undo step");
         // Move two slides to a new scene.
         a.add_scene();
-        a.slide = 0;
+        a.view.slide = 0;
         a.slide_multi = vec![start[1].clone()];
         a.move_selected_slides_to_scene(1);
         let p = a.project.as_ref().unwrap();
@@ -15365,7 +15389,7 @@ mod tests {
         a.reorder_object(0, 0, 2);
         let after = names(&a);
         assert_eq!(after, vec![start[1].clone(), start[2].clone(), start[0].clone()]);
-        assert_eq!(a.selected, Some((0, 2)), "the moved object stays selected");
+        assert_eq!(a.view.selected, Some((0, 2)), "the moved object stays selected");
         a.undo();
         assert_eq!(names(&a), start);
     }
@@ -15374,8 +15398,8 @@ mod tests {
     fn gui_timeline_names_are_the_object_list() {
         let mut a = app();
         three_rects(&mut a);
-        a.selected = None;
-        a.multi.clear();
+        a.view.selected = None;
+        a.view.multi.clear();
         let mut h = harness(a);
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
@@ -15392,9 +15416,9 @@ mod tests {
         // Rows run front to back: the first listed is the last object.
         let (x, y0, step) = (300.0, 828.0, 28.0);
         click(&mut h, egui::pos2(x, y0));
-        assert_eq!(h.state().selected, Some((0, 2)), "clicking a name in the timeline selects that object");
+        assert_eq!(h.state().view.selected, Some((0, 2)), "clicking a name in the timeline selects that object");
         click(&mut h, egui::pos2(x, y0 + step));
-        assert_eq!(h.state().selected, Some((0, 1)));
+        assert_eq!(h.state().view.selected, Some((0, 1)));
         // The eye hides the object when the slide starts.
         click(&mut h, egui::pos2(410.0, y0));
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].hidden, "the eye hid it");
@@ -15433,8 +15457,8 @@ mod tests {
         a.insert_rect();
         let ids = |a: &App| a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect::<Vec<_>>();
         let start = ids(&a);
-        a.selected = Some((0, 0));
-        a.multi = vec![start[1].clone()];
+        a.view.selected = Some((0, 0));
+        a.view.multi = vec![start[1].clone()];
         a.group_selected();
         // Send the group in front of the last object: both members end up after it, in their own order.
         a.move_group(0, 0, 3);
@@ -15454,8 +15478,8 @@ mod tests {
         let mut a = app();
         three_rects(&mut a);
         a.group_selected();
-        a.selected = None;
-        a.multi.clear();
+        a.view.selected = None;
+        a.view.multi.clear();
         let mut h = harness(a);
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
@@ -15514,7 +15538,7 @@ mod tests {
         // Type into a body cell, then add a row below it and a column to its right.
         let k = objs(&a).iter().position(|o| o.table == Some((1, 0))).unwrap();
         a.project.as_mut().unwrap().slides[0].layers[0].objects[k].text = "hello".into();
-        a.selected = Some((0, k));
+        a.view.selected = Some((0, k));
         a.table_edit(TableOp::RowBelow);
         assert_eq!(objs(&a).len(), 8);
         a.table_edit(TableOp::ColRight);
@@ -15526,8 +15550,8 @@ mod tests {
         a.undo();
         assert_eq!(objs(&a).len(), 12);
         // Deleting works on the whole table at once.
-        a.selected = Some((0, 0));
-        a.multi.clear();
+        a.view.selected = Some((0, 0));
+        a.view.multi.clear();
         a.delete_selected();
         assert!(objs(&a).is_empty());
     }
@@ -15550,7 +15574,7 @@ mod tests {
         let objs = |a: &App| a.project.as_ref().unwrap().slides[0].layers[0].objects.clone();
         let g = objs(&a)[0].group.clone().unwrap();
         let k = objs(&a).iter().position(|o| o.table == Some((1, 0))).unwrap();
-        a.selected = Some((0, k));
+        a.view.selected = Some((0, k));
         a.range_end = Some((g.clone(), (2, 1)));
         assert_eq!(a.cell_block().unwrap().1, (1, 0, 2, 1));
         a.merge_cells();
@@ -15573,7 +15597,7 @@ mod tests {
         a.insert_table(3, 3);
         let objs = |a: &App| a.project.as_ref().unwrap().slides[0].layers[0].objects.clone();
         let k = objs(&a).iter().position(|o| o.table == Some((1, 1))).unwrap();
-        a.selected = Some((0, k));
+        a.view.selected = Some((0, k));
         assert_eq!(a.format_targets().len(), 1, "a clicked cell is formatted alone");
         let cols = objs(&a).iter().filter(|o| o.table.is_some_and(|t| t.1 == 1)).count();
         a.select_cells((0, 1), (2, 1));
@@ -15629,7 +15653,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("9h-hotspot-empty.png")).unwrap();
         }
-        let regions = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[h.state().slide].kind {
+        let regions = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[h.state().view.slide].kind {
             SlideKind::Question(Question { style: QuestionStyle::Hotspot { regions, .. }, .. }) => regions.clone(),
             _ => vec![],
         };
@@ -15752,7 +15776,7 @@ mod tests {
     fn selected_rect_for_resizing() -> egui_kittest::Harness<'static, App> {
         let mut a = app();
         a.insert_rect();
-        let (li, oi) = a.selected.unwrap();
+        let (li, oi) = a.view.selected.unwrap();
         let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
         (o.x, o.y, o.w, o.h, o.rotation) = (300.0, 300.0, 400.0, 200.0, 0.0);
         let mut h = harness(a);
@@ -15761,7 +15785,7 @@ mod tests {
     }
 
     fn resized_rect(h: &egui_kittest::Harness<'static, App>) -> (f32, f32, f32, f32) {
-        let (li, oi) = h.state().selected.unwrap();
+        let (li, oi) = h.state().view.selected.unwrap();
         let o = &h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi];
         (o.x, o.y, o.w, o.h)
     }
@@ -15779,7 +15803,7 @@ mod tests {
         let mut o = Object::new(id, id, kind.clone(), 100.0, 100.0, 600.0, 600.0);
         if matches!(kind, Kind::Video) { o.poster = Some("pic".into()); } else { o.asset = Some("pic".into()); }
         a.insert(o);
-        a.selected.unwrap()
+        a.view.selected.unwrap()
     }
 
     #[test]
@@ -15854,10 +15878,10 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layers[second.0].objects[second.1].rotation = 30.0;
         let centre_y = { let o = &a.project.as_ref().unwrap().slides[0].layers[second.0].objects[second.1]; o.y + o.h / 2.0 };
         a.insert_rect();
-        let rect = a.selected.unwrap();
+        let rect = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[rect.0].objects[rect.1].h = 77.0;
         let ids: Vec<String> = [first, second].iter().map(|&(l, o)| a.project.as_ref().unwrap().slides[0].layers[l].objects[o].id.clone()).collect();
-        a.multi = ids;
+        a.view.multi = ids;
         a.restore_aspect_ratio();
         let objs = &a.project.as_ref().unwrap().slides[0].layers[0].objects;
         assert_eq!(objs[first.1].h, 300.0);
@@ -15866,8 +15890,8 @@ mod tests {
         assert!((t.y + t.h / 2.0 - centre_y).abs() < 0.01, "a turned picture keeps its centre: y {} h {}", t.y, t.h);
         assert_eq!(objs[rect.1].h, 77.0, "other objects are left alone");
         // With only a shape selected there is nothing to restore.
-        a.multi.clear();
-        a.selected = Some(rect);
+        a.view.multi.clear();
+        a.view.selected = Some(rect);
         a.restore_aspect_ratio();
         assert_eq!(a.status, "Select a picture or video");
     }
@@ -15956,7 +15980,7 @@ mod tests {
         let mut o = Object::new("photo", "Photo", Kind::Image, 0.0, 0.0, 600.0, 300.0);
         o.asset = Some("pic".into());
         a.insert(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.crop_mode = Some("photo".into());
         let mut h = harness(a);
         h.run_steps(3);
@@ -16019,7 +16043,7 @@ mod tests {
     fn gui_a_check_box_is_inserted_drawn_with_its_box_and_edited_in_the_panel() {
         let mut a = app();
         a.insert_check_look(0);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
         assert!(o.check.is_some() && o.text == "Check box" && o.margins[0] > 0.0, "a labelled check box with room for the box");
         let mut h = harness(a);
@@ -16042,7 +16066,7 @@ mod tests {
         let mut spot = blank_object("spot".into(), "Hotspot", Kind::Hotspot, 100.0, 100.0, 600.0, 400.0);
         spot.hit_area = Some(vec![(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]);
         a.insert(spot);
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(3);
         let outlined = h.render().expect("renderer");
@@ -16084,7 +16108,7 @@ mod tests {
         let mut o = Object::new("photo", "Photo", Kind::Image, 0.0, 0.0, 800.0, 400.0);
         o.asset = Some("pic".into());
         a.insert(o);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.crop_mode = Some("photo".into());
         assert_eq!(a.picture_ratio("photo"), Some(2.0), "the source picture is twice as wide as tall");
         a.set_crop_aspect(Some(1.0));
@@ -16124,24 +16148,24 @@ mod tests {
         let mut o = Object::new("photo", "Photo", Kind::Image, 0.0, 0.0, 700.0, 500.0);
         o.asset = Some("pic".into());
         a.insert(o);
-        a.selected = None;
+        a.view.selected = None;
         let mut h = harness(a);
         h.run_steps(3);
         let boxed = h.render().expect("renderer");
         let red = |img: &image::RgbaImage| img.pixels().filter(|p| p[0] > 180 && p[1] < 60 && p[2] < 60).count();
         for shape in PictureShape::ALL {
-            h.state_mut().selected = Some((0, 0));
+            h.state_mut().view.selected = Some((0, 0));
             h.state_mut().set_picture_shape(Some(shape));
-            h.state_mut().selected = None;
+            h.state_mut().view.selected = None;
             h.run_steps(3);
             let shaped = h.render().expect("renderer");
             let (full, part) = (red(&boxed), red(&shaped));
             assert!(part > full / 5 && part < full * 995 / 1000, "{shape:?}: {part} of {full} red pixels are left");
             if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { shaped.save(std::path::PathBuf::from(dir).join(format!("9w-shape-{:?}.png", shape))).unwrap(); }
         }
-        h.state_mut().selected = Some((0, 0));
+        h.state_mut().view.selected = Some((0, 0));
         h.state_mut().set_picture_shape(None);
-        h.state_mut().selected = None;
+        h.state_mut().view.selected = None;
         h.run_steps(3);
         assert_eq!(red(&h.render().expect("renderer")), red(&boxed), "no shape: the whole picture again");
         h.state_mut().undo();
@@ -16152,7 +16176,7 @@ mod tests {
     fn gui_outline_mode_moves_corners_adds_one_on_an_edge_and_deletes_the_chosen_one() {
         let mut a = app();
         a.insert(blank_object("spot".into(), "Hotspot", Kind::Hotspot, 100.0, 100.0, 600.0, 400.0));
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.begin_outline();
         assert_eq!(a.outline_mode.as_deref(), Some("spot"));
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].hit_area.as_ref().map(|a| a.len()), Some(4), "the box's four corners to start from");
@@ -16204,7 +16228,7 @@ mod tests {
     fn gui_an_outline_that_is_still_the_box_is_dropped_when_editing_ends() {
         let mut a = app();
         a.insert(blank_object("spot".into(), "Hotspot", Kind::Hotspot, 100.0, 100.0, 600.0, 400.0));
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.begin_outline();
         let mut h = harness(a);
         h.run_steps(3);
@@ -16234,7 +16258,7 @@ mod tests {
         let area = spot.hit_area.clone().expect("an outline");
         assert_eq!(area.len(), 4);
         assert!(area.iter().any(|p| p.0 == 0.0) && area.iter().any(|p| p.0 == 1.0) && area.iter().any(|p| p.1 == 0.0) && area.iter().any(|p| p.1 == 1.0), "the frame fits the corners: {area:?}");
-        assert_eq!(h.state().selected, Some((0, 0)));
+        assert_eq!(h.state().view.selected, Some((0, 0)));
         // Undo takes the hotspot away again.
         h.state_mut().undo();
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty());
@@ -16279,14 +16303,14 @@ mod tests {
         assert!(matches!(o.kind, Kind::Hotspot) && o.hit_area.as_ref().map(|a| a.len()) == Some(48));
         a.insert_hotspot(false);
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[1].hit_area, None);
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.reset_outline();
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].hit_area, None, "the oval is a box again");
         a.undo();
         assert!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].hit_area.is_some(), "undo brings the oval back");
         a.project.as_mut().unwrap().slides[0].layers[0].objects[0].hit_area = Some(vec![(0.25, 0.25), (0.75, 0.25), (0.5, 0.75)]);
         let w0 = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].w;
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         a.fit_outline();
         let o = &a.project.as_ref().unwrap().slides[0].layers[0].objects[0];
         assert!((o.w - w0 / 2.0).abs() < 0.01, "the frame shrank to the outline");
@@ -16302,7 +16326,7 @@ mod tests {
         assert!(p.variables.iter().any(|v| v.id == sl.variable && matches!(v.initial, Value::Num(_))), "linked to it");
         a.insert_slider();
         assert!(a.project.as_ref().unwrap().variables.iter().any(|v| v.name == "Slider2"), "the next one gets a fresh name");
-        a.selected = Some((0, 0));
+        a.view.selected = Some((0, 0));
         let mut h = harness(a);
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
@@ -16321,7 +16345,7 @@ mod tests {
         a.insert_table(4, 3);
         let g = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].group.clone().unwrap();
         let k = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().position(|o| o.table == Some((1, 0))).unwrap();
-        a.selected = Some((0, k));
+        a.view.selected = Some((0, k));
         a.range_end = Some((g, (2, 1)));
         let mut h = harness(a);
         h.run_steps(3);
@@ -16385,7 +16409,7 @@ mod tests {
         for _ in 0..4 {
             let n = h.state().project.as_ref().unwrap().slides.len();
             let last = n - 1;
-            h.state_mut().slide = last;
+            h.state_mut().view.slide = last;
             h.run_steps(2);
             h.get_by_label("Layout").click();
             h.run_steps(3);
@@ -16423,15 +16447,15 @@ mod tests {
         h.get_by_label("+ Add layout").click();
         h.run_steps(3);
         assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n0 + 1);
-        let i = h.state().slide;
+        let i = h.state().view.slide;
         assert_eq!(i, n0, "the new layout is selected");
         h.state_mut().rename_layout(i, "Quiz ");
         h.state_mut().rename_layout(i, "Quiz page");
         h.state_mut().move_layout(i, false);
         assert_eq!(h.state().project.as_ref().unwrap().slides[n0 - 1].name, "Quiz page");
-        assert_eq!(h.state().slide, n0 - 1);
+        assert_eq!(h.state().view.slide, n0 - 1);
         h.state_mut().move_layout(1, false);
-        assert_eq!(h.state().slide, n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
+        assert_eq!(h.state().view.slide, n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
         h.state_mut().leave_master_view();
         let p = h.state().project.as_ref().unwrap();
         assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");
@@ -16468,11 +16492,11 @@ mod tests {
     fn gui_master_view_and_backgrounds_render() {
         let mut a = app();
         a.add_slide_with_layout(SlideKind::Normal, Some("layout-title".into()));
-        a.project.as_mut().unwrap().slides[a.slide].background = Some(Background::gradient(135.0, Rgba(3, 83, 158, 255), Rgba(232, 119, 34, 255)));
+        a.project.as_mut().unwrap().slides[a.view.slide].background = Some(Background::gradient(135.0, Rgba(3, 83, 158, 255), Rgba(232, 119, 34, 255)));
         let mut h = harness(a);
         h.run_steps(3);
         h.state_mut().enter_master_view();
-        h.state_mut().slide = 2;
+        h.state_mut().view.slide = 2;
         h.run_steps(3);
         h.state_mut().leave_master_view();
         h.run_steps(3);
@@ -16480,11 +16504,11 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             let dir = std::path::PathBuf::from(dir);
             h.state_mut().enter_master_view();
-            h.state_mut().slide = 2;
+            h.state_mut().view.slide = 2;
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("6a-master-view.png")).unwrap();
             h.state_mut().leave_master_view();
-            h.state_mut().slide = 1;
+            h.state_mut().view.slide = 1;
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("6b-layout-slide-gradient.png")).unwrap();
         }
@@ -16496,16 +16520,16 @@ mod tests {
         a.add_layer();
         a.add_layer();
         a.add_layer();
-        let names = |a: &App| a.project.as_ref().unwrap().slides[a.slide].layers.iter().map(|l| l.name.clone()).collect::<Vec<_>>();
+        let names = |a: &App| a.project.as_ref().unwrap().slides[a.view.slide].layers.iter().map(|l| l.name.clone()).collect::<Vec<_>>();
         let before = names(&a);
-        a.visible = vec![true, false, true, true];
+        a.view.visible = vec![true, false, true, true];
         a.move_layer(1, 3);
         let after = names(&a);
         assert_eq!(after[0], before[0]);
         assert_eq!(after[3], before[1]);
         assert_eq!(after[1], before[2]);
-        assert_eq!(a.visible, vec![true, true, true, false]);
-        assert_eq!(a.layer, 3);
+        assert_eq!(a.view.visible, vec![true, true, true, false]);
+        assert_eq!(a.view.layer, 3);
         a.move_layer(0, 2);
         assert_eq!(names(&a), after);
     }

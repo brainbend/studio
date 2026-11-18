@@ -347,7 +347,7 @@ impl App {
                 done(json!({
                     "name": p.name, "kind": p.kind.label(), "slides": p.slides.len(), "pass_mark_percent": p.pass_mark,
                     "unsaved_changes": self.dirty, "saved_at": self.path.as_ref().map(|p| p.display().to_string()),
-                    "current_slide": self.slide + 1,
+                    "current_slide": self.view.slide + 1,
                     "player": self.player_summary(),
                 }))
             }
@@ -384,12 +384,12 @@ impl App {
                 let after = match a.get("after") { None | Some(Value::Null) => count, Some(_) => slide_arg(a, "after", count)? + 1 };
                 let title = text_arg(a, "name")?;
                 let layout = self.layout_arg(a)?;
-                self.slide = after - 1;
+                self.view.slide = after - 1;
                 match layout { Some(l) => self.add_slide_with_layout(SlideKind::Normal, Some(l)), None => self.add_slide(SlideKind::Normal) }
-                if let (Some(t), Some(p)) = (title.filter(|t| !t.trim().is_empty()), self.project.as_mut()) { p.slides[self.slide].name = t.trim().to_string(); }
-                self.status = format!("AI tool: added slide {}", self.slide + 1);
-                let s = &self.project.as_ref().unwrap().slides[self.slide];
-                done(json!({ "number": self.slide + 1, "id": s.id, "name": s.name, "width": s.width, "height": s.height, "layout": s.layout, "objects": s.layers[0].objects.iter().map(describe_object).collect::<Vec<_>>() }))
+                if let (Some(t), Some(p)) = (title.filter(|t| !t.trim().is_empty()), self.project.as_mut()) { p.slides[self.view.slide].name = t.trim().to_string(); }
+                self.status = format!("AI tool: added slide {}", self.view.slide + 1);
+                let s = &self.project.as_ref().unwrap().slides[self.view.slide];
+                done(json!({ "number": self.view.slide + 1, "id": s.id, "name": s.name, "width": s.width, "height": s.height, "layout": s.layout, "objects": s.layers[0].objects.iter().map(describe_object).collect::<Vec<_>>() }))
             }
             "delete_slide" => {
                 let i = slide_arg(a, "slide", count)?;
@@ -403,7 +403,7 @@ impl App {
                 let new = text_arg(a, "name")?.filter(|n| !n.trim().is_empty()).ok_or("`name` must be some text.")?;
                 self.snapshot();
                 self.project.as_mut().unwrap().slides[i].name = new.trim().to_string();
-                self.slide = i;
+                self.view.slide = i;
                 self.status = format!("AI tool: renamed slide {}", i + 1);
                 done(json!({ "number": i + 1, "name": new.trim() }))
             }
@@ -412,7 +412,7 @@ impl App {
                 let notes = text_arg(a, "notes")?.ok_or("`notes` must be text.")?;
                 self.snapshot();
                 self.project.as_mut().unwrap().slides[i].notes = notes;
-                self.slide = i;
+                self.view.slide = i;
                 self.status = format!("AI tool: set the notes of slide {}", i + 1);
                 done(json!({ "number": i + 1 }))
             }
@@ -424,8 +424,8 @@ impl App {
                 let (li, oi) = find_object(&self.project.as_ref().unwrap().slides[i], &which)?;
                 self.snapshot();
                 let removed = self.project.as_mut().unwrap().slides[i].layers[li].objects.remove(oi);
-                self.slide = i;
-                self.selected = None;
+                self.view.slide = i;
+                self.view.selected = None;
                 self.status = format!("AI tool: deleted {} from slide {}", removed.name, i + 1);
                 done(json!({ "deleted": removed.id }))
             }
@@ -504,9 +504,9 @@ impl App {
         self.snapshot();
         let slide = &mut self.project.as_mut().unwrap().slides[i];
         slide.layers[0].objects.push(o);
-        self.selected = Some((0, slide.layers[0].objects.len() - 1));
-        self.slide = i;
-        self.layer = 0;
+        self.view.selected = Some((0, slide.layers[0].objects.len() - 1));
+        self.view.slide = i;
+        self.view.layer = 0;
         self.status = format!("AI tool: added {} to slide {}", if name == "add_text" { "a text box" } else { "a shape" }, i + 1);
         done(described)
     }
@@ -543,9 +543,9 @@ impl App {
         if let Some(w) = object_warning(&o) { described["warning"] = json!(w); }
         self.snapshot();
         self.project.as_mut().unwrap().slides[i].layers[li].objects[oi] = o;
-        self.slide = i;
-        self.layer = li;
-        self.selected = Some((li, oi));
+        self.view.slide = i;
+        self.view.layer = li;
+        self.view.selected = Some((li, oi));
         self.status = format!("AI tool: changed an object on slide {}", i + 1);
         done(described)
     }
@@ -583,10 +583,10 @@ impl App {
         let after = issue_lines(&new);
         self.project = Some(new);
         let slides = self.project.as_ref().map_or(1, |p| p.slides.len()).max(1);
-        self.slide = slide.unwrap_or(self.slide).min(slides - 1);
+        self.view.slide = slide.unwrap_or(self.view.slide).min(slides - 1);
         match select {
-            Some((si, li, oi)) => { self.slide = si.min(slides - 1); self.layer = li; self.selected = Some((li, oi)); }
-            None => { self.layer = 0; self.selected = None; }
+            Some((si, li, oi)) => { self.view.slide = si.min(slides - 1); self.view.layer = li; self.view.selected = Some((li, oi)); }
+            None => { self.view.layer = 0; self.view.selected = None; }
         }
         self.reset_visibility();
         self.status = format!("AI tool: {what}");
@@ -670,7 +670,7 @@ mod tests {
         let mut a = App::default();
         a.new_project();
         for _ in 1..slides { a.add_slide(SlideKind::Normal); }
-        a.slide = 0;
+        a.view.slide = 0;
         a.undo.clear();
         a.dirty = false;
         a
@@ -885,7 +885,7 @@ mod tests {
         assert_eq!((r["ok"].as_bool(), r["applied"].as_u64()), (Some(true), Some(3)));
         let p = a.project.as_ref().unwrap();
         assert_eq!((p.slides[1].name.as_str(), p.slides[1].notes.as_str(), p.pass_mark), ("Patched", "A note", 70));
-        assert_eq!(a.slide, 1, "the slide it worked on is on screen");
+        assert_eq!(a.view.slide, 1, "the slide it worked on is on screen");
         assert!(a.dirty);
         run(&mut a, "undo", json!({})).unwrap();
         let p = a.project.as_ref().unwrap();
@@ -925,7 +925,7 @@ mod tests {
         assert_eq!((o.id.as_str(), o.name.as_str(), o.x, o.w), (id.as_str(), "Dot", 50.0, 120.0));
         assert!(matches!(o.kind, Kind::Ellipse) && o.entrance.is_some() && o.timing == Some(Timing { start_ms: 1000, dur_ms: Some(3000) }));
         assert_eq!((o.style.size, o.style.bold), (30.0, true));
-        assert_eq!(a.selected, Some((0, 0)), "it is selected, so the author sees it");
+        assert_eq!(a.view.selected, Some((0, 0)), "it is selected, so the author sees it");
         let second = run(&mut a, "create_object", json!({ "slide": 1, "index": 0, "object": { "name": "Behind", "kind": "Rect" } })).unwrap();
         assert_eq!(second["path"], "/slides/0/layers/0/objects/0", "an index puts it there");
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[1].name, "Dot");

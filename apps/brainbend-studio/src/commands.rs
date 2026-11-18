@@ -174,8 +174,8 @@ impl App {
             _ if !has => false,
             Cmd::Undo => !self.undo.is_empty(),
             Cmd::Redo => !self.redo.is_empty(),
-            Cmd::Cut | Cmd::Delete => if slides { self.project.as_ref().is_some_and(|p| p.slides.len() > self.slide_selection().len()) } else { self.selected.is_some() },
-            Cmd::Copy | Cmd::Duplicate => slides || self.selected.is_some(),
+            Cmd::Cut | Cmd::Delete => if slides { self.project.as_ref().is_some_and(|p| p.slides.len() > self.slide_selection().len()) } else { self.view.selected.is_some() },
+            Cmd::Copy | Cmd::Duplicate => slides || self.view.selected.is_some(),
             Cmd::Paste => if slides { !self.slide_clip.is_empty() } else { self.clipboard.is_some() },
             Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ProjectInfo | Cmd::ProjectSettings | Cmd::ShowRibbon => true,
             Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomFit | Cmd::ZoomActual => !self.scene_view && !self.file_view,
@@ -221,10 +221,10 @@ impl App {
             Cmd::ProjectSettings => self.open_file_page(crate::backstage::FilePage::Project),
             Cmd::About => self.open_file_page(crate::backstage::FilePage::About),
             Cmd::Quit => if let Some(ctx) = &self.ctx_copy { ctx.send_viewport_cmd(egui::ViewportCommand::Close); },
-            Cmd::ZoomIn => self.zoom = (self.zoom * 1.25).clamp(0.1, 8.0),
-            Cmd::ZoomOut => self.zoom = (self.zoom / 1.25).clamp(0.1, 8.0),
-            Cmd::ZoomFit => { self.zoom = 1.0; self.pan = egui::Vec2::ZERO; }
-            Cmd::ZoomActual => { self.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.pan = egui::Vec2::ZERO; }
+            Cmd::ZoomIn => self.view.zoom = (self.view.zoom * 1.25).clamp(0.1, 8.0),
+            Cmd::ZoomOut => self.view.zoom = (self.view.zoom / 1.25).clamp(0.1, 8.0),
+            Cmd::ZoomFit => { self.view.zoom = 1.0; self.view.pan = egui::Vec2::ZERO; }
+            Cmd::ZoomActual => { self.view.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.view.pan = egui::Vec2::ZERO; }
             Cmd::ShowRibbon => {
                 // The menu bar or the ribbon has to stay, or File and the rest are out of reach.
                 if self.show_ribbon && !self.show_menu_bar { self.status = "Show the menu bar first, or File and the other menus are out of reach".into(); }
@@ -308,20 +308,20 @@ impl App {
     /// Every slide of the scene being shown (or every slide, in the Scene View).
     fn select_all_slides(&mut self) {
         let Some(p) = &self.project else { return };
-        let scene = p.slides.get(self.slide).map(|s| s.scene.clone());
+        let scene = p.slides.get(self.view.slide).map(|s| s.scene.clone());
         let all = self.scene_view;
-        self.slide_multi = p.slides.iter().enumerate().filter(|(i, s)| *i != self.slide && (all || Some(&s.scene) == scene.as_ref())).map(|(_, s)| s.id.clone()).collect();
+        self.slide_multi = p.slides.iter().enumerate().filter(|(i, s)| *i != self.view.slide && (all || Some(&s.scene) == scene.as_ref())).map(|(_, s)| s.id.clone()).collect();
     }
 
     /// Every object on the layer being worked on.
     fn select_all_objects(&mut self) {
         let Some(p) = &self.project else { return };
-        let li = self.layer.min(p.slides[self.slide].layers.len().saturating_sub(1));
-        let objects = &p.slides[self.slide].layers[li].objects;
+        let li = self.view.layer.min(p.slides[self.view.slide].layers.len().saturating_sub(1));
+        let objects = &p.slides[self.view.slide].layers[li].objects;
         let Some(first) = objects.iter().position(|o| !o.hidden || self.show_hidden) else { return };
         let ids: Vec<String> = objects.iter().enumerate().filter(|(k, o)| *k != first && (!o.hidden || self.show_hidden)).map(|(_, o)| o.id.clone()).collect();
-        self.selected = Some((li, first));
-        self.multi = ids.into_iter().collect();
+        self.view.selected = Some((li, first));
+        self.view.multi = ids.into_iter().collect();
     }
 
     /// Show or hide a panel, and remember it. A panel that is shown comes back where it was.

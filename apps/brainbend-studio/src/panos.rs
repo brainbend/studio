@@ -265,7 +265,7 @@ impl App {
 
     /// A 360° image object for the asset `key` (a picture `w` by `h`).
     pub(super) fn add_pano(&mut self, key: String, name: &str, w: f32, h: f32) {
-        let (sw, sh) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
+        let (sw, sh) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
         let vw = (sw * 0.66).min(1280.0).round();
         let mut o = blank_object(self.new_id("obj"), "360° image", Kind::Pano(Pano::new()), 0.0, 0.0, vw, (vw * 9.0 / 16.0).min(sh * 0.8).round());
         o.asset = Some(key);
@@ -281,12 +281,12 @@ impl App {
     /// Open the editing mode for the 360° image at (layer, object) of the current slide.
     pub(super) fn open_pano_dialog(&mut self, (li, oi): (usize, usize)) {
         if self.pano.edit.is_some() { return; }
-        let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
+        let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (Kind::Pano(p), Some(key)) = (&o.kind, o.asset.clone()) else { return };
         let view = (p.yaw, p.pitch, p.fov);
-        let tab = self.project.as_ref().map(|pr| Tab { slide_id: pr.slides[self.slide].id.clone(), obj_id: o.id.clone() });
+        let tab = self.project.as_ref().map(|pr| Tab { slide_id: pr.slides[self.view.slide].id.clone(), obj_id: o.id.clone() });
         self.snapshot();
-        self.pano.edit = Some(Edit { target: (li, oi), slide: self.slide, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false });
+        self.pano.edit = Some(Edit { target: (li, oi), slide: self.view.slide, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false });
         self.pano.tab = tab;
         self.scene_view = false;
         self.ribbon_tab = ribbon::OBJECTS_TAB;
@@ -303,7 +303,7 @@ impl App {
             p.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == t.obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, (li, oi))))
         });
         let Some((si, at)) = found else { self.pano.tab = None; return };
-        self.slide = si;
+        self.view.slide = si;
         self.open_pano_dialog(at);
     }
 

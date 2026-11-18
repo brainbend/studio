@@ -144,13 +144,13 @@ impl App {
         let p = self.project.as_mut().unwrap();
         p.assets.insert(key, Asset { name: source_name, mime: pic.mime.into(), bytes: pic.bytes, file: None });
         let slide = &mut p.slides[i];
-        if to_back { slide.layers[0].objects.insert(0, o); self.selected = Some((0, 0)); } else { slide.layers[0].objects.push(o); self.selected = Some((0, slide.layers[0].objects.len() - 1)); }
+        if to_back { slide.layers[0].objects.insert(0, o); self.view.selected = Some((0, 0)); } else { slide.layers[0].objects.push(o); self.view.selected = Some((0, slide.layers[0].objects.len() - 1)); }
         if let Some(c) = &credit {
             let line = format!("Image credit: {c}");
             if !slide.notes.contains(&line) { if !slide.notes.is_empty() { slide.notes.push('\n'); } slide.notes.push_str(&line); }
         }
-        self.slide = i;
-        self.layer = 0;
+        self.view.slide = i;
+        self.view.layer = 0;
         self.dirty = true;
         self.status = format!("AI tool: added a picture to slide {slide_no}");
         done(json!({ "added": described, "picture_pixels": [pic.w, pic.h], "credit_in_notes": credit.is_some(), "drawn_from_svg": pic.from_svg }))
@@ -198,9 +198,9 @@ impl App {
         let described = describe_object(&o);
         self.snapshot();
         let slide = &mut self.project.as_mut().unwrap().slides[i];
-        if bool_arg(a, "send_to_back")?.unwrap_or(false) { slide.layers[0].objects.insert(0, o); self.selected = Some((0, 0)); } else { slide.layers[0].objects.push(o); self.selected = Some((0, slide.layers[0].objects.len() - 1)); }
-        self.slide = i;
-        self.layer = 0;
+        if bool_arg(a, "send_to_back")?.unwrap_or(false) { slide.layers[0].objects.insert(0, o); self.view.selected = Some((0, 0)); } else { slide.layers[0].objects.push(o); self.view.selected = Some((0, slide.layers[0].objects.len() - 1)); }
+        self.view.slide = i;
+        self.view.layer = 0;
         self.dirty = true;
         self.status = format!("AI tool: added the {} icon to slide {}", icon.title(), i + 1);
         done(described)

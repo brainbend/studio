@@ -23,15 +23,15 @@ pub(super) fn kind_icon(o: &Object) -> char {
 impl App {
     /// Move object `src` of layer `li` to z-position `dst`.
     pub(super) fn reorder_object(&mut self, li: usize, src: usize, dst: usize) {
-        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(li)) else { return };
+        let Some(layer) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)) else { return };
         if src >= layer.objects.len() || dst >= layer.objects.len() || src == dst { return; }
         self.snapshot();
-        let layer = &mut self.project.as_mut().unwrap().slides[self.slide].layers[li];
+        let layer = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li];
         let o = layer.objects.remove(src);
         let id = o.id.clone();
         layer.objects.insert(dst, o);
-        self.selected = Some((li, layer.objects.iter().position(|x| x.id == id).unwrap_or(dst)));
-        self.multi.clear();
+        self.view.selected = Some((li, layer.objects.iter().position(|x| x.id == id).unwrap_or(dst)));
+        self.view.multi.clear();
         self.dirty = true;
     }
 }
