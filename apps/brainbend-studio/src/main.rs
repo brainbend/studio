@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use brainbend_doc::*;
 mod equations;
 mod dock;
+mod commands;
 mod panos;
 mod icons;
 mod markers;
@@ -1212,15 +1213,7 @@ impl App {
     /// Close a tab: a tool closes, and a panel is hidden (Studio Settings brings it back).
     fn close_panel_tab(&mut self, g: usize) {
         if let Some(t) = Self::tool_of(g) { self.close_tool(t); return; }
-        let (key, flag) = match g {
-            0 => ("show_properties", &mut self.panels.properties), 1 => ("show_triggers", &mut self.panels.triggers), 2 => ("show_ai", &mut self.panels.ai),
-            P_TIMELINE => ("show_timeline", &mut self.panels.timeline), P_NOTES => ("show_notes", &mut self.panels.notes), P_STATES => ("show_states", &mut self.panels.states),
-            dock::LAYERS => ("show_layers", &mut self.panels.layers),
-            P_SLIDES => ("show_slides", &mut self.panels.slides),
-            _ => return,
-        };
-        *flag = false;
-        crate::prefs::set_bool(key, false);
+        self.set_panel_shown(g, false);
     }
 
     /// Close a tool, wherever it is shown.
@@ -7518,9 +7511,7 @@ impl App {
         if let Some(e) = self.start_edit.take() { self.editing = Some(e); }
         if let Some(t) = self.clip_out.take() { ctx.copy_text(t.clone()); self.clip_text = t; }
         if self.project.is_some() && ctx.input(|i| i.key_pressed(egui::Key::F7)) { self.open_spelling(); }
-        if self.project.is_some() && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-            self.find.get_or_insert_with(FindState::default).focus = true;
-        }
+        if self.project.is_some() && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) { self.run_cmd(commands::Cmd::Find); }
         // Delete / arrows / duplicate only when no text field has focus.
         if self.project.is_some() && ctx.memory(|m| m.focused().is_none()) {
             // On a real desktop the window system turns ⌘C, ⌘X and ⌘V into Copy, Cut and Paste events, with no key press
@@ -7535,7 +7526,7 @@ impl App {
                 )
             });
             // With the slide list or the Scene View in front, the keys are about slides and not about the objects on the canvas.
-            let on_slides = self.scene_view || self.slides_focus;
+            let on_slides = self.editing_slides();
             if on_slides {
                 let (del, dup, enter, left, right, up, down, shift) = ctx.input(|i| (
                     i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
@@ -7545,20 +7536,19 @@ impl App {
                     i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown),
                     i.modifiers.shift,
                 ));
-                if copy || cut { self.copy_slides(); }
-                if cut { let sel = self.slide_selection(); self.delete_slides(sel); }
-                if key_paste || pasted_text.as_ref().is_some_and(|t| !self.slide_clip.is_empty() && self.clip_text == *t) { self.paste_slides(); }
-                if del { let sel = self.slide_selection(); self.delete_slides(sel); }
-                if dup { self.duplicate_slides(); }
+                if cut { self.run_cmd(commands::Cmd::Cut); } else if copy { self.run_cmd(commands::Cmd::Copy); }
+                if key_paste || pasted_text.as_ref().is_some_and(|t| !self.slide_clip.is_empty() && self.clip_text == *t) { self.run_cmd(commands::Cmd::Paste); }
+                if del { self.run_cmd(commands::Cmd::Delete); }
+                if dup { self.run_cmd(commands::Cmd::Duplicate); }
                 if left || up { self.step_slide_selection(false, shift); }
                 if right || down { self.step_slide_selection(true, shift); }
                 if enter {
                     if self.scene_view { let i = self.slide; self.scene_open(i); } else { self.slides_focus = false; }
                 }
             } else {
-            if copy { self.copy_selected(); }
-            if cut { self.copy_selected(); self.delete_selected(); }
-            if key_paste { self.paste(); }
+            if copy { self.run_cmd(commands::Cmd::Copy); }
+            if cut { self.run_cmd(commands::Cmd::Cut); }
+            if key_paste { self.run_cmd(commands::Cmd::Paste); }
             if let Some(text) = pasted_text {
                 // Our own copy comes back as the text we left on the system clipboard; anything else was copied elsewhere.
                 if self.clipboard.is_some() && text == self.clip_text { self.paste(); }
@@ -7581,7 +7571,7 @@ impl App {
             let corner = self.outline_mode.is_some() && self.outline_sel.is_some();
             let cropping_now = self.crop_mode.is_some();
             if del { if corner { self.remove_outline_point(); } else { self.delete_selected(); } }
-            if dup { self.duplicate_selected(); }
+            if dup { self.run_cmd(commands::Cmd::Duplicate); }
             if corner {
                 if left { self.nudge_outline_point(-step, 0.0); }
                 if right { self.nudge_outline_point(step, 0.0); }
@@ -7599,8 +7589,8 @@ impl App {
             }
             }
         }
-        if undo_k { self.undo(); }
-        if redo_k { self.redo(); }
+        if undo_k { self.run_cmd(commands::Cmd::Undo); }
+        if redo_k { self.run_cmd(commands::Cmd::Redo); }
         if save_k { self.save(false); }
         let mut do_open = open_k;
 
@@ -12330,6 +12320,67 @@ mod tests {
         h.get_by_label_contains("Graded question").click();
         h.run_steps(3);
         h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join("add-slide-menu.png")).unwrap();
+    }
+
+    #[test]
+    fn edit_commands_act_on_objects_or_slides_by_what_has_the_keyboard() {
+        use commands::Cmd;
+        let mut a = app();
+        a.insert_rect();
+        a.add_slide(SlideKind::Normal);
+        a.slide = 0;
+        a.selected = None;
+        assert!(!a.cmd_enabled(Cmd::Delete) && !a.cmd_enabled(Cmd::Copy) && !a.cmd_enabled(Cmd::Paste), "nothing is chosen on the slide");
+        a.selected = Some((0, 0));
+        assert!(a.cmd_enabled(Cmd::Delete) && a.cmd_enabled(Cmd::Duplicate) && !a.cmd_enabled(Cmd::Paste));
+        a.run_cmd(Cmd::Copy);
+        assert!(a.cmd_enabled(Cmd::Paste));
+        let objects = |a: &App| a.project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        let n = objects(&a);
+        a.run_cmd(Cmd::Paste);
+        assert_eq!(objects(&a), n + 1, "Paste adds the copied object");
+        a.run_cmd(Cmd::Undo);
+        assert_eq!(objects(&a), n);
+        assert!(a.cmd_enabled(Cmd::Redo));
+        a.run_cmd(Cmd::Redo);
+        assert_eq!(objects(&a), n + 1);
+        a.run_cmd(Cmd::SelectAll);
+        assert_eq!(a.selection().len(), n + 1, "Select All takes every object on the layer");
+        // With the slide list in front the same commands are about slides.
+        a.slides_focus = true;
+        a.slide = 0;
+        let slides = |a: &App| a.project.as_ref().unwrap().slides.len();
+        let count = slides(&a);
+        assert!(!a.cmd_enabled(Cmd::Paste), "no slide has been copied");
+        a.run_cmd(Cmd::Duplicate);
+        assert_eq!(slides(&a), count + 1);
+        a.run_cmd(Cmd::SelectAll);
+        assert_eq!(a.slide_selection().len(), slides(&a), "Select All takes every slide of the scene");
+        assert!(!a.cmd_enabled(Cmd::Delete), "a project keeps at least one slide, so with every slide chosen Delete is off");
+        a.run_cmd(Cmd::Delete);
+        assert_eq!(slides(&a), count + 1, "and nothing is deleted");
+        a.slide_multi.clear();
+        assert!(a.cmd_enabled(Cmd::Delete));
+        a.run_cmd(Cmd::Delete);
+        assert_eq!(slides(&a), count, "one chosen slide is deleted");
+    }
+
+    #[test]
+    fn window_commands_switch_panels_and_lay_them_out() {
+        use commands::Cmd;
+        let mut a = app();
+        assert_eq!(a.cmd_checked(Cmd::TogglePanel(P_TIMELINE)), Some(true));
+        a.run_cmd(Cmd::TogglePanel(P_TIMELINE));
+        assert_eq!(a.cmd_checked(Cmd::TogglePanel(P_TIMELINE)), Some(false));
+        assert!(!a.bottom_tab_ids().contains(&P_TIMELINE), "hidden, it is off the screen");
+        a.run_cmd(Cmd::TogglePanel(P_TIMELINE));
+        assert!(a.bottom_tab_ids().contains(&P_TIMELINE), "and it comes back");
+        a.run_cmd(Cmd::Preset(dock::Preset::Tall));
+        assert_eq!(a.area_of(0), Area::Bottom);
+        assert_eq!(commands::window().len(), commands::PANELS.len() + dock::Preset::ALL.len());
+        for c in commands::EDIT.into_iter().chain(commands::window()) { assert!(!c.label().is_empty()); }
+        assert_eq!(Cmd::Undo.shortcut().map(|s| s.ends_with('Z')), Some(true));
+        assert!(Cmd::TogglePanel(0).shortcut().is_none());
     }
 
     #[test]
