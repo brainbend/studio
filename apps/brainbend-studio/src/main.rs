@@ -230,6 +230,8 @@ struct App {
     new_tab_each: bool,
     /// The order of the tab strip: "s:<slide id>" for slide tabs, "layout" and "pano" for the others. Kept for the session.
     strip_order: Vec<String>,
+    /// The bottom panel's height as last saved.
+    bottom_height_saved: f32,
     /// Where the tabs are: groups in the side and bottom panels, and which are windows. Remembered per person.
     dock: dock::Layout,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
@@ -527,7 +529,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -1082,7 +1084,8 @@ impl App {
             1 => self.triggers_panel(ui, ctx, slide_idx),
             2 => self.ai_panel(ui),
             P_TIMELINE => self.timeline_panel(ui, slide_idx),
-            P_STATES => self.states_tab(ui, slide_idx),
+            // The states are cards in a row that scrolls sideways; a panel shorter than they are scrolls up and down.
+            P_STATES => { egui::ScrollArea::vertical().id_salt("states-scroll").auto_shrink([false, false]).show(ui, |ui| self.states_tab(ui, slide_idx)); }
             P_NOTES => self.notes_panel(ui, slide_idx),
             dock::LAYERS => self.layers_panel(ui, ctx, slide_idx, true),
             _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
@@ -1241,7 +1244,15 @@ impl App {
             }
             dock::Edge::Bottom => {
                 let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
-                egui::Panel::bottom(id).resizable(true).default_size(189.0 * n as f32).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                // The height is the person's: dragging the top edge sets it, it does not follow what is in the tab, and it is remembered.
+                let saved = prefs::get_str("bottom_panel_height").and_then(|s| s.parse::<f32>().ok()).filter(|h| *h >= 80.0).unwrap_or(200.0);
+                let max = (ctx.content_rect().height() * 0.7).max(120.0);
+                let shown = egui::Panel::bottom(id).resizable(true).default_size(saved.min(max)).min_size(80.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                let h = shown.response.rect.height();
+                if !ctx.input(|i| i.pointer.any_down()) && (h - self.bottom_height_saved).abs() > 1.0 {
+                    self.bottom_height_saved = h;
+                    crate::prefs::set_str("bottom_panel_height", &format!("{h:.0}"));
+                }
             }
         }
     }
@@ -1250,10 +1261,7 @@ impl App {
     /// the tabs being dragged.
     fn dock_lanes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, edge: dock::Edge, plan: &[(u32, f32, Vec<(u32, f32, Vec<usize>, usize)>)], slide_idx: usize, wants: &mut SideWants) {
         const GAP: f32 = 6.0;
-        let mut full = ui.available_rect_before_wrap();
-        // A bottom panel in one lane is as tall as what is in it, so what it has to show may need more room than it had a moment ago: it is
-        // laid out with at least the room it starts with (the panel is then given just the height used).
-        if edge == dock::Edge::Bottom && plan.len() == 1 { full.max.y = full.top() + full.height().max(191.0); }
+        let full = ui.available_rect_before_wrap();
         let across = edge == dock::Edge::Right; // lanes are columns at the right edge, rows at the bottom
         let split = |rect: egui::Rect, shares: &[f32], horizontal: bool, min: f32| -> Vec<egui::Rect> {
             let n = shares.len();
@@ -1273,7 +1281,6 @@ impl App {
         let line = ui.visuals().widgets.noninteractive.bg_stroke.color;
         let mut resizes: Vec<(bool, u32, u32, f32)> = vec![]; // (lane?, first id, second id, share to move from the second to the first)
         let mut rects_out: Vec<GroupRect> = vec![];
-        let mut used_bottom = full.top();
         for (li, (lane_id, _, groups)) in plan.iter().enumerate() {
             let lane_rect = lane_rects[li];
             let group_rects = split(lane_rect, &groups.iter().map(|g| g.1).collect::<Vec<_>>(), !across, if across { 110.0 } else { 200.0 });
@@ -1310,7 +1317,6 @@ impl App {
                         self.panel_body(ui, ctx, slide_idx, cur, wants);
                     });
                 });
-                used_bottom = used_bottom.max(gui.min_rect().bottom());
                 // The divider after this group in its lane.
                 if gi + 1 < groups.len() {
                     let next = group_rects[gi + 1];
@@ -1333,13 +1339,7 @@ impl App {
                 }
             }
         }
-        // The bottom panel in one lane is as tall as what is in it (up to the room it has), like a row of tabs and its body always was.
-        let mut allocated = full;
-        if edge == dock::Edge::Bottom && plan.len() == 1 {
-            allocated.max.y = used_bottom.clamp(full.top() + TAB_ROW, full.bottom());
-            for r in rects_out.iter_mut() { r.rect.max.y = allocated.max.y; }
-        }
-        ui.allocate_rect(allocated, egui::Sense::hover());
+        ui.allocate_rect(full, egui::Sense::hover());
         ctx.data_mut(|d| { let mut all: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); all.extend(rects_out); d.insert_temp(egui::Id::new("group-rects-next"), all); });
         if !resizes.is_empty() {
             for (lane, a, b, delta) in resizes {
@@ -10875,7 +10875,7 @@ mod tests {
         // Dragging the area's grip moves it; one undo step puts it back.
         let area = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[1].kind { SlideKind::Question(q) => q.area.unwrap(), _ => unreachable!() };
         let before = area(&h);
-        let (from, to) = (egui::pos2(369.0, 276.0), egui::pos2(469.0, 326.0));
+        let (from, to) = (egui::pos2(378.0, 274.0), egui::pos2(478.0, 324.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -10891,7 +10891,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(795.0, 639.0), egui::pos2(745.0, 589.0));
+        let (from, to) = (egui::pos2(793.0, 629.0), egui::pos2(743.0, 579.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11841,6 +11841,28 @@ mod tests {
         // The layout is written as it is saved and reads back the same.
         let back = dock::Layout::from_json(&a.dock.to_json()).unwrap();
         assert_eq!(back.groups().len(), a.dock.groups().len());
+    }
+
+    /// The bottom panel keeps the height it has whatever the tab shows and however many rows it has.
+    #[test]
+    fn the_bottom_panel_keeps_its_height_when_the_tab_or_the_rows_change() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let top = |h: &egui_kittest::Harness<'_, App>| h.get_by_label("Slide Notes").rect().top();
+        let before = top(&h);
+        for _ in 0..8 { h.state_mut().insert_rect(); }
+        h.state_mut().selected = None;
+        h.run_steps(4);
+        assert_eq!(top(&h), before, "eight more timeline rows do not make the panel taller");
+        h.state_mut().show_panel_tab(P_STATES);
+        h.run_steps(4);
+        assert_eq!(top(&h), before, "and States is the same height as the Timeline");
+        h.state_mut().show_panel_tab(P_NOTES);
+        h.run_steps(4);
+        assert_eq!(top(&h), before, "and so is Slide Notes");
     }
 
     #[test]
@@ -14648,7 +14670,7 @@ mod tests {
             h.run_steps(2);
         };
         // Rows run front to back: the first listed is the last object.
-        let (x, y0, step) = (300.0, 847.0, 28.0);
+        let (x, y0, step) = (300.0, 828.0, 28.0);
         click(&mut h, egui::pos2(x, y0));
         assert_eq!(h.state().selected, Some((0, 2)), "clicking a name in the timeline selects that object");
         click(&mut h, egui::pos2(x, y0 + step));
@@ -14721,7 +14743,7 @@ mod tests {
         }
         assert!(h.state().tl_open.is_empty());
         // Click the fold arrow at the left of the first row.
-        let at = egui::pos2(264.0, 903.0);
+        let at = egui::pos2(264.0, 836.0);
         h.event(egui::Event::PointerMoved(at));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -14734,7 +14756,7 @@ mod tests {
         // Dragging the group's bar moves every member's start together.
         let timings = |h: &egui_kittest::Harness<'static, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.timing).collect::<Vec<_>>();
         assert!(timings(&h).iter().all(|t| t.is_none()));
-        let (from, to) = (egui::pos2(700.0, 903.0), egui::pos2(800.0, 903.0));
+        let (from, to) = (egui::pos2(700.0, 836.0), egui::pos2(800.0, 836.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -14924,7 +14946,7 @@ mod tests {
         }
         let point = |h: &egui_kittest::Harness<'_, App>| h.state().selected_object().unwrap().motion.as_ref().unwrap().points[1];
         let before = point(&h);
-        let (from, to) = (egui::pos2(720.0, 352.0), egui::pos2(760.0, 392.0)); // path point 1 in the 9n screenshot
+        let (from, to) = (egui::pos2(720.0, 322.0), egui::pos2(760.0, 362.0)); // path point 1 in the 9n screenshot
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -15615,10 +15637,10 @@ mod tests {
             (0..3).map(|c| o.iter().find(|x| x.table == Some((0, c))).unwrap().w).collect::<Vec<_>>()
         };
         let before = widths(&h);
-        // The first column border sits near x=626 in the 1500x950 window (see the 9b-table screenshot).
+        // The first column border sits near x=629 in the 1500x950 window (see the 9b-table screenshot).
         let mut moved = false;
         'scan: for y in [456, 396] {
-            for x in 622..632 {
+            for x in 627..633 {
                 let (from, to) = (egui::pos2(x as f32, y as f32), egui::pos2(x as f32 + 60.0, y as f32));
                 h.event(egui::Event::PointerMoved(from));
                 h.run_steps(1);
