@@ -206,7 +206,7 @@ impl App {
             row(ui, "Style", |ui, _| self.text_styles_menu(ui));
             row(ui, "Font", |ui, w| { *changed |= crate::font_store::font_menu(ui, "pf-font", &mut obj.style.font_family, w - 8.0); });
             row(ui, "Size", |ui, w| {
-                *changed |= number(ui, (w - 92.0).max(40.0), &mut obj.style.size, 4.0..=400.0, " pt");
+                *changed |= number(ui, (w - 104.0).max(44.0), &mut obj.style.size, 4.0..=400.0, " pt");
                 let sizes = ui.add_sized([22.0, ROW_H], egui::Button::new("▾")).on_hover_text("Common sizes");
                 egui::Popup::from_toggle_button_response(&sizes).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
                     for z in [18.0, 24.0, 28.0, 32.0, 36.0, 40.0, 48.0, 60.0, 72.0, 96.0, 120.0] {

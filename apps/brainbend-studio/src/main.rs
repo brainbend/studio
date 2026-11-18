@@ -248,6 +248,12 @@ struct App {
     slide_rename: Option<usize>,
     /// Ids of further selected slides (besides the current one): ⌘-click toggles, ⇧-click selects a range.
     slide_multi: Vec<String>,
+    /// The last click was on a slide in the slide list, so the keys act on slides (the Scene View always counts).
+    slides_focus: bool,
+    /// A slide was pressed on during this frame (so the press did not take the focus away from the slides).
+    slide_hit: bool,
+    /// Slides copied with ⌘C or ⌘X while the slide list or Scene View had the focus.
+    slide_clip: Vec<Slide>,
     /// Notes from the last import, shown once in a dialog.
     import_report: Vec<String>,
     /// What the last PowerPoint export could not carry over.
@@ -529,7 +535,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -3080,6 +3086,12 @@ impl App {
     }
 
     /// Open a slide in the editor (leaving Scene View).
+    /// Open a slide from the Scene View: the only Scene View gives it a tab of its own; from a second one it takes over that tab.
+    fn scene_open(&mut self, i: usize) {
+        if self.scene_tabs.as_ref().is_some_and(|t| t.len() > 1) { self.scene_to_slide = true; } else { self.new_tab_request = true; }
+        self.open_slide(i);
+    }
+
     fn open_slide(&mut self, i: usize) {
         self.slide = i;
         self.layer = 0;
@@ -3311,6 +3323,8 @@ impl App {
                 let marked = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id) || self.menu_pick.as_ref().is_some_and(|mp| mp.picked == self.project.as_ref().unwrap().slides[i].id);
                 let in_selection = i == self.slide || self.slide_multi.contains(&self.project.as_ref().unwrap().slides[i].id);
                 let resp = self.slide_thumbnail(ui, ctx, i, tw, marked);
+                // Pressing on a slide gives the slide list (or Scene View) the keyboard.
+                if resp.hovered() && ctx.input(|inp| inp.pointer.any_pressed()) { self.slides_focus = true; self.slide_hit = true; }
                 if resp.secondary_clicked() && !in_selection && !self.scene_view {
                     // Right-clicking a slide outside the selection picks just that slide for the menu. The editor stays where it is.
                     self.menu_pick = Some(MenuPick { picked: self.project.as_ref().unwrap().slides[i].id.clone(), pass: ctx.cumulative_pass_nr() });
@@ -3472,9 +3486,7 @@ impl App {
         if rename.is_some() { self.snapshot(); self.scene_rename = rename; }
         if let Some(i) = select { self.slide = i; self.layer = 0; self.selected = None; self.reset_visibility(); }
         if let Some(i) = open {
-            // From the only Scene View a slide gets a tab of its own; from a second one it takes over the tab it was opened from.
-            if self.scene_tabs.as_ref().is_some_and(|t| t.len() > 1) { self.scene_to_slide = true; } else { self.new_tab_request = true; }
-            self.open_slide(i);
+            self.scene_open(i);
         }
         if let Some((si, down)) = mv { self.move_scene(si, down); }
         if let Some(si) = delete { self.delete_scene(si); }
@@ -3529,9 +3541,14 @@ impl App {
     /// Copy a slide, giving the copy fresh ids; its triggers are re-pointed at the copied layers/objects.
     fn copy_of_slide(&mut self, i: usize) -> Option<Slide> {
         let mut copy = self.project.as_ref().map(|p| p.slides[i].clone())?;
+        copy.name = format!("{} copy", copy.name);
+        Some(self.with_fresh_ids(copy))
+    }
+
+    /// The slide with new ids for itself, its layers and objects, and its triggers pointed at the new ones.
+    fn with_fresh_ids(&mut self, mut copy: Slide) -> Slide {
         let mut map: HashMap<String, String> = HashMap::new();
         copy.id = self.new_id("slide");
-        copy.name = format!("{} copy", copy.name);
         for l in copy.layers.iter_mut() {
             let nid = self.new_id("layer");
             map.insert(std::mem::replace(&mut l.id, nid), l.id.clone());
@@ -3555,7 +3572,56 @@ impl App {
                 a => a.map_objects(&|o| remap(&o.to_string())),
             };
         }
-        Some(copy)
+        copy
+    }
+
+    /// ⌘C on slides: the selected slides wait to be pasted, and some text is left on the system clipboard so the desktop sends the paste.
+    fn copy_slides(&mut self) {
+        let Some(p) = &self.project else { return };
+        let sel = self.slide_selection();
+        self.slide_clip = sel.iter().map(|&i| p.slides[i].clone()).collect();
+        let note = format!("{} slide{}", sel.len(), if sel.len() == 1 { "" } else { "s" });
+        self.clip_out = Some(note);
+        self.status = "Copied".into();
+    }
+
+    /// ⌘V on slides: the copied slides go in right after the selected ones, in the scene of the last of them.
+    fn paste_slides(&mut self) {
+        if self.slide_clip.is_empty() || self.project.is_none() { return; }
+        let sel = self.slide_selection();
+        let Some(&last) = sel.last() else { return };
+        let scene = self.project.as_ref().unwrap().slides[last].scene.clone();
+        let fresh: Vec<Slide> = self.slide_clip.clone().into_iter().map(|c| { let mut c = self.with_fresh_ids(c); c.scene = scene.clone(); c }).collect();
+        self.snapshot();
+        let p = self.project.as_mut().unwrap();
+        let ids: Vec<String> = fresh.iter().map(|c| c.id.clone()).collect();
+        for (k, c) in fresh.into_iter().enumerate() { p.slides.insert(last + 1 + k, c); }
+        self.slide = last + 1;
+        self.slide_multi = ids.into_iter().skip(1).collect();
+        self.layer = 0;
+        self.selected = None;
+        self.reset_visibility();
+    }
+
+    /// An arrow key in the slide list or Scene View: the previous or next slide (Shift adds it to the selection instead).
+    fn step_slide_selection(&mut self, down: bool, extend: bool) {
+        let Some(p) = &self.project else { return };
+        let sel = self.slide_selection();
+        let (Some(&first), Some(&last)) = (sel.first(), sel.last()) else { return };
+        let from = if down { last } else { first };
+        let to = if down { from + 1 } else { from.wrapping_sub(1) };
+        // The slide list shows one scene; the Scene View shows them all.
+        if to >= p.slides.len() || (!self.scene_view && p.slides[to].scene != p.slides[from].scene) { return; }
+        if extend {
+            let id = p.slides[to].id.clone();
+            if !self.slide_multi.contains(&id) { self.slide_multi.push(id); }
+        } else {
+            self.slide_multi.clear();
+            self.slide = to;
+            self.layer = 0;
+            self.selected = None;
+            self.reset_visibility();
+        }
     }
 
     fn duplicate_slide(&mut self, i: usize) {
@@ -4247,7 +4313,7 @@ impl App {
                         if selected { ui.painter().rect_filled(row, 2.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40)); }
                         let name_rect = egui::Rect::from_min_size(row.min, egui::vec2(LABEL_W - 6.0, ROW_H));
                         let name_resp = ui.interact(name_rect, ui.id().with(("tl-group", gid.as_str())), egui::Sense::click_and_drag());
-                        let fg = if selected { egui::Color32::WHITE } else { egui::Color32::LIGHT_GRAY };
+                        let fg = ui.visuals().text_color();
                         let dim = if hidden { 0.45 } else { 1.0 };
                         // Fold arrow, then the icon and the name.
                         let ac = egui::pos2(name_rect.left() + 8.0, row.center().y);
@@ -4355,7 +4421,7 @@ impl App {
                 // The name column is the object list: select (⌘/⇧ adds), rename by double-click, drag to reorder, eye to hide.
                 let name_rect = egui::Rect::from_min_size(row.min + egui::vec2(indent, 0.0), egui::vec2(LABEL_W - 6.0 - indent, ROW_H));
                 let name_resp = ui.interact(name_rect, ui.id().with(("tl-name", oi)), egui::Sense::click_and_drag());
-                let fg = if selected { egui::Color32::WHITE } else { egui::Color32::LIGHT_GRAY };
+                let fg = ui.visuals().text_color();
                 let dim = if hidden { 0.45 } else { 1.0 };
                 ui.painter().text(egui::pos2(name_rect.left() + 10.0, row.center().y), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(13.0, ribbon::icons()), fg.gamma_multiply(dim));
                 if self.obj_edit == Some((li, oi)) {
@@ -7286,6 +7352,9 @@ impl App {
         self.sync_tabs();
         self.begin_state_swap();
         self.show_frame(root);
+        // A press anywhere but on a slide takes the keys back to the canvas.
+        if root.ctx().input(|i| i.pointer.any_pressed()) && !self.slide_hit { self.slides_focus = false; }
+        self.slide_hit = false;
         if font_store::has_pending() { root.ctx().request_repaint(); }
         if let Some(sel) = self.pending_delete.take() { self.delete_slides(sel); }
         self.end_state_swap();
@@ -7322,6 +7391,28 @@ impl App {
                     i.events.iter().find_map(|e| if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None }),
                 )
             });
+            // With the slide list or the Scene View in front, the keys are about slides and not about the objects on the canvas.
+            let on_slides = self.scene_view || self.slides_focus;
+            if on_slides {
+                let (del, dup, enter, left, right, up, down, shift) = ctx.input(|i| (
+                    i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace),
+                    i.modifiers.command && i.key_pressed(egui::Key::D),
+                    i.key_pressed(egui::Key::Enter),
+                    i.key_pressed(egui::Key::ArrowLeft), i.key_pressed(egui::Key::ArrowRight),
+                    i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::ArrowDown),
+                    i.modifiers.shift,
+                ));
+                if copy || cut { self.copy_slides(); }
+                if cut { let sel = self.slide_selection(); self.delete_slides(sel); }
+                if key_paste || pasted_text.as_ref().is_some_and(|t| !self.slide_clip.is_empty() && self.clip_text == *t) { self.paste_slides(); }
+                if del { let sel = self.slide_selection(); self.delete_slides(sel); }
+                if dup { self.duplicate_slides(); }
+                if left || up { self.step_slide_selection(false, shift); }
+                if right || down { self.step_slide_selection(true, shift); }
+                if enter {
+                    if self.scene_view { let i = self.slide; self.scene_open(i); } else { self.slides_focus = false; }
+                }
+            } else {
             if copy { self.copy_selected(); }
             if cut { self.copy_selected(); self.delete_selected(); }
             if key_paste { self.paste(); }
@@ -7362,6 +7453,7 @@ impl App {
                 if right { self.nudge_selected(step, 0.0); }
                 if up { self.nudge_selected(0.0, -step); }
                 if down { self.nudge_selected(0.0, step); }
+            }
             }
         }
         if undo_k { self.undo(); }
@@ -11863,6 +11955,90 @@ mod tests {
         h.state_mut().show_panel_tab(P_NOTES);
         h.run_steps(4);
         assert_eq!(top(&h), before, "and so is Slide Notes");
+    }
+
+    #[test]
+    fn the_properties_panel_keeps_its_width_when_text_formatting_is_open() {
+        let mut a = app();
+        a.insert_text();
+        let mut h = harness(a);
+        h.run_steps(4);
+        let width = |h: &egui_kittest::Harness<'_, App>| {
+            let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+            rects.iter().find(|r| r.edge == dock::Edge::Right).map(|r| r.rect.width()).unwrap_or(0.0)
+        };
+        use egui_kittest::kittest::Queryable;
+        h.get_by_label("Text Formatting").click();
+        h.run_steps(6);
+        let first = width(&h);
+        assert!(first > 0.0, "{first}");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("props-text.png")).unwrap(); }
+        h.run_steps(12);
+        assert_eq!(width(&h), first, "frame after frame the panel stays as wide as it was");
+    }
+
+    #[test]
+    fn keys_act_on_the_slides_once_one_was_clicked_in_the_slide_list() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        for _ in 0..3 { a.add_slide(SlideKind::Normal); }
+        a.slide = 0;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let count = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().slides.len();
+        // The thumbnail sits above its name.
+        let thumb = |h: &egui_kittest::Harness<'_, App>, name: &str| { let r = h.get_by_label(name).rect(); egui::pos2(r.center().x, r.top() - 25.0) };
+        let at = thumb(&h, "1.2 Slide 2");
+        click_at(&mut h, at);
+        h.run_steps(3);
+        assert_eq!(h.state().slide, 1);
+        h.key_press(egui::Key::ArrowDown);
+        h.run_steps(2);
+        assert_eq!(h.state().slide, 2, "the down arrow goes to the next slide");
+        h.key_press(egui::Key::ArrowUp);
+        h.run_steps(2);
+        assert_eq!(h.state().slide, 1, "and the up arrow back");
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+        h.run_steps(2);
+        assert_eq!(count(&h), 5, "Command-D duplicates the slide");
+        h.key_press(egui::Key::Delete);
+        h.run_steps(2);
+        assert_eq!(count(&h), 4, "Delete removes it");
+        // Copy and paste.
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::C);
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::V);
+        h.run_steps(2);
+        assert_eq!(count(&h), 5, "Command-C then Command-V adds a copy");
+        // A press on the canvas gives the keys back to the objects.
+        h.state_mut().slides_focus = true;
+        click_at(&mut h, egui::pos2(700.0, 450.0));
+        h.run_steps(2);
+        assert!(!h.state().slides_focus);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(2);
+        assert_eq!(count(&h), 5, "so Delete no longer removes slides");
+    }
+
+    #[test]
+    fn keys_act_on_the_slides_in_the_scene_view() {
+        let mut a = app();
+        for _ in 0..3 { a.add_slide(SlideKind::Normal); }
+        a.slide = 1;
+        a.scene_view = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::ArrowRight);
+        h.run_steps(2);
+        assert_eq!(h.state().slide_selection(), vec![1, 2], "Shift and an arrow add the next slide");
+        h.key_press(egui::Key::Delete);
+        h.run_steps(2);
+        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), 2, "Delete removes both");
+        h.state_mut().slide = 0;
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert!(!h.state().scene_view, "Enter opens the slide");
     }
 
     #[test]
