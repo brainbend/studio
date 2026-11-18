@@ -255,6 +255,8 @@ struct App {
     ctx_copy: Option<egui::Context>,
     /// The menu bar drawn inside the window (File, Edit, View, Window, Help).
     show_menu_bar: bool,
+    /// The slim toolbar above the slide with `+ Add` and the common objects.
+    show_insert_bar: bool,
     /// A tab that was pulled out of a panel and is being carried to a new place as a window: the tab and where the pointer holds the window.
     tear: Option<(usize, egui::Vec2)>,
     /// A slide was pressed on during this frame (so the press did not take the focus away from the slides).
@@ -542,7 +544,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(target_os = "macos", test))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(target_os = "macos", test))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -7814,6 +7816,8 @@ impl App {
             }
         }
 
+        // The insert bar sits at the top of what is left for the slide, between the panels.
+        self.insert_bar(root);
         let slide_idx = current(self);
         egui::CentralPanel::default().show(root, |ui| {
             let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
@@ -12409,7 +12413,7 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_by_label_contains("Paste").is_some() && !h.state().cmd_enabled(commands::Cmd::Paste), "Paste is listed, and greyed out because nothing was copied");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("menu-bar.png")).unwrap(); }
-        assert_eq!(commands::menus().iter().map(|m| m.0).collect::<Vec<_>>(), vec!["File", "Edit", "View", "Tools", "Window", "Help"]);
+        assert_eq!(commands::menus().iter().map(|m| m.0).collect::<Vec<_>>(), vec!["File", "Edit", "View", "Insert", "Tools", "Window", "Help"]);
     }
 
     #[test]
@@ -12446,6 +12450,78 @@ mod tests {
         assert!(!b.cmd_enabled(Cmd::Tool(Tool::Variables)) && !b.cmd_enabled(Cmd::LayoutBuilder) && !b.cmd_enabled(Cmd::SlideSize(1280, 720)));
         assert!(b.cmd_enabled(Cmd::Tool(Tool::Settings)) && b.cmd_enabled(Cmd::Open));
         assert_eq!(Cmd::Tool(Tool::Spelling).shortcut().as_deref(), Some("F7"));
+    }
+
+    #[test]
+    fn the_insert_bar_has_a_button_for_every_object_and_one_click_adds_it() {
+        use egui_kittest::kittest::Queryable;
+        let names = ["Text Box", "Table", "Slide Number", "Placeholder", "Symbol", "Hyperlink", "Picture", "Shape", "Video", "Audio", "Caption", "360° Image", "Equation", "Icons", "Web Object", "Button", "Slider", "Hotspot", "Dial", "Input", "Marker"];
+        let count = |show: bool| {
+            let mut a = app();
+            a.show_insert_bar = show;
+            a.selected = None;
+            let mut h = harness(a);
+            h.run_steps(4);
+            names.iter().map(|n| h.query_all_by_label_contains(n).count()).collect::<Vec<_>>()
+        };
+        let (with, without) = (count(true), count(false));
+        for (i, n) in names.iter().enumerate() { assert_eq!(with[i], without[i] + 1, "{n} has a button on the bar"); }
+        let mut a = app();
+        a.show_insert_bar = true;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("insert-bar.png")).unwrap(); }
+        let objects = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.len();
+        let before = objects(&h);
+        // The bar's button is the lower of the two with a name (the ribbon's is above).
+        let lowest = |h: &egui_kittest::Harness<'static, App>, n: &str| h.get_all_by_label_contains(n).max_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().rect().center();
+        let at = lowest(&h, "Text Box");
+        click_at(&mut h, at);
+        assert_eq!(objects(&h), before + 1, "one click adds a text box");
+        let at = lowest(&h, "Button");
+        click_at(&mut h, at);
+        assert_eq!(objects(&h), before + 2, "and one click adds a button");
+        // A button with choices opens them.
+        let at = lowest(&h, "Shape");
+        click_at(&mut h, at);
+        h.run_steps(2);
+        let first = brainbend_doc::shapes::GALLERY[0].1;
+        assert!(h.query_all_by_label_contains(first).next().is_some(), "Shape opens the shapes to choose from ({first})");
+        h.state_mut().scene_view = true;
+        h.run_steps(3);
+        let in_scene: Vec<usize> = names.iter().map(|n| h.query_all_by_label_contains(n).count()).collect();
+        assert!(in_scene.iter().zip(&without).all(|(a, b)| a <= b), "the Scene View has no insert bar");
+    }
+
+    #[test]
+    fn the_insert_menu_search_narrows_the_gallery() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.show_menu_bar = true;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_all_by_label("Insert").next().unwrap().click();
+        h.run_steps(3);
+        let pictures = h.query_all_by_label_contains("Picture").count();
+        h.event(egui::Event::Text("hot".into()));
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("Picture").count() < pictures, "typing took the Picture line out of the gallery");
+        assert!(h.query_all_by_label_contains("Hotspot").next().is_some());
+    }
+
+    #[test]
+    fn the_insert_menu_in_the_menu_bar_is_the_same_gallery() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.show_menu_bar = true;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        h.get_all_by_label("Insert").next().unwrap().click();
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("Text Box").count() >= 2, "the gallery is under the Insert menu");
     }
 
     #[test]

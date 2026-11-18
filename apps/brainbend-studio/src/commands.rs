@@ -36,6 +36,7 @@ pub(crate) enum Cmd {
     ShowRibbon,
     DarkMode,
     ShowMenuBar,
+    ShowInsertBar,
     Docs,
     SubmitIssue,
     Community,
@@ -53,7 +54,8 @@ pub(crate) const SLIDE_SIZES: [(u32, u32); 4] = [(1920, 1080), (1280, 720), (144
 
 /// One line of a menu.
 #[derive(Clone)]
-pub(crate) enum Item { Do(Cmd), Gap, Sub(&'static str, Vec<Cmd>) }
+pub(crate) enum Item { Do(Cmd), Gap, Sub(&'static str, Vec<Cmd>), /// The gallery of objects to add to a slide (see `App::insert_menu`).
+    Gallery }
 
 /// The menus, in order: what the menu bar (and later the macOS menu bar) shows.
 pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
@@ -61,7 +63,8 @@ pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
     vec![
         ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
         ("Edit", vec![Do(Cmd::Undo), Do(Cmd::Redo), Gap, Do(Cmd::Cut), Do(Cmd::Copy), Do(Cmd::Paste), Do(Cmd::Delete), Gap, Do(Cmd::Duplicate), Do(Cmd::SelectAll), Gap, Do(Cmd::Find)]),
-        ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowRibbon), Do(Cmd::ShowMenuBar), Do(Cmd::DarkMode)]),
+        ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowRibbon), Do(Cmd::ShowMenuBar), Do(Cmd::ShowInsertBar), Do(Cmd::DarkMode)]),
+        ("Insert", vec![Item::Gallery]),
         ("Tools", vec![Do(Cmd::LayoutBuilder), Sub("Slide Size", SLIDE_SIZES.iter().map(|&(w, h)| Cmd::SlideSize(w, h)).collect()), Do(Cmd::Tool(crate::Tool::Colors)), Do(Cmd::PlayerSettings), Gap, Do(Cmd::Tool(crate::Tool::Variables)), Do(Cmd::Tool(crate::Tool::FocusOrder)), Gap, Do(Cmd::Tool(crate::Tool::Spelling)), Do(Cmd::Tool(crate::Tool::Check))]),
         ("Window", PANELS.iter().map(|&g| Do(Cmd::TogglePanel(g))).chain([Gap]).chain(dock::Preset::ALL.iter().map(|&p| Do(Cmd::Preset(p)))).collect()),
         ("Help", vec![Do(Cmd::Docs), Do(Cmd::SubmitIssue), Do(Cmd::Community), Gap, Do(Cmd::CheckForUpdates)]),
@@ -107,6 +110,7 @@ impl Cmd {
             Cmd::ShowRibbon => "Keep the Ribbon Open".into(),
             Cmd::DarkMode => "Dark Mode".into(),
             Cmd::ShowMenuBar => "Show Menu Bar".into(),
+            Cmd::ShowInsertBar => "Show Insert Bar".into(),
             Cmd::Docs => "Documentation".into(),
             Cmd::SubmitIssue => "Submit an Issue…".into(),
             Cmd::Community => "BrainBend Community…".into(),
@@ -152,7 +156,7 @@ impl App {
         let has = self.project.is_some();
         let slides = self.editing_slides();
         match c {
-            Cmd::New | Cmd::Open | Cmd::Settings | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
+            Cmd::New | Cmd::Open | Cmd::Settings | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::ShowInsertBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
             Cmd::Docs => false,
             Cmd::Tool(crate::Tool::Settings | crate::Tool::Find) => true,
             Cmd::PlayerSettings | Cmd::Tool(_) | Cmd::LayoutBuilder | Cmd::SlideSize(..) if !has => false,
@@ -177,6 +181,7 @@ impl App {
             Cmd::TogglePanel(g) => Some(self.panel_shown(g)),
             Cmd::ShowRibbon => Some(self.ribbon_pinned),
             Cmd::ShowMenuBar => Some(self.show_menu_bar),
+            Cmd::ShowInsertBar => Some(self.show_insert_bar),
             Cmd::SlideSize(w, h) => self.project.as_ref().map(|p| p.slides.first().is_some_and(|s| s.width as u32 == w && s.height as u32 == h)),
             Cmd::DarkMode => Some(self.ctx_copy.as_ref().is_some_and(|c| c.theme() == egui::Theme::Dark)),
             _ => None,
@@ -211,6 +216,7 @@ impl App {
             Cmd::ZoomActual => { self.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.pan = egui::Vec2::ZERO; }
             Cmd::ShowRibbon => { self.ribbon_pinned = !self.ribbon_pinned; crate::prefs::set_bool("ribbon_pinned", self.ribbon_pinned); }
             Cmd::ShowMenuBar => { self.show_menu_bar = !self.show_menu_bar; crate::prefs::set_bool("show_menu_bar", self.show_menu_bar); }
+            Cmd::ShowInsertBar => { self.show_insert_bar = !self.show_insert_bar; crate::prefs::set_bool("show_insert_bar", self.show_insert_bar); }
             Cmd::DarkMode => if let Some(ctx) = &self.ctx_copy {
                 let dark = ctx.theme() == egui::Theme::Dark;
                 ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
@@ -257,6 +263,7 @@ impl App {
                         for item in items {
                             match item {
                                 Item::Gap => { ui.separator(); }
+                                Item::Gallery => { if self.project.is_some() && !self.try_mode { self.insert_menu(ui); } else { ui.weak("Open a project to add objects"); } }
                                 Item::Sub(name, cmds) => {
                                     ui.menu_button(name, |ui| {
                                         for c in cmds {

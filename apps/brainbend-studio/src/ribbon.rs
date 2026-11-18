@@ -932,6 +932,7 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
                     for poly in path_polygons(&cmds, inner) { ui.painter().add(egui::Shape::closed_line(poly, stroke)); }
                 }
             }
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *label));
             if resp.on_hover_text(*label).clicked() { picked = Some(*name); }
             if (i + 1) % 4 == 0 { ui.end_row(); }
         }
@@ -1071,6 +1072,66 @@ const SURVEY_QUESTIONS: [(char, &str, &str, fn() -> Question); 2] = [
     (SLIDERS, "Rating scale", "A survey question answered on a scale; not scored", Question::new_likert),
     (TEXTBOX, "Free text", "A survey question answered in the learner's own words; not scored", Question::new_reflection),
 ];
+
+/// One thing that can be added to a slide: a button that adds it, or one that opens choices first (a table size, a shape).
+type InsertLeaf = (char, &'static str, &'static str, fn(&mut App));
+type InsertSub = (char, &'static str, &'static str, fn(&mut App, &mut egui::Ui));
+enum InsertEntry { Leaf(InsertLeaf), Sub(InsertSub) }
+
+impl InsertEntry {
+    fn label(&self) -> &'static str { match self { InsertEntry::Leaf(l) => l.1, InsertEntry::Sub(s) => s.1 } }
+    fn tip(&self) -> &'static str { match self { InsertEntry::Leaf(l) => l.2, InsertEntry::Sub(s) => s.2 } }
+    fn icon(&self) -> char { match self { InsertEntry::Leaf(l) => l.0, InsertEntry::Sub(s) => s.0 } }
+}
+
+/// Everything that can be added to a slide, in three groups: the gallery and the toolbar are both drawn from this.
+fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
+    use InsertEntry::{Leaf as L, Sub as S};
+    [
+        ("Text", vec![
+            L((TEXTBOX, "Text Box", "A box to type in", |a| a.insert_text())),
+            S((TABLE, "Table", "Rows and columns", |a, ui| { ui.set_min_width(0.0); if let Some((r, c)) = table_picker(ui) { a.insert_table(r, c); ui.close(); } })),
+            S((HASH, "Slide Number", "A number that follows the slide", |a, ui| {
+                if menu_item(ui, HASH, "Slide number").clicked() { a.insert_slide_number(false); ui.close(); }
+                if menu_item(ui, HASH, "Slide number of total").clicked() { a.insert_slide_number(true); ui.close(); }
+            })),
+            S((TEXTBOX, "Placeholder", "An empty box that asks for text", |a, ui| { for k in PlaceholderKind::CHOICES { if menu_item(ui, TEXT_T, k.label()).clicked() { a.insert_placeholder(k); ui.close(); } } })),
+            S((SIGMA, "Symbol", "Greek letters, math, arrows and more", |a, ui| { if a.can_take_text() { if let Some(s) = App::symbol_grid(ui) { a.insert_symbol(&s); ui.close(); } } else { ui.weak("This object has no text"); } })),
+            S((LINK, "Hyperlink", "Link text to a web address", |a, ui| { if a.can_take_text() { a.link_form_menu(ui); } else { ui.weak("This object has no text"); } })),
+        ]),
+        ("Media", vec![
+            L((IMAGE, "Picture", "A picture from a file", |a| a.insert_image())),
+            S((SHAPES, "Shape", "Rectangles, arrows, stars and more", |a, ui| { if let Some(name) = shape_gallery(ui) { a.insert_shape(name); ui.close(); } })),
+            L((VIDEO, "Video", "A video from a file", |a| a.insert_video())),
+            L((SPEAKER, "Audio", "A sound from a file", |a| a.insert_audio())),
+            S((CHAT, "Caption", "A speech or thought bubble with text", |a, ui| a.caption_menu(ui))),
+            L((PANORAMA, "360° Image", "A panoramic picture to look around, with annotations", |a| a.insert_pano())),
+            L((FUNCTION, "Equation", "Type an equation in LaTeX", |a| a.open_equation_dialog(None))),
+            S((STAR, "Icons", "A vector icon you can recolor and resize", |a, ui| a.icon_gallery(ui))),
+            L((GLOBE, "Web Object", "A web page inside the slide", |a| a.insert_web_object())),
+        ]),
+        ("Interactive", vec![
+            L((CLICK, "Button", "A button with hover and click looks", |a| a.insert_button())),
+            L((SLIDERS, "Slider", "A slider the learner drags to set a number", |a| a.insert_slider())),
+            S((CLICK, "Hotspot", "An invisible area the learner clicks", |a, ui| {
+                if menu_item(ui, RECT, "Rectangle").clicked() { a.insert_hotspot(false); ui.close(); }
+                if menu_item(ui, CIRCLE, "Oval").clicked() { a.insert_hotspot(true); ui.close(); }
+                if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
+                    a.draw_outline = Some(vec![]);
+                    a.draw_slide = a.slide;
+                    a.selected = None;
+                    a.multi.clear();
+                    a.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
+                    ui.close();
+                }
+            })),
+            S((GAUGE, "Dial", "A dial the learner turns to set a number", |a, ui| a.dial_menu(ui))),
+            S((CHECK, "Input", "Check boxes, radio buttons and entry fields", |a, ui| a.input_menu(ui))),
+            S((PIN, "Marker", "A round button with an icon or a number in it", |a, ui| a.marker_gallery(ui))),
+        ]),
+    ]
+}
+
 
 impl App {
     /// Object currently selected (primary) and whether it can carry text/shape formatting.
@@ -1585,12 +1646,14 @@ impl App {
         let mut each_tab = self.new_tab_each;
         let mut preset: Option<crate::dock::Preset> = None;
         let mut menu_bar = self.show_menu_bar;
+        let mut insert_bar = self.show_insert_bar;
         let mut panels = self.panels;
         crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
             ui.label(egui::RichText::new("Windows and panels").strong());
             ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
             ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
             ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
+            ui.checkbox(&mut insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
             ui.checkbox(&mut menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Where things are").strong());
@@ -1625,6 +1688,7 @@ impl App {
         });
         if let Some(pr) = preset { self.apply_preset(pr); }
         if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
+        if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
@@ -2101,8 +2165,8 @@ impl App {
         self.status = "Paste Style: applied.".into();
     }
 
-    /// The Symbol button of the Text group: a grid of common symbols; clicking one puts it into the selected text.
-    fn symbol_button(&mut self, ui: &mut egui::Ui) {
+    /// The grid of common symbols, in a menu or a popup: the one clicked, if any.
+    fn symbol_grid(ui: &mut egui::Ui) -> Option<String> {
         const GROUPS: [(&str, &str); 6] = [
             ("Greek", "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ"),
             ("Math", "±×÷≠≈≤≥∞√∑∏∫∂∆∇∈∉⊂⊃⊆⊇∪∩∧∨¬∀∃∅≡∝∠∴∵−·°′″²³½¼¾‰"),
@@ -2111,27 +2175,138 @@ impl App {
             ("Writing", "©®™§¶†‡•…–—«»‘’“”‹›"),
             ("Small numbers", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺ⁿ₀₁₂₃₄₅₆₇₈₉₊"),
         ];
-        // With nothing selected a symbol starts a new text box; only a picture-like object has no text to put it in.
-        let can = self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)));
+        let mut pick: Option<String> = None;
+        ui.set_width(8.0 * 36.0 + 12.0);
+        for (name, chars) in GROUPS {
+            ui.label(egui::RichText::new(name).weak().size(12.0));
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                for c in chars.chars() {
+                    let b = ui.add(egui::Button::new(egui::RichText::new(c.to_string()).family(font_family("Open Sans")).size(18.0)).min_size(egui::vec2(32.0, 30.0)).frame(false));
+                    let code = format!("U+{:04X}", c as u32);
+                    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &code));
+                    if b.on_hover_text(code).clicked() { pick = Some(c.to_string()); }
+                }
+            });
+        }
+        pick
+    }
+
+    /// Whether the selection can hold a symbol or a link: with nothing selected they start a new text box; only a picture-like object has no text.
+    fn can_take_text(&self) -> bool {
+        self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)))
+    }
+
+    /// The Symbol button of the Text group: a grid of common symbols; clicking one puts it into the selected text.
+    fn symbol_button(&mut self, ui: &mut egui::Ui) {
+        let can = self.can_take_text();
         let resp = ui.add_enabled_ui(can, |ui| big_widget(ui, SIGMA, "Symbol", true, false).on_hover_text("Symbol: put a symbol into the selected text, or into a new text box")).inner
             .on_disabled_hover_text("Symbol: this object has no text; select a text box or shape, or click an empty part of the slide");
         let mut pick: Option<String> = None;
-        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-            ui.set_width(8.0 * 36.0 + 12.0);
-            for (name, chars) in GROUPS {
-                ui.label(egui::RichText::new(name).weak().size(12.0));
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                    for c in chars.chars() {
-                        let b = ui.add(egui::Button::new(egui::RichText::new(c.to_string()).family(font_family("Open Sans")).size(18.0)).min_size(egui::vec2(32.0, 30.0)).frame(false));
-                        let code = format!("U+{:04X}", c as u32);
-                        b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &code));
-                        if b.on_hover_text(code).clicked() { pick = Some(c.to_string()); }
-                    }
-                });
-            }
-        });
+        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| { pick = App::symbol_grid(ui); });
         if let Some(s) = pick { self.insert_symbol(&s); }
+    }
+
+    /// The Hyperlink form as a menu shows it: the address (and, with no text to link, the words to show) and Apply or Insert.
+    fn link_form_menu(&mut self, ui: &mut egui::Ui) {
+        ui.set_min_width(260.0);
+        let has_text = self.selected_object().is_some_and(|o| !o.text.is_empty());
+        let cur: String = self.selected_object().and_then(|o| {
+            let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
+            o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
+        }).unwrap_or_default();
+        let key = egui::Id::new("menu-link-form");
+        let (seen, mut url, mut shown): (String, String, String) = ui.data_mut(|d| d.get_temp(key)).unwrap_or((String::from("\u{0}"), String::new(), String::new()));
+        if seen != cur { url = cur.clone(); shown.clear(); }
+        if !has_text {
+            ui.label("Text to show");
+            ui.add(egui::TextEdit::singleline(&mut shown).desired_width(240.0).hint_text("Same as the address"));
+        }
+        ui.label("Web address (https:// or mailto:)");
+        ui.add(egui::TextEdit::singleline(&mut url).desired_width(240.0).hint_text("https://example.com"));
+        let ok = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
+        let (mut apply, mut remove) = (false, false);
+        ui.horizontal(|ui| {
+            apply = ui.add_enabled(ok, egui::Button::new(if has_text { "Apply" } else { "Insert" })).clicked();
+            remove = has_text && ui.button("Remove link").clicked();
+        });
+        ui.data_mut(|d| d.insert_temp(key, (cur, url.clone(), shown.clone())));
+        if apply || remove {
+            if has_text { self.link_selected(apply.then(|| url.trim().to_string())); }
+            else { self.insert_link_text(shown.trim(), url.trim()); }
+            ui.close();
+        }
+    }
+
+    /// A slim toolbar at the top of the slide area (between the panels, not across the window): a button for each thing that can be added,
+    /// grouped as Text, Media and Interactive, each named in a tooltip. A button with choices (a table size, a shape) opens them below it.
+    pub(crate) fn insert_bar(&mut self, root: &mut egui::Ui) {
+        // The Scene View, the 360° editor and Try It have nothing to add objects to.
+        if !self.show_insert_bar || self.scene_view || self.pano.edit.is_some() || self.try_mode { return; }
+        let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Panel::top("insert-bar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+            // The buttons sit in the middle of the bar. How wide they come to is known from the frame before, so they start that far in.
+            let width_id = egui::Id::new("insert-bar-width");
+            let avail = ui.available_width();
+            let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
+            let pad = ((avail - known) / 2.0).max(0.0);
+            let (mut left, mut right, mut first_top, mut wrapped) = (f32::MAX, 0.0f32, None::<f32>, false);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
+                ui.add_space(pad);
+                for (n, (_, entries)) in insert_sections().into_iter().enumerate() {
+                    if n > 0 { ui.add_space(6.0); ui.separator(); ui.add_space(6.0); }
+                    for entry in entries {
+                        let (label, tip) = (entry.label(), entry.tip());
+                        let button = egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons())).color(text_col(ui))).frame(false).min_size(egui::vec2(30.0, 28.0));
+                        let named = |r: egui::Response| { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); r.on_hover_ui(|ui| { ui.strong(label); ui.weak(tip); }) };
+                        let r = match entry {
+                            InsertEntry::Leaf((_, _, _, act)) => { let r = named(ui.add(button)); if r.clicked() { act(self); } r }
+                            InsertEntry::Sub((_, _, _, content)) => named(egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| content(self, ui)).0),
+                        };
+                        left = left.min(r.rect.left());
+                        right = right.max(r.rect.right());
+                        match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
+                    }
+                }
+            });
+            // Wrapped onto two rows, the bar is as wide as it can be; otherwise it is as wide as the buttons (without the padding in front).
+            let width = if wrapped || right <= left { avail } else { right - left };
+            if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
+        });
+    }
+
+    /// Everything that can be added to a slide, as a menu with a search box on top: the gallery behind the + button and the Insert menu.
+    /// Typing narrows the list to the objects whose names match; an object with choices (a table size, a shape) opens them beside it.
+    pub(crate) fn insert_menu(&mut self, ui: &mut egui::Ui) {
+        let sections = insert_sections();
+        ui.set_min_width(240.0);
+        let id = egui::Id::new("insert-search");
+        let mut query: String = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
+        let field = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search objects").desired_width(240.0));
+        // Typing starts the search as soon as the gallery opens.
+        if !field.has_focus() && ui.memory(|m| m.focused().is_none()) { field.request_focus(); }
+        ui.data_mut(|d| d.insert_temp(id, query.clone()));
+        let needle = query.trim().to_lowercase();
+        let wanted = |label: &str, tip: &str| needle.is_empty() || label.to_lowercase().contains(&needle) || tip.to_lowercase().contains(&needle);
+        let mut found = false;
+        let room = (ui.ctx().content_rect().height() - 160.0).max(200.0);
+        egui::ScrollArea::vertical().max_height(room).auto_shrink([true, true]).show(ui, |ui| {
+        for (heading, entries) in sections {
+            let shown: Vec<InsertEntry> = entries.into_iter().filter(|e| wanted(e.label(), e.tip())).collect();
+            if shown.is_empty() { continue; }
+            found = true;
+            if needle.is_empty() { ui.label(egui::RichText::new(heading).weak().size(12.0)); }
+            for e in shown {
+                match e {
+                    InsertEntry::Leaf((icon, label, tip, act)) => { if menu_item(ui, icon, label).on_hover_text(tip).clicked() { act(self); ui.close(); } }
+                    InsertEntry::Sub((icon, label, tip, content)) => { ui.menu_button(menu_job(ui, icon, label), |ui| content(self, ui)).response.on_hover_text(tip); }
+                }
+            }
+        }
+        if !found { ui.weak("Nothing matches"); }
+        });
     }
 
     /// The Caption menu: the eight bubbles two to a row, each drawn with "Abc" in it.
