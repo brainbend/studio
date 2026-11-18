@@ -1545,12 +1545,17 @@ impl App {
         let mut one = self.one_section;
         let mut hover = self.ribbon_hover;
         let mut each_tab = self.new_tab_each;
+        let mut reset = false;
         let mut panels = self.panels;
         crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
             ui.label(egui::RichText::new("Windows and panels").strong());
             ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
             ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
             ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new("Where things are").strong());
+            ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, or out of the app for a window. Right-click a tab for the same moves from a menu.");
+            if ui.button("Reset layout").on_hover_text("Put every tab back where it started").clicked() { reset = true; }
             ui.add_space(10.0);
             ui.label(egui::RichText::new("What shows").strong());
             ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
@@ -1570,6 +1575,7 @@ impl App {
             ui.label("Slide");
             ui.checkbox(&mut panels.layers, "Slide Layers");
         });
+        if reset { self.reset_layout(); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }

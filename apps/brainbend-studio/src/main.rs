@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use brainbend_doc::*;
 mod equations;
+mod dock;
 mod panos;
 mod icons;
 mod markers;
@@ -229,10 +230,8 @@ struct App {
     new_tab_each: bool,
     /// The order of the tab strip: "s:<slide id>" for slide tabs, "layout" and "pano" for the others. Kept for the session.
     strip_order: Vec<String>,
-    /// Where each tab was put when it is not where it starts (see `area_of`); remembered per person.
-    areas: HashMap<usize, Area>,
-    /// The Slide Layers panel is out in a window of its own.
-    layers_out: bool,
+    /// Where the tabs are: groups in the side and bottom panels, and which are windows. Remembered per person.
+    dock: dock::Layout,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
     scene_tabs: Option<Vec<String>>,
     /// The Scene View tab that is showing, or that was showing last.
@@ -320,10 +319,6 @@ struct App {
     settings_open: bool,
     /// The tool showing in the tool dock, and which tools were open last frame (the newest one is shown).
     docked: Vec<Tool>,
-    /// The order of the side panel's tabs, as the person arranged them (tab numbers; see `TOOL_TAB`). Tabs not listed follow.
-    side_order: Vec<usize>,
-    /// The order of the bottom panel's tabs (0 Timeline, 1 Slide Notes, 2 States), as the person arranged them.
-    bottom_order: Vec<usize>,
     tools_seen: Vec<usize>,
     ribbon_open: bool,
     /// Resting the pointer on a tab opens the ribbon too (a person's choice).
@@ -532,7 +527,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], areas: load_areas(), layers_out: prefs::get_bool("layers_popped").unwrap_or(false), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, bottom_order: prefs::get_str("bottom_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse::<usize>().ok()).map(|n| if n < 3 { n + P_TIMELINE } else { n }).collect()).unwrap_or_default(), side_order: prefs::get_str("side_tab_order").map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect()).unwrap_or_default(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -787,15 +782,17 @@ struct SideWants {
     paste_look: bool,
 }
 
-/// The tabs a person has moved, from the settings: "id:S", "id:B" or "id:W", separated by commas.
-fn load_areas() -> HashMap<usize, Area> {
-    let mut out = HashMap::new();
-    for part in prefs::get_str("tab_areas").unwrap_or_default().split(',') {
-        let Some((id, a)) = part.split_once(':') else { continue };
-        let Ok(id) = id.trim().parse::<usize>() else { continue };
-        out.insert(id, match a.trim() { "S" => Area::Side, "B" => Area::Bottom, _ => Area::Window });
-    }
-    out
+/// The layout of the panels from the settings, with every tab the layout has not heard of put where it starts: a tool that was docked
+/// docks at the right, anything else is a window.
+fn load_dock() -> dock::Layout {
+    let mut l = prefs::get_str("dock_layout").and_then(|s| dock::Layout::from_json(&s)).unwrap_or_default();
+    let mut start = HashMap::new();
+    for t in TOOLS { if prefs::get_bool(t.key()).unwrap_or(false) { start.insert(TOOL_TAB + t.index(), dock::Edge::Right); } }
+    for g in PANEL_IDS { start.insert(g, if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
+    start.insert(dock::LAYERS, dock::Edge::Right);
+    let all: Vec<usize> = PANEL_IDS.iter().copied().chain([dock::LAYERS]).chain(TOOLS.iter().map(|t| TOOL_TAB + t.index())).collect();
+    l.include(&all, &start);
+    l
 }
 
 /// The side panel's tab numbers: 0 Properties, 1 Triggers, 2 AI, then a docked tool is `TOOL_TAB` plus its place in `TOOLS`.
@@ -841,7 +838,7 @@ pub(crate) fn dock_tool(ui: &mut egui::Ui, _title: &str, open: &mut bool, conten
     if own_window && !docked {
         let (tab, closed) = doc_tabs::window_tab(ui, _title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
         if closed { *open = false; }
-        if let Some(to) = drag_to_dock(ui.ctx(), &tab) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-dock-to"), if to == "bottom" { 1u8 } else { 0u8 })); }
+        if let Some(spot) = drag_to_dock(ui.ctx(), &tab) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("tool-dock-to"), spot)); }
     } else if !docked {
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -859,10 +856,63 @@ pub(crate) fn dock_tool(ui: &mut egui::Ui, _title: &str, open: &mut bool, conten
     (if docked || own_window { area } else { area.max_height(tall) }).show(ui, |ui| content(ui));
 }
 
-/// Dragging the tab of a window of its own: the window follows the pointer, and the side or bottom panel of the main window lights up while the
-/// pointer is over it. Returns the panel ("side" or "bottom") when the tab was let go over it. Windows are separate, so the pointer is compared on
-/// the screen: the window's own place plus where the pointer is in it.
-fn drag_to_dock(ctx: &egui::Context, tab: &egui::Response) -> Option<&'static str> {
+/// A draggable line between two groups or lanes. Returns how far it was dragged this frame along the axis it moves on.
+fn divider(ui: &mut egui::Ui, rect: egui::Rect, id: (&str, u32), horizontal_line: bool, color: egui::Color32) -> Option<f32> {
+    let r = ui.interact(rect, egui::Id::new(id), egui::Sense::drag());
+    let hot = r.hovered() || r.dragged();
+    if hot { ui.ctx().set_cursor_icon(if horizontal_line { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal }); }
+    let c = rect.center();
+    let stroke = egui::Stroke::new(if hot { 2.0 } else { 1.0 }, if hot { ui.visuals().selection.bg_fill } else { color });
+    if horizontal_line { ui.painter().line_segment([egui::pos2(rect.left(), c.y), egui::pos2(rect.right(), c.y)], stroke); } else { ui.painter().line_segment([egui::pos2(c.x, rect.top()), egui::pos2(c.x, rect.bottom())], stroke); }
+    if r.dragged() { Some(if horizontal_line { r.drag_delta().y } else { r.drag_delta().x }) } else { None }
+}
+
+/// Where a group is on the screen, for finding what a dragged tab is let go over.
+#[derive(Clone, Copy, Debug)]
+struct GroupRect { id: u32, edge: dock::Edge, rect: egui::Rect }
+
+/// The height of a group's tab row: letting a tab go there adds it to the group's tabs.
+const TAB_ROW: f32 = 36.0;
+
+/// How far in from the outer edge of the window letting a tab go makes a new lane there.
+const EDGE_STRIP: f32 = 26.0;
+
+/// What a tab let go at `pos` (in the main window) would do, and the area that shows it. The edges of a group make a new group or lane beside it,
+/// the middle adds the tab, and the outer edge of the window makes a new column at the right or a new row at the bottom.
+fn spot_at(ctx: &egui::Context, pos: egui::Pos2) -> Option<(dock::Spot, egui::Rect)> {
+    use dock::{Edge, Spot, Zone};
+    let rects: Vec<GroupRect> = ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+    let root: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new("root-rect")));
+    let over = rects.iter().find(|g| g.rect.contains(pos)).copied();
+    if let Some(root) = root {
+        let right = egui::Rect::from_min_max(egui::pos2(root.right() - EDGE_STRIP, root.top()), root.max);
+        let bottom = egui::Rect::from_min_max(egui::pos2(root.left(), root.bottom() - EDGE_STRIP), root.max);
+        if right.contains(pos) && over.map_or(true, |g| g.edge == Edge::Right) { return Some((Spot::EdgeEnd(Edge::Right), right)); }
+        if bottom.contains(pos) && over.map_or(true, |g| g.edge == Edge::Bottom) { return Some((Spot::EdgeEnd(Edge::Bottom), bottom)); }
+    }
+    let g = over?;
+    let r = g.rect;
+    let body = egui::Rect::from_min_max(egui::pos2(r.left(), (r.top() + TAB_ROW).min(r.bottom())), r.max);
+    if !body.contains(pos) { return Some((Spot::At { group: g.id, zone: Zone::Center }, r)); }
+    let (fx, fy) = ((pos.x - body.left()) / body.width().max(1.0), (pos.y - body.top()) / body.height().max(1.0));
+    let m = 0.22;
+    let edges = [(fx, Zone::Left), (1.0 - fx, Zone::Right), (fy, Zone::Above), (1.0 - fy, Zone::Below)];
+    let (d, zone) = edges.into_iter().fold((f32::MAX, Zone::Center), |best, e| if e.0 < best.0 { e } else { best });
+    let zone = if d < m { zone } else { Zone::Center };
+    let shown = match zone {
+        Zone::Center => r,
+        Zone::Left => egui::Rect::from_min_max(r.min, egui::pos2(r.center().x, r.max.y)),
+        Zone::Right => egui::Rect::from_min_max(egui::pos2(r.center().x, r.min.y), r.max),
+        Zone::Above => egui::Rect::from_min_max(r.min, egui::pos2(r.max.x, r.center().y)),
+        Zone::Below => egui::Rect::from_min_max(egui::pos2(r.min.x, r.center().y), r.max),
+    };
+    Some((Spot::At { group: g.id, zone }, shown))
+}
+
+/// Dragging the tab of a window of its own: the window follows the pointer, and the place the tab would dock shows in the main window. Returns
+/// where it was let go when that was over a group or an edge of the main window. Windows are separate, so the pointer is compared on the screen:
+/// the window's own place plus where the pointer is in it.
+fn drag_to_dock(ctx: &egui::Context, tab: &egui::Response) -> Option<dock::Spot> {
     let last = egui::Id::new("dock-drag-pointer");
     if !(tab.dragged() || tab.drag_stopped()) { return None; }
     if let (Some(p), Some(own)) = (ctx.input(|i| i.pointer.latest_pos()), ctx.input(|i| i.viewport().inner_rect)) {
@@ -877,29 +927,26 @@ fn drag_to_dock(ctx: &egui::Context, tab: &egui::Response) -> Option<&'static st
     }
     let main = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
     let at: Option<egui::Pos2> = ctx.data(|d| d.get_temp(last));
-    let mut over: Option<&'static str> = None;
-    for target in ["side", "bottom"] {
-        let panel: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new(("panel-rect", target))));
-        if matches!((main, panel, at), (Some(m), Some(s), Some(p)) if s.translate(m.min.to_vec2()).contains(p)) { over = Some(target); }
-    }
-    for target in ["side", "bottom"] { ctx.data_mut(|d| d.insert_temp(egui::Id::new(("dock-hover", target)), tab.dragged() && over == Some(target))); }
+    let local = match (main, at) { (Some(m), Some(p)) => Some(p - m.min.to_vec2()), _ => None };
+    let spot = local.and_then(|p| spot_at(ctx, p));
+    let pos_id = egui::Id::new("tab-drag-pos");
+    if tab.dragged() { if let Some(p) = local { ctx.data_mut(|d| d.insert_temp(pos_id, p)); } } else { ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(pos_id)); }
     ctx.request_repaint_of(egui::ViewportId::ROOT);
     if tab.drag_stopped() {
         ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(last));
-        return over;
+        return spot.map(|s| s.0);
     }
     None
 }
 
-/// Remember where a panel is this frame, and light it up while a window's tab is dragged over it.
-fn dock_target(ctx: &egui::Context, ui: &egui::Ui, target: &str) {
-    let here = ui.max_rect().expand(8.0);
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("panel-rect", target)), here));
-    if ctx.data(|d| d.get_temp::<bool>(egui::Id::new(("dock-hover", target)))).unwrap_or(false) {
-        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("dock-hint", target))));
-        p.rect_filled(here, 0.0, ui.visuals().selection.bg_fill.gamma_multiply(0.3));
-        p.rect_stroke(here.shrink(2.0), 0.0, egui::Stroke::new(2.0, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
-    }
+/// While a tab is dragged (in the main window or from a window of its own), show where it would land.
+fn dock_drag_overlay(ctx: &egui::Context) {
+    let Some(pos) = ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("tab-drag-pos"))) else { return };
+    let Some((_, shown)) = spot_at(ctx, pos) else { return };
+    let color = ctx.global_style().visuals.selection.bg_fill;
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("dock-hint")));
+    p.rect_filled(shown, 0.0, color.gamma_multiply(0.3));
+    p.rect_stroke(shown.shrink(2.0), 0.0, egui::Stroke::new(2.0, color), egui::StrokeKind::Inside);
 }
 
 impl App {
@@ -909,66 +956,102 @@ impl App {
 
     /// Whether a panel (not a tool) is switched on in Studio Settings.
     fn panel_shown(&self, g: usize) -> bool {
-        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, _ => false }
+        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, dock::LAYERS => self.panels.layers, _ => false }
     }
 
     fn panel_title(g: usize) -> &'static str {
-        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", _ => "States" }
+        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", _ => "States" }
     }
 
-    /// Where a tab is. What the person chose wins; otherwise the panels start where they always were (Properties, Triggers and AI at the
-    /// side, Timeline, Slide Notes and States at the bottom) and a tool is a window unless it was docked.
-    fn area_of(&self, g: usize) -> Area {
-        if let Some(a) = self.areas.get(&g) { return *a; }
-        match g {
-            0..=2 => Area::Side,
-            P_TIMELINE | P_NOTES | P_STATES => Area::Bottom,
-            _ => match Self::tool_of(g) { Some(t) if self.docked.contains(&t) => Area::Side, _ => Area::Window },
+    /// Whether a tab shows where it is: a panel that is on in Studio Settings (Slide Layers is not part of the Layout Builder), or a
+    /// tool that is open and can dock here.
+    fn tab_visible(&self, g: usize) -> bool {
+        match Self::tool_of(g) {
+            Some(t) => self.tool_open(t) && self.can_dock_here(),
+            None => self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
+    }
+
+    /// Where a tab is: in the side panel, the bottom panel or a window of its own.
+    fn area_of(&self, g: usize) -> Area {
+        match self.dock.edge_of(g) { Some(dock::Edge::Right) => Area::Side, Some(dock::Edge::Bottom) => Area::Bottom, None => Area::Window }
+    }
+
+    /// Remember the layout, and keep the list of docked tools (the setting that says a tool opens docked) in step with it.
+    fn layout_changed(&mut self) {
+        for t in TOOLS {
+            let docked = self.dock.edge_of(TOOL_TAB + t.index()).is_some();
+            if docked && !self.docked.contains(&t) { self.docked.push(t); }
+            if !docked { self.docked.retain(|x| *x != t); }
+            crate::prefs::set_bool(t.key(), docked);
+        }
+        crate::prefs::set_str("dock_layout", &self.dock.to_json());
+        self.sync_current_out();
     }
 
     /// Put a tab in the side panel, the bottom panel or a window of its own. It is remembered.
     fn set_area(&mut self, g: usize, area: Area) {
-        self.areas.insert(g, area);
-        if let Some(t) = Self::tool_of(g) {
-            if area == Area::Window { self.docked.retain(|x| *x != t); } else if !self.docked.contains(&t) { self.docked.push(t); }
-            crate::prefs::set_bool(t.key(), area != Area::Window);
-        }
-        let text: Vec<String> = self.areas.iter().map(|(g, a)| format!("{g}:{}", match a { Area::Side => "S", Area::Bottom => "B", Area::Window => "W" })).collect();
-        crate::prefs::set_str("tab_areas", &text.join(","));
-        // It goes at the end of that panel's tabs.
-        if area != Area::Window {
-            let mut ids = if area == Area::Side { self.side_tab_ids() } else { self.bottom_tab_ids() };
-            ids.retain(|x| *x != g);
-            ids.push(g);
-            let order = if area == Area::Side { &mut self.side_order } else { &mut self.bottom_order };
-            let rest: Vec<usize> = order.iter().copied().filter(|o| !ids.contains(o)).collect();
-            *order = ids.into_iter().chain(rest).collect();
-            let text = order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(",");
-            crate::prefs::set_str(if area == Area::Side { "side_tab_order" } else { "bottom_tab_order" }, &text);
-        }
-        // The tab that was put in a panel is the one showing there.
-        match area { Area::Side => self.right_tab = g, Area::Bottom => self.bottom_tab = g, Area::Window => {} }
+        match area { Area::Window => self.dock.pop_out(g), Area::Side => self.dock.dock(g, dock::Edge::Right), Area::Bottom => self.dock.dock(g, dock::Edge::Bottom) }
+        self.show_panel_tab(g);
+        self.layout_changed();
+    }
+
+    /// Back to the layout the app starts with: the tabs where they began, and the tools in windows.
+    fn reset_layout(&mut self) {
+        for t in TOOLS { crate::prefs::set_bool(t.key(), false); }
+        self.dock = dock::Layout::default();
+        let all: Vec<usize> = TOOLS.iter().map(|t| TOOL_TAB + t.index()).collect();
+        self.dock.include(&all, &HashMap::new());
+        self.right_tab = 0;
+        self.bottom_tab = P_TIMELINE;
+        self.layout_changed();
+    }
+
+    /// Put a tab where it was let go (see `dock::Spot`).
+    fn place_tab(&mut self, g: usize, spot: dock::Spot) {
+        self.dock.place(g, spot);
+        self.show_panel_tab(g);
+        self.layout_changed();
     }
 
     /// Show a tab if it is in a panel (the tab of a window is already showing).
     fn show_panel_tab(&mut self, g: usize) {
-        match self.area_of(g) { Area::Side => self.right_tab = g, Area::Bottom => self.bottom_tab = g, Area::Window => {} }
+        self.dock.show(g);
+        match self.dock.edge_of(g) { Some(dock::Edge::Right) => self.right_tab = g, Some(dock::Edge::Bottom) => self.bottom_tab = g, None => {} }
+    }
+
+    /// Before a frame, `right_tab` and `bottom_tab` (the tab showing in the group that last had one set) are made the ones showing...
+    fn sync_current_in(&mut self) {
+        let (r, b) = (self.right_tab, self.bottom_tab);
+        self.dock.show(r);
+        self.dock.show(b);
+    }
+
+    /// ...and after it they follow the person's clicks in those groups.
+    fn sync_current_out(&mut self) {
+        if let Some(g) = self.dock.group_of(self.right_tab) { self.right_tab = g.current; }
+        if let Some(g) = self.dock.group_of(self.bottom_tab) { self.bottom_tab = g.current; }
     }
 
     /// Whether the States panel is the one showing, wherever it is.
     fn states_showing(&self) -> bool {
-        self.panels.states && match self.area_of(P_STATES) { Area::Side => self.right_tab == P_STATES, Area::Bottom => self.bottom_tab == P_STATES, Area::Window => true }
+        let showing = |edge: Option<dock::Edge>, g: Option<&dock::Group>| match edge {
+            Some(dock::Edge::Right) => self.right_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
+            Some(dock::Edge::Bottom) => self.bottom_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
+            None => true,
+        };
+        self.panels.states && showing(self.dock.edge_of(P_STATES), self.dock.group_of(P_STATES))
     }
 
-    /// The tabs that are shown in a panel: the panels that are on in Studio Settings, and the tools that are open and docked there.
+    /// The tabs that show in the side panel or the bottom panel, in order across its groups; for a window, the panels that are windows and on.
     fn tabs_in(&self, area: Area) -> Vec<usize> {
-        let mut ids: Vec<usize> = PANEL_IDS.iter().copied().filter(|g| self.panel_shown(*g) && self.area_of(*g) == area).collect();
-        if area != Area::Window && self.can_dock_here() {
-            ids.extend(TOOLS.iter().filter(|t| self.tool_open(**t) && self.area_of(TOOL_TAB + t.index()) == area).map(|t| TOOL_TAB + t.index()));
-        }
-        ids
+        let edge = match area { Area::Side => dock::Edge::Right, Area::Bottom => dock::Edge::Bottom, Area::Window => return self.dock.window.iter().copied().filter(|g| !Self::is_tool_id(*g) && self.tab_visible(*g)).collect() };
+        self.dock.lanes(edge).iter().flat_map(|l| l.groups.iter()).flat_map(|g| g.tabs.iter().copied()).filter(|g| self.tab_visible(*g)).collect()
     }
+
+    fn side_tab_ids(&self) -> Vec<usize> { self.tabs_in(Area::Side) }
+
+    fn bottom_tab_ids(&self) -> Vec<usize> { self.tabs_in(Area::Bottom) }
 
     /// The names on the tabs, with the number of triggers on the one for Triggers and a dot on AI while a tool is connected.
     fn tab_labels(&self, ids: &[usize], slide_idx: usize) -> Vec<(usize, String)> {
@@ -1001,6 +1084,7 @@ impl App {
             P_TIMELINE => self.timeline_panel(ui, slide_idx),
             P_STATES => self.states_tab(ui, slide_idx),
             P_NOTES => self.notes_panel(ui, slide_idx),
+            dock::LAYERS => self.layers_panel(ui, ctx, slide_idx, true),
             _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
         }
     }
@@ -1011,24 +1095,12 @@ impl App {
         let (key, flag) = match g {
             0 => ("show_properties", &mut self.panels.properties), 1 => ("show_triggers", &mut self.panels.triggers), 2 => ("show_ai", &mut self.panels.ai),
             P_TIMELINE => ("show_timeline", &mut self.panels.timeline), P_NOTES => ("show_notes", &mut self.panels.notes), P_STATES => ("show_states", &mut self.panels.states),
+            dock::LAYERS => ("show_layers", &mut self.panels.layers),
             _ => return,
         };
         *flag = false;
         crate::prefs::set_bool(key, false);
     }
-
-    /// Hide the Slide Layers panel.
-    fn hide_layers(&mut self) {
-        self.layers_out = false;
-        crate::prefs::set_bool("layers_popped", false);
-        self.panels.layers = false;
-        crate::prefs::set_bool("show_layers", false);
-    }
-
-    fn set_layers_out(&mut self, out: bool) { self.layers_out = out; crate::prefs::set_bool("layers_popped", out); }
-
-    /// The Slide Layers panel is out in a window of its own (and is not hidden).
-    fn layers_popped(&self) -> bool { self.panels.layers && self.layers_out }
 
     /// Close a tool, wherever it is shown.
     fn close_tool(&mut self, t: Tool) {
@@ -1077,8 +1149,8 @@ impl App {
         }
         // The Dock and Pop out buttons, and a tool window's tab let go over a panel.
         let g = TOOL_TAB + t.index();
-        if let Some(to) = ctx.data_mut(|d| d.remove_temp::<u8>(egui::Id::new("tool-dock-to"))) {
-            self.set_area(g, if to == 1 { Area::Bottom } else { Area::Side });
+        if let Some(spot) = ctx.data_mut(|d| d.remove_temp::<dock::Spot>(egui::Id::new("tool-dock-to"))) {
+            self.place_tab(g, spot);
         } else if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("tool-toggle-dock"))).unwrap_or(false) {
             let now = if self.area_of(g) == Area::Window { Area::Side } else { Area::Window };
             self.set_area(g, now);
@@ -1089,13 +1161,9 @@ impl App {
     /// or docked, so the side panel shows it.
     fn tool_windows(&mut self, ctx: &egui::Context) {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-variables"))).unwrap_or(false) { self.variables_open = true; }
-        // The buttons on a tab: close it, or pop it out into a window of its own.
-        if ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", "layers")))).is_some() { self.hide_layers(); }
-        if ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", "layers")))).is_some() { self.set_layers_out(true); }
-        for salt in ["side", "bottom"] {
-            if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", salt)))) { self.close_panel_tab(g); }
-            if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", salt)))) { self.set_area(g, Area::Window); }
-        }
+        // The buttons on a tool's tab in the Scene View's panel: close it, or pop it out into a window of its own.
+        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", "side")))) { self.close_panel_tab(g); }
+        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", "side")))) { self.set_area(g, Area::Window); }
         if self.file_view || self.project.is_none() { self.tools_seen.clear(); return; }
         // A docked tool that has just opened (or been docked) is the tab showing in its panel.
         let docked: Vec<usize> = TOOLS.iter().filter(|t| self.tool_open(**t) && self.tool_docked(**t)).map(|t| TOOL_TAB + t.index()).collect();
@@ -1109,76 +1177,190 @@ impl App {
         }
     }
 
-    /// The side panel's tabs, in the order the person gave them; the ones they have not placed keep their usual order, after.
-    fn side_tab_ids(&self) -> Vec<usize> {
-        let mut ids = self.tabs_in(Area::Side);
-        let rank = |id: &usize| self.side_order.iter().position(|o| o == id).unwrap_or(usize::MAX);
-        ids.sort_by_key(rank);
-        ids
+    /// Dragging a tab within its group's row: `from` and `to` are places among the tabs shown.
+    fn move_in_group(&mut self, group: u32, from: usize, to: usize) {
+        let visible: Vec<usize> = self.dock.group_mut(group).map(|g| g.tabs.clone()).unwrap_or_default().into_iter().filter(|t| self.tab_visible(*t)).collect();
+        let (Some(&a), Some(&b)) = (visible.get(from), visible.get(to)) else { return };
+        if let Some(g) = self.dock.group_mut(group) {
+            let (i, j) = (g.tabs.iter().position(|t| *t == a), g.tabs.iter().position(|t| *t == b));
+            if let (Some(i), Some(j)) = (i, j) { let t = g.tabs.remove(i); g.tabs.insert(j, t); }
+        }
+        self.layout_changed();
     }
 
-    /// The bottom panel's tabs, in the order the person gave them.
-    fn bottom_tab_ids(&self) -> Vec<usize> {
-        let mut ids = self.tabs_in(Area::Bottom);
-        ids.sort_by_key(|id| self.bottom_order.iter().position(|o| o == id).unwrap_or(usize::MAX));
-        ids
-    }
-
-    /// Dragging a bottom-panel tab: `from` and `to` are places among the tabs shown.
-    fn move_bottom_tab(&mut self, from: usize, to: usize) {
-        let mut ids = self.bottom_tab_ids();
-        if from >= ids.len() || to >= ids.len() { return; }
-        let id = ids.remove(from);
-        ids.insert(to, id);
-        let rest: Vec<usize> = self.bottom_order.iter().copied().filter(|o| !ids.contains(o)).collect();
-        self.bottom_order = ids.into_iter().chain(rest).collect();
-        crate::prefs::set_str("bottom_tab_order", &self.bottom_order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","));
-    }
-
-    /// Dragging a side-panel tab: `from` and `to` are places among the tabs shown.
-    fn move_side_tab(&mut self, from: usize, to: usize) {
-        let mut ids = self.side_tab_ids();
-        if from >= ids.len() || to >= ids.len() { return; }
-        let id = ids.remove(from);
-        ids.insert(to, id);
-        let rest: Vec<usize> = self.side_order.iter().copied().filter(|o| !ids.contains(o)).collect();
-        self.side_order = ids.into_iter().chain(rest).collect();
-        crate::prefs::set_str("side_tab_order", &self.side_order.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","));
-    }
-
-    /// The panels that are windows of their own, each with a tab at the top to drag it onto the side or the bottom panel.
+    /// The panels that are windows of their own, each with a tab strip at the top to drag it onto a panel.
     fn panel_windows(&mut self, ctx: &egui::Context, slide_idx: usize, wants: &mut SideWants) {
         if self.file_view || self.project.is_none() { return; }
         let editable = !self.try_mode;
-        if self.layers_popped() && !self.in_master_view() {
-            let mut open = true;
-            let mut closed_here = false;
-            let mut back = false;
-            os_window_inner(ctx, "panel-layers", "Slide Layers", [320.0, 420.0], &mut open, false, |ui| {
-                let (tab, closed) = doc_tabs::window_tab(ui, "Slide Layers", if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
-                if closed { closed_here = true; }
-                // The layers belong at the foot of the side panel, so that whole panel is where it goes back.
-                if drag_to_dock(ui.ctx(), &tab).is_some_and(|t| t == "side") { back = true; }
-                ui.add_enabled_ui(editable, |ui| self.layers_panel(ui, ctx, slide_idx, true));
-            });
-            if back { self.set_layers_out(false); }
-            else if closed_here || !open { self.hide_layers(); }
-        }
         for g in self.tabs_in(Area::Window) {
             let title = Self::panel_title(g);
-            let size = if g >= P_TIMELINE { [760.0, 300.0] } else { [380.0, 640.0] };
+            let size = if g >= P_TIMELINE && g != dock::LAYERS { [760.0, 300.0] } else { [380.0, 640.0] };
             let mut open = true;
             let mut closed_here = false;
-            let mut to: Option<&'static str> = None;
+            let mut to: Option<dock::Spot> = None;
             os_window_inner(ctx, &format!("panel-{g}"), title, size, &mut open, false, |ui| {
                 let (tab, closed) = doc_tabs::window_tab(ui, title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
                 if closed { closed_here = true; }
                 to = drag_to_dock(ui.ctx(), &tab);
                 ui.add_enabled_ui(editable, |ui| self.panel_body(ui, ctx, slide_idx, g, wants));
             });
-            if let Some(t) = to { self.set_area(g, if t == "bottom" { Area::Bottom } else { Area::Side }); }
+            if let Some(spot) = to { self.place_tab(g, spot); }
             else if closed_here || !open { self.close_panel_tab(g); }
         }
+    }
+
+    /// A group's tabs that show, as (group, share, tabs, tab showing), and the same for its lane: the plan an edge is drawn from. Groups and lanes
+    /// with nothing to show are left out, and the tab showing is one that shows.
+    fn dock_plan(&self, edge: dock::Edge) -> Vec<(u32, f32, Vec<(u32, f32, Vec<usize>, usize)>)> {
+        let mut out = vec![];
+        for lane in self.dock.lanes(edge) {
+            let mut groups = vec![];
+            for g in &lane.groups {
+                let tabs: Vec<usize> = g.tabs.iter().copied().filter(|t| self.tab_visible(*t)).collect();
+                if tabs.is_empty() { continue; }
+                let current = if tabs.contains(&g.current) { g.current } else { tabs[0] };
+                groups.push((g.id, g.share, tabs, current));
+            }
+            if !groups.is_empty() { out.push((lane.id, lane.share, groups)); }
+        }
+        out
+    }
+
+    /// One edge of the editor: its lanes side by side (the right edge) or stacked (the bottom edge), each holding groups of tabs.
+    fn dock_edge(&mut self, root: &mut egui::Ui, ctx: &egui::Context, edge: dock::Edge, slide_idx: usize, wants: &mut SideWants) {
+        let plan = self.dock_plan(edge);
+        if plan.is_empty() { return; }
+        let n = plan.len();
+        let frame = doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false);
+        match edge {
+            dock::Edge::Right => {
+                // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
+                let wide = plan.iter().flat_map(|l| l.2.iter()).any(|g| (g.3 == AI_TAB && self.assistant.shows_terminal()) || Self::is_tool_id(g.3));
+                let id = format!("{}{}", if wide { "inspector-terminal" } else { "inspector" }, if n > 1 { format!("-{n}") } else { String::new() });
+                egui::Panel::right(id).default_size((if wide { 560.0 } else { 326.0 }) * n as f32).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+            }
+            dock::Edge::Bottom => {
+                let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
+                egui::Panel::bottom(id).resizable(true).default_size(189.0 * n as f32).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+            }
+        }
+    }
+
+    /// Lay out an edge's lanes and groups in the room the panel has, draw each group (a row of tabs and the tab showing), and handle the dividers and
+    /// the tabs being dragged.
+    fn dock_lanes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, edge: dock::Edge, plan: &[(u32, f32, Vec<(u32, f32, Vec<usize>, usize)>)], slide_idx: usize, wants: &mut SideWants) {
+        const GAP: f32 = 6.0;
+        let mut full = ui.available_rect_before_wrap();
+        // A bottom panel in one lane is as tall as what is in it, so what it has to show may need more room than it had a moment ago: it is
+        // laid out with at least the room it starts with (the panel is then given just the height used).
+        if edge == dock::Edge::Bottom && plan.len() == 1 { full.max.y = full.top() + full.height().max(191.0); }
+        let across = edge == dock::Edge::Right; // lanes are columns at the right edge, rows at the bottom
+        let split = |rect: egui::Rect, shares: &[f32], horizontal: bool, min: f32| -> Vec<egui::Rect> {
+            let n = shares.len();
+            let total = if horizontal { rect.width() } else { rect.height() } - GAP * n.saturating_sub(1) as f32;
+            let sum: f32 = shares.iter().sum::<f32>().max(0.001);
+            let mut at = if horizontal { rect.left() } else { rect.top() };
+            let mut out = vec![];
+            for s in shares {
+                let len = (total * s / sum).max(min.min(total / n as f32));
+                out.push(if horizontal { egui::Rect::from_min_size(egui::pos2(at, rect.top()), egui::vec2(len, rect.height())) } else { egui::Rect::from_min_size(egui::pos2(rect.left(), at), egui::vec2(rect.width(), len)) });
+                at += len + GAP;
+            }
+            out
+        };
+        let lane_rects = split(full, &plan.iter().map(|l| l.1).collect::<Vec<_>>(), across, if across { 220.0 } else { 120.0 });
+        let editable = !self.try_mode;
+        let line = ui.visuals().widgets.noninteractive.bg_stroke.color;
+        let mut resizes: Vec<(bool, u32, u32, f32)> = vec![]; // (lane?, first id, second id, share to move from the second to the first)
+        let mut rects_out: Vec<GroupRect> = vec![];
+        let mut used_bottom = full.top();
+        for (li, (lane_id, _, groups)) in plan.iter().enumerate() {
+            let lane_rect = lane_rects[li];
+            let group_rects = split(lane_rect, &groups.iter().map(|g| g.1).collect::<Vec<_>>(), !across, if across { 110.0 } else { 200.0 });
+            for (gi, (gid, _, tabs, current)) in groups.iter().enumerate() {
+                let grect = group_rects[gi];
+                rects_out.push(GroupRect { id: *gid, edge, rect: grect });
+                let mut gui = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(grect.min, grect.max - egui::vec2(0.0, if across && gi + 1 == groups.len() { 8.0 } else { 0.0 }))).layout(egui::Layout::top_down(egui::Align::Min)));
+                gui.set_clip_rect(grect.intersect(ui.clip_rect()));
+                gui.push_id(("dock-group", *gid), |ui| {
+                    ui.add_enabled_ui(editable, |ui| {
+                        let labels = self.tab_labels(tabs, slide_idx);
+                        let salt = format!("g{gid}");
+                        let mut cur = *current;
+                        if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &labels, &mut cur, &salt) { self.move_in_group(*gid, f, t); }
+                        if cur != *current { self.dock.group_mut(*gid).map(|g| g.current = cur); self.sync_current_out_to(cur); crate::prefs::set_str("dock_layout", &self.dock.to_json()); }
+                        // The buttons on the tab, and the tab let go somewhere else.
+                        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", salt.as_str())))) { self.close_panel_tab(g); }
+                        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", salt.as_str())))) { self.set_area(g, Area::Window); }
+                        if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", salt.as_str())))) { if let Some(&(g, _)) = labels.get(k) { self.set_area(g, Area::Window); } }
+                        // The menu on a tab: move it without dragging.
+                        if let Some((g, how)) = ctx.data_mut(|d| d.remove_temp::<(usize, u8)>(egui::Id::new(("tab-move", salt.as_str())))) {
+                            match how {
+                                0 => self.set_area(g, Area::Window),
+                                1 => self.set_area(g, Area::Side),
+                                2 => self.set_area(g, Area::Bottom),
+                                3 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Right)),
+                                4 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Bottom)),
+                                _ => self.place_tab(g, dock::Spot::At { group: *gid, zone: if across { dock::Zone::Below } else { dock::Zone::Right } }),
+                            }
+                        }
+                        if let Some((k, pos)) = ctx.data_mut(|d| d.remove_temp::<(usize, egui::Pos2)>(egui::Id::new(("tab-released", salt.as_str())))) {
+                            if let (Some(&(g, _)), Some((spot, _))) = (labels.get(k), spot_at(ctx, pos)) { self.place_tab(g, spot); }
+                        }
+                        self.panel_body(ui, ctx, slide_idx, cur, wants);
+                    });
+                });
+                used_bottom = used_bottom.max(gui.min_rect().bottom());
+                // The divider after this group in its lane.
+                if gi + 1 < groups.len() {
+                    let next = group_rects[gi + 1];
+                    let d = if across { egui::Rect::from_min_max(egui::pos2(grect.left(), grect.bottom() - 1.0), egui::pos2(grect.right(), next.top() + 1.0)) } else { egui::Rect::from_min_max(egui::pos2(grect.right() - 1.0, grect.top()), egui::pos2(next.left() + 1.0, grect.bottom())) };
+                    if let Some(delta) = divider(ui, d, ("group-divider", *gid), across, line) {
+                        let total: f32 = groups.iter().map(|g| g.1).sum();
+                        let len = if across { lane_rect.height() } else { lane_rect.width() };
+                        resizes.push((false, *gid, groups[gi + 1].0, delta / len.max(1.0) * total));
+                    }
+                }
+            }
+            // The divider after this lane.
+            if li + 1 < plan.len() {
+                let (a, b) = (lane_rects[li], lane_rects[li + 1]);
+                let d = if across { egui::Rect::from_min_max(egui::pos2(a.right() - 1.0, a.top()), egui::pos2(b.left() + 1.0, a.bottom())) } else { egui::Rect::from_min_max(egui::pos2(a.left(), a.bottom() - 1.0), egui::pos2(a.right(), b.top() + 1.0)) };
+                if let Some(delta) = divider(ui, d, ("lane-divider", *lane_id), !across, line) {
+                    let total: f32 = plan.iter().map(|l| l.1).sum();
+                    let len = if across { full.width() } else { full.height() };
+                    resizes.push((true, *lane_id, plan[li + 1].0, delta / len.max(1.0) * total));
+                }
+            }
+        }
+        // The bottom panel in one lane is as tall as what is in it (up to the room it has), like a row of tabs and its body always was.
+        let mut allocated = full;
+        if edge == dock::Edge::Bottom && plan.len() == 1 {
+            allocated.max.y = used_bottom.clamp(full.top() + TAB_ROW, full.bottom());
+            for r in rects_out.iter_mut() { r.rect.max.y = allocated.max.y; }
+        }
+        ui.allocate_rect(allocated, egui::Sense::hover());
+        ctx.data_mut(|d| { let mut all: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); all.extend(rects_out); d.insert_temp(egui::Id::new("group-rects-next"), all); });
+        if !resizes.is_empty() {
+            for (lane, a, b, delta) in resizes {
+                let lanes = self.dock.lanes_mut(edge);
+                if lane {
+                    let (ia, ib) = (lanes.iter().position(|l| l.id == a), lanes.iter().position(|l| l.id == b));
+                    if let (Some(ia), Some(ib)) = (ia, ib) { let (sa, sb) = (lanes[ia].share, lanes[ib].share); if sa + delta > 0.1 && sb - delta > 0.1 { lanes[ia].share = sa + delta; lanes[ib].share = sb - delta; } }
+                } else {
+                    for l in lanes.iter_mut() {
+                        let (ia, ib) = (l.groups.iter().position(|g| g.id == a), l.groups.iter().position(|g| g.id == b));
+                        if let (Some(ia), Some(ib)) = (ia, ib) { let (sa, sb) = (l.groups[ia].share, l.groups[ib].share); if sa + delta > 0.05 && sb - delta > 0.05 { l.groups[ia].share = sa + delta; l.groups[ib].share = sb - delta; } }
+                    }
+                }
+            }
+            crate::prefs::set_str("dock_layout", &self.dock.to_json());
+        }
+    }
+
+    /// A tab was chosen in a group: it is the tab showing, and the one `right_tab` or `bottom_tab` names if it is in the group they name.
+    fn sync_current_out_to(&mut self, g: usize) {
+        match self.dock.edge_of(g) { Some(dock::Edge::Right) => self.right_tab = g, Some(dock::Edge::Bottom) => self.bottom_tab = g, None => {} }
     }
 
     /// The Properties tab: the settings of whatever is chosen. Also the body of its window when it is popped out.
@@ -7394,68 +7576,21 @@ impl App {
         // The left panel can add or delete slides; re-read the index before anything else uses it.
         let slide_idx = self.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
         let mut wants = SideWants::default();
-        // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
-        let wide_panel = (self.right_tab == AI_TAB && self.assistant.shows_terminal()) || Self::is_tool_id(self.right_tab);
-        let show_side = !self.side_tab_ids().is_empty() || (self.panels.layers && !self.layers_popped() && !self.in_master_view()) || self.tabs_in(Area::Window).iter().any(|g| *g < P_TIMELINE) || self.layers_popped();
-        if show_side {
-        egui::Panel::right(if wide_panel { "inspector-terminal" } else { "inspector" }).default_size(if wide_panel { 560.0 } else { 326.0 }).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
-            let editable = !self.try_mode;
-            dock_target(ctx, ui, "side");
-            // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and
-            // staying on it hid the Properties from anyone who did not know to look. Picking an owner from the Triggers tab
-            // stays put.
-            // A tab that was hidden in the settings is not left showing.
-            let side = self.side_tab_ids();
-            let seen = (self.selected, self.layer, self.slide);
-            let from_triggers = std::mem::take(&mut self.trigger_select);
-            // The AI tab stays: an AI tool selects things as it works, and the author chose to be looking at it.
-            if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab == P_TRIGGERS { self.right_tab = 0; }
-            self.inspector_seen = Some(seen);
-            if !side.contains(&self.right_tab) { if let Some(&first) = side.first() { self.right_tab = first; } }
-            ui.add_enabled_ui(editable, |ui| {
-            if !self.in_master_view() && self.panels.layers && !self.layers_popped() {
-                egui::Panel::bottom("layers-panel-with-formatting").resizable(true).default_size(150.0).min_size(130.0).frame(doc_tabs::tabbed_panel_frame(ui.style(), true)).show(ui, |ui| {
-                    self.layers_panel(ui, ctx, slide_idx, false);
-                });
-            }
-            if side.is_empty() { return; }
-            let tabs = self.tab_labels(&side, slide_idx);
-            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.right_tab, "side") { self.move_side_tab(f, t); }
-            // A tab let go outside the app is taken out into a window of its own; over the bottom panel, it goes there.
-            if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", "side")))) {
-                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, Area::Window); }
-            }
-            if let Some((k, bottom)) = ctx.data_mut(|d| d.remove_temp::<(usize, bool)>(egui::Id::new(("tab-dropped-on", "side")))) {
-                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, if bottom { Area::Bottom } else { Area::Side }); }
-            }
-            self.panel_body(ui, ctx, slide_idx, self.right_tab, &mut wants);
-                    });
-        });
-        }
-
+        // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and staying on it hid
+        // the Properties from anyone who did not know to look. Picking an owner from the Triggers tab stays put.
+        let seen = (self.selected, self.layer, self.slide);
+        let from_triggers = std::mem::take(&mut self.trigger_select);
+        if self.inspector_seen.is_some_and(|before| before != seen) && !from_triggers && self.right_tab == P_TRIGGERS { self.show_panel_tab(0); }
+        self.inspector_seen = Some(seen);
+        self.sync_current_in();
+        let window = ctx.content_rect();
+        ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
+        self.dock_edge(root, ctx, dock::Edge::Right, slide_idx, &mut wants);
         self.panel_windows(ctx, slide_idx, &mut wants);
-        let bottom = self.bottom_tab_ids();
-        if !bottom.contains(&self.bottom_tab) { if let Some(&first) = bottom.first() { self.bottom_tab = first; } }
-        if !bottom.is_empty() || self.tabs_in(Area::Window).iter().any(|g| *g >= P_TIMELINE) { egui::Panel::bottom("timeline").resizable(true).default_size(200.0).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
-            let editable = !self.try_mode;
-            dock_target(ctx, ui, "bottom");
-            ui.add_enabled_ui(editable, |ui| {
-            let tabs = self.tab_labels(&bottom, slide_idx);
-            if let Some((f, t)) = doc_tabs::panel_tabs_movable(ui, &tabs, &mut self.bottom_tab, "bottom") { self.move_bottom_tab(f, t); }
-            if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", "bottom")))) {
-                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, Area::Window); }
-            }
-            if let Some((k, to_bottom)) = ctx.data_mut(|d| d.remove_temp::<(usize, bool)>(egui::Id::new(("tab-dropped-on", "bottom")))) {
-                if let Some(&(g, _)) = tabs.get(k) { self.set_area(g, if to_bottom { Area::Bottom } else { Area::Side }); }
-            }
-            if bottom.is_empty() {
-                ui.add_space(8.0);
-                ui.weak("Drag a panel's tab here to dock it.");
-            } else {
-                self.panel_body(ui, ctx, slide_idx, self.bottom_tab, &mut wants);
-            }
-                    });
-        }); }
+        self.dock_edge(root, ctx, dock::Edge::Bottom, slide_idx, &mut wants);
+        ctx.data_mut(|d| { let next: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); d.insert_temp(egui::Id::new("group-rects"), next); });
+        dock_drag_overlay(ctx);
+        self.sync_current_out();
 
         if wants.copy_look {
             self.style_clip = self.selected_object().map(|o| Box::new(o.clone()));
@@ -10740,7 +10875,7 @@ mod tests {
         // Dragging the area's grip moves it; one undo step puts it back.
         let area = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[1].kind { SlideKind::Question(q) => q.area.unwrap(), _ => unreachable!() };
         let before = area(&h);
-        let (from, to) = (egui::pos2(362.0, 294.0), egui::pos2(462.0, 344.0));
+        let (from, to) = (egui::pos2(369.0, 276.0), egui::pos2(469.0, 326.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -10756,7 +10891,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(776.0, 650.0), egui::pos2(726.0, 600.0));
+        let (from, to) = (egui::pos2(795.0, 639.0), egui::pos2(745.0, 589.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11643,14 +11778,14 @@ mod tests {
     #[test]
     fn any_tab_can_be_docked_in_either_panel_or_be_a_window_and_closing_hides_it() {
         let mut a = app();
-        assert_eq!(a.side_tab_ids(), vec![0, 1, 2]);
+        assert_eq!(a.side_tab_ids(), vec![0, 1, 2, dock::LAYERS]);
         assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_NOTES, P_STATES]);
         // A side tab can be a window, and a bottom tab can go to the side panel.
         a.set_area(1, Area::Window);
-        assert_eq!(a.side_tab_ids(), vec![0, 2], "Triggers left the side panel");
+        assert_eq!(a.side_tab_ids(), vec![0, 2, dock::LAYERS], "Triggers left the side panel");
         assert_eq!(a.tabs_in(Area::Window), vec![1], "and is a window of its own");
         a.set_area(P_NOTES, Area::Side);
-        assert_eq!(a.side_tab_ids(), vec![0, 2, P_NOTES]);
+        assert_eq!(a.side_tab_ids(), vec![0, 2, P_NOTES, dock::LAYERS]);
         assert_eq!(a.right_tab, P_NOTES, "the tab that was docked is the one showing");
         assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_STATES]);
         // And back: a window can be docked in the bottom panel.
@@ -11666,6 +11801,60 @@ mod tests {
         assert!(!a.panels.triggers && !a.bottom_tab_ids().contains(&1));
         a.close_panel_tab(P_TIMELINE);
         assert!(!a.bottom_tab_ids().contains(&P_TIMELINE));
+    }
+
+    #[test]
+    fn a_dragged_tab_lands_by_where_it_is_let_go_on_a_group() {
+        use dock::{Edge, Spot, Zone};
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_max(egui::pos2(1000.0, 100.0), egui::pos2(1400.0, 600.0));
+        ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("group-rects"), vec![GroupRect { id: 7, edge: Edge::Right, rect }]);
+            d.insert_temp(egui::Id::new("root-rect"), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1400.0, 800.0)));
+        });
+        let at = |x: f32, y: f32| spot_at(&ctx, egui::pos2(x, y)).map(|s| s.0);
+        assert_eq!(at(1200.0, 110.0), Some(Spot::At { group: 7, zone: Zone::Center }), "the tab row adds it to the group");
+        assert_eq!(at(1200.0, 350.0), Some(Spot::At { group: 7, zone: Zone::Center }), "so does the middle");
+        assert_eq!(at(1030.0, 350.0), Some(Spot::At { group: 7, zone: Zone::Left }));
+        assert_eq!(at(1200.0, 160.0), Some(Spot::At { group: 7, zone: Zone::Above }), "just under the tab row");
+        assert_eq!(at(1200.0, 590.0), Some(Spot::At { group: 7, zone: Zone::Below }));
+        assert_eq!(at(1395.0, 350.0), Some(Spot::EdgeEnd(Edge::Right)), "the outer edge of the window is a new column");
+        assert_eq!(at(500.0, 795.0), Some(Spot::EdgeEnd(Edge::Bottom)), "and at the bottom a new row");
+        assert_eq!(at(500.0, 300.0), None, "over nothing it does nothing");
+    }
+
+    #[test]
+    fn tab_groups_make_rows_and_columns_in_a_panel_and_come_back_after_a_restart() {
+        let mut a = app();
+        let main = a.dock.group_of(0).unwrap().id;
+        // A tab dropped under the Properties group is a row of its own; beside it, a column.
+        a.place_tab(P_NOTES, dock::Spot::At { group: main, zone: dock::Zone::Below });
+        a.place_tab(P_STATES, dock::Spot::At { group: main, zone: dock::Zone::Right });
+        let plan = a.dock_plan(dock::Edge::Right);
+        assert_eq!(plan.len(), 2, "two columns at the right");
+        assert_eq!(plan[0].2.iter().map(|g| g.2.clone()).collect::<Vec<_>>(), vec![vec![0, 1, 2], vec![P_NOTES], vec![dock::LAYERS]]);
+        assert_eq!(plan[1].2.iter().map(|g| g.2.clone()).collect::<Vec<_>>(), vec![vec![P_STATES]]);
+        // The Timeline is all that is left at the bottom, and then nothing: the bottom panel goes with its last tab.
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE]);
+        a.place_tab(P_TIMELINE, dock::Spot::EdgeEnd(dock::Edge::Right));
+        assert!(a.dock_plan(dock::Edge::Bottom).is_empty());
+        // The layout is written as it is saved and reads back the same.
+        let back = dock::Layout::from_json(&a.dock.to_json()).unwrap();
+        assert_eq!(back.groups().len(), a.dock.groups().len());
+    }
+
+    #[test]
+    fn reset_layout_puts_every_tab_back_where_it_started() {
+        let mut a = app();
+        let main = a.dock.group_of(0).unwrap().id;
+        a.place_tab(P_NOTES, dock::Spot::At { group: main, zone: dock::Zone::Right });
+        a.set_area(1, Area::Window);
+        a.variables_open = true;
+        a.set_area(TOOL_TAB + Tool::Variables.index(), Area::Bottom);
+        a.reset_layout();
+        assert_eq!(a.side_tab_ids(), vec![0, 1, 2, dock::LAYERS]);
+        assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_NOTES, P_STATES]);
+        assert!(a.docked.is_empty() && a.dock.window.contains(&(TOOL_TAB + Tool::Variables.index())), "the tool is a window again");
     }
 
     #[test]
@@ -11742,18 +11931,20 @@ mod tests {
         a.move_tab(2, 0);
         assert_eq!(a.tabs.iter().map(|t| t.slide_id.clone()).collect::<Vec<_>>(), vec![ids[2].clone(), ids[0].clone(), ids[1].clone()]);
         assert_eq!(a.active_tab, Some(0), "the tab that was showing still is");
-        // The side panel: Properties, Triggers, AI until the person moves them.
-        assert_eq!(a.side_tab_ids(), vec![0, 1, 2]);
-        a.move_side_tab(2, 0);
-        assert_eq!(a.side_tab_ids(), vec![2, 0, 1], "AI first");
+        // The side panel: Properties, Triggers, AI until the person moves them (Slide Layers is a group of its own under them).
+        assert_eq!(a.side_tab_ids(), vec![0, 1, 2, dock::LAYERS]);
+        let side = a.dock.group_of(0).unwrap().id;
+        a.move_in_group(side, 2, 0);
+        assert_eq!(a.side_tab_ids(), vec![2, 0, 1, dock::LAYERS], "AI first");
         a.variables_open = true;
-        a.docked.push(Tool::Variables);
-        assert_eq!(a.side_tab_ids(), vec![2, 0, 1, TOOL_TAB + Tool::Variables.index()], "a tab not placed yet follows the others");
-        a.move_side_tab(3, 1);
-        assert_eq!(a.side_tab_ids(), vec![2, TOOL_TAB + Tool::Variables.index(), 0, 1]);
+        a.set_area(TOOL_TAB + Tool::Variables.index(), Area::Side);
+        assert_eq!(a.side_tab_ids(), vec![2, 0, 1, TOOL_TAB + Tool::Variables.index(), dock::LAYERS], "a tab docked later goes at the end of the group");
+        a.move_in_group(side, 3, 1);
+        assert_eq!(a.side_tab_ids(), vec![2, TOOL_TAB + Tool::Variables.index(), 0, 1, dock::LAYERS]);
         // The bottom panel: Timeline, Slide Notes, States, until moved; a hidden tab is skipped and keeps its place.
         assert_eq!(a.bottom_tab_ids(), vec![P_TIMELINE, P_NOTES, P_STATES]);
-        a.move_bottom_tab(0, 2);
+        let low = a.dock.group_of(P_TIMELINE).unwrap().id;
+        a.move_in_group(low, 0, 2);
         assert_eq!(a.bottom_tab_ids(), vec![P_NOTES, P_STATES, P_TIMELINE], "Timeline last");
         a.panels.notes = false;
         assert_eq!(a.bottom_tab_ids(), vec![P_STATES, P_TIMELINE]);

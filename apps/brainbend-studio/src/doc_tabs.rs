@@ -367,6 +367,14 @@ fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut u
             if ui.ctx().data_mut(|d| d.remove_temp::<bool>(r.id.with("popped"))).unwrap_or(false) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-popped", at)), i)); }
             r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, *current == i, label));
             if r.clicked() && *current != i { *current = i; changed = true; }
+            // Without dragging: the same moves from a menu, for the keyboard and for anyone who would rather not drag.
+            if let Some(s) = salt {
+                r.context_menu(|ui| {
+                    for (n, text) in [(0u8, "Pop out into a window"), (1, "Move to the side panel"), (2, "Move to the bottom panel"), (3, "New column at the right"), (4, "New row at the bottom"), (5, "New group beside this one")] {
+                        if ui.button(text).clicked() { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-move", s)), (i, n))); ui.close(); }
+                    }
+                });
+            }
             chips.push(r);
         }
     });
@@ -410,22 +418,29 @@ fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(
     let x = ui.ctx().pointer_latest_pos().map(|p| p.x).unwrap_or(dragged.rect.center().x);
     // Where it would go: after every tab whose middle is to its left.
     let slot = chips.iter().filter(|r| r.rect.center().x < x).count();
+    // Tabs of the panels (their salt starts with "g") can also be let go over another group: the place it would land shows while it is dragged.
+    let panel = salt.starts_with('g');
+    let pos_id = egui::Id::new("tab-drag-pos");
+    let pointer = ui.ctx().pointer_latest_pos();
+    let in_row = pointer.is_some_and(|p| p.y >= dragged.rect.top() - 8.0 && p.y <= dragged.rect.bottom() + 8.0);
     if dragged.dragged() {
-        let at = if slot == 0 { chips[0].rect.left() } else { chips[slot - 1].rect.right() };
-        let top = chips[0].rect.top();
-        ui.painter().line_segment([egui::pos2(at, top + 2.0), egui::pos2(at, top + 28.0)], egui::Stroke::new(2.0, ui.visuals().selection.bg_fill));
+        if in_row || !panel {
+            let at = if slot == 0 { chips[0].rect.left() } else { chips[slot - 1].rect.right() };
+            let top = chips[0].rect.top();
+            ui.painter().line_segment([egui::pos2(at, top + 2.0), egui::pos2(at, top + 28.0)], egui::Stroke::new(2.0, ui.visuals().selection.bg_fill));
+            ui.ctx().data_mut(|d| d.remove_temp::<egui::Pos2>(pos_id));
+        } else if let Some(p) = pointer {
+            ui.ctx().data_mut(|d| d.insert_temp(pos_id, p));
+        }
         ui.ctx().request_repaint();
     }
     if dragged.drag_stopped() {
-        ui.ctx().data_mut(|d| d.remove_temp::<usize>(key));
-        // Let go over the other panel: the tab moves there.
-        let other = match salt { "side" => "bottom", "bottom" => "side", _ => "" };
-        if let (Some(r), Some(p)) = (ui.ctx().data(|d| d.get_temp::<egui::Rect>(egui::Id::new(("panel-rect", other)))), ui.ctx().pointer_latest_pos()) {
-            if r.contains(p) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-dropped-on", salt)), (from, other == "bottom"))); return None; }
-        }
+        ui.ctx().data_mut(|d| { d.remove_temp::<usize>(key); d.remove_temp::<egui::Pos2>(pos_id); });
         // Let go outside the window: the tab is being taken out of the panel, not moved within it.
-        let inside = ui.ctx().pointer_latest_pos().is_some_and(|p| ui.ctx().content_rect().contains(p));
+        let inside = pointer.is_some_and(|p| ui.ctx().content_rect().contains(p));
         if !inside { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-dropped-outside", salt)), from)); return None; }
+        // Let go over another place in the window: the tab goes there (the panels work out where).
+        if panel && !in_row { if let Some(p) = pointer { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-released", salt)), (from, p))); } return None; }
         let to = (if slot > from { slot - 1 } else { slot }).min(chips.len() - 1);
         if to != from { return Some((from, to)); }
     }
