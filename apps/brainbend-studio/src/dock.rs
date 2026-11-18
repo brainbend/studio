@@ -13,7 +13,13 @@ use std::collections::HashMap;
 pub const LAYERS: usize = 30;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum Edge { Right, Bottom }
+pub enum Edge { Right, Bottom, Left, Top }
+
+impl Edge {
+    pub const ALL: [Edge; 4] = [Edge::Right, Edge::Bottom, Edge::Left, Edge::Top];
+    /// At the left and right edges the lanes are columns side by side and the groups in a lane are rows; at the top and bottom it is the other way round.
+    pub fn columns(self) -> bool { matches!(self, Edge::Right | Edge::Left) }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Zone { Center, Left, Right, Above, Below }
@@ -39,6 +45,8 @@ pub struct Lane { pub id: u32, pub groups: Vec<Group>, pub share: f32 }
 pub struct Layout {
     pub right: Vec<Lane>,
     pub bottom: Vec<Lane>,
+    pub left: Vec<Lane>,
+    pub top: Vec<Lane>,
     /// The tabs that are windows of their own.
     pub window: Vec<usize>,
     next: u32,
@@ -47,7 +55,7 @@ pub struct Layout {
 impl Default for Layout {
     /// Properties, Triggers and AI at the right with Slide Layers under them; Timeline, Slide Notes and States at the bottom.
     fn default() -> Self {
-        let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
+        let mut l = Layout { right: vec![], bottom: vec![], left: vec![], top: vec![], window: vec![], next: 1 };
         let main = l.group(vec![0, 1, 2], 0.772);
         let layers = l.group(vec![LAYERS], 0.228);
         let lane = l.lane(vec![main, layers]);
@@ -88,7 +96,7 @@ impl Layout {
         match p {
             Preset::Standard => Layout::default(),
             Preset::Wide => {
-                let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
+                let mut l = Layout { right: vec![], bottom: vec![], left: vec![], top: vec![], window: vec![], next: 1 };
                 let main = l.group(vec![0, 1, 2], 0.7);
                 let layers = l.group(vec![LAYERS], 0.3);
                 let first = l.lane(vec![main, layers]);
@@ -99,7 +107,7 @@ impl Layout {
                 l
             }
             Preset::Tall => {
-                let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
+                let mut l = Layout { right: vec![], bottom: vec![], left: vec![], top: vec![], window: vec![], next: 1 };
                 let main = l.group(vec![0, 1, 2], 0.3);
                 let low = l.group(vec![20, 21, 22], 0.4);
                 let layers = l.group(vec![LAYERS], 0.3);
@@ -114,12 +122,13 @@ impl Layout {
     fn group(&mut self, tabs: Vec<usize>, share: f32) -> Group { let current = tabs.first().copied().unwrap_or(0); Group { id: self.id(), tabs, current, share } }
     fn lane(&mut self, groups: Vec<Group>) -> Lane { Lane { id: self.id(), groups, share: 1.0 } }
 
-    pub fn lanes(&self, edge: Edge) -> &Vec<Lane> { match edge { Edge::Right => &self.right, Edge::Bottom => &self.bottom } }
-    pub fn lanes_mut(&mut self, edge: Edge) -> &mut Vec<Lane> { match edge { Edge::Right => &mut self.right, Edge::Bottom => &mut self.bottom } }
+    pub fn lanes(&self, edge: Edge) -> &Vec<Lane> { match edge { Edge::Right => &self.right, Edge::Bottom => &self.bottom, Edge::Left => &self.left, Edge::Top => &self.top } }
+    pub fn lanes_mut(&mut self, edge: Edge) -> &mut Vec<Lane> { match edge { Edge::Right => &mut self.right, Edge::Bottom => &mut self.bottom, Edge::Left => &mut self.left, Edge::Top => &mut self.top } }
+    fn all_lanes_mut(&mut self) -> impl Iterator<Item = &mut Lane> { self.right.iter_mut().chain(self.bottom.iter_mut()).chain(self.left.iter_mut()).chain(self.top.iter_mut()) }
 
     /// Every group with the edge it is on, in drawing order.
     pub fn groups(&self) -> Vec<(Edge, &Group)> {
-        [Edge::Right, Edge::Bottom].into_iter().flat_map(|e| self.lanes(e).iter().flat_map(move |l| l.groups.iter().map(move |g| (e, g)))).collect()
+        Edge::ALL.into_iter().flat_map(|e| self.lanes(e).iter().flat_map(move |l| l.groups.iter().map(move |g| (e, g)))).collect()
     }
 
     /// The edge a tab is docked on, or `None` when it is a window (or not placed).
@@ -128,7 +137,7 @@ impl Layout {
     pub fn group_of(&self, tab: usize) -> Option<&Group> { self.groups().into_iter().map(|(_, g)| g).find(|g| g.tabs.contains(&tab)) }
 
     pub fn group_mut(&mut self, id: u32) -> Option<&mut Group> {
-        self.right.iter_mut().chain(self.bottom.iter_mut()).flat_map(|l| l.groups.iter_mut()).find(|g| g.id == id)
+        self.all_lanes_mut().flat_map(|l| l.groups.iter_mut()).find(|g| g.id == id)
     }
 
     /// Make a tab the one showing in its group.
@@ -139,7 +148,7 @@ impl Layout {
     /// Take a tab out of wherever it is, and tidy up the groups and lanes that are left empty.
     pub fn remove(&mut self, tab: usize) {
         self.window.retain(|t| *t != tab);
-        for lane in self.right.iter_mut().chain(self.bottom.iter_mut()) {
+        for lane in self.all_lanes_mut() {
             for g in lane.groups.iter_mut() {
                 g.tabs.retain(|t| *t != tab);
                 if g.current == tab { g.current = g.tabs.first().copied().unwrap_or(0); }
@@ -149,7 +158,7 @@ impl Layout {
     }
 
     fn tidy(&mut self) {
-        for edge in [Edge::Right, Edge::Bottom] {
+        for edge in Edge::ALL {
             let lanes = self.lanes_mut(edge);
             for l in lanes.iter_mut() { l.groups.retain(|g| !g.tabs.is_empty()); }
             lanes.retain(|l| !l.groups.is_empty());
@@ -197,7 +206,7 @@ impl Layout {
                     return;
                 }
                 // New groups beside a group in its lane; new lanes beside its lane. Which is which depends on the edge.
-                let in_lane = match (edge, zone) { (Edge::Right, Zone::Above | Zone::Below) | (Edge::Bottom, Zone::Left | Zone::Right) => true, _ => false };
+                let in_lane = if edge.columns() { matches!(zone, Zone::Above | Zone::Below) } else { matches!(zone, Zone::Left | Zone::Right) };
                 let after = matches!(zone, Zone::Right | Zone::Below);
                 let (lane_id, group_id) = (self.lanes(edge)[li].id, group);
                 let _ = (gi, lane_id);
@@ -213,7 +222,7 @@ impl Layout {
                 }
                 // Now take the tab out of its old place (not the new one).
                 let new_id = self.groups().into_iter().map(|(_, g)| g).find(|g| g.tabs == vec![tab] && Some(g.id) != own).map(|g| g.id);
-                for lane in self.right.iter_mut().chain(self.bottom.iter_mut()) {
+                for lane in self.all_lanes_mut() {
                     for g in lane.groups.iter_mut() {
                         if Some(g.id) != new_id { g.tabs.retain(|t| *t != tab); if g.current == tab { g.current = g.tabs.first().copied().unwrap_or(0); } }
                     }
@@ -226,7 +235,7 @@ impl Layout {
 
     /// Where a group is: its edge, its lane's place and its own place in the lane.
     pub fn locate(&self, group: u32) -> Option<(Edge, usize, usize)> {
-        for edge in [Edge::Right, Edge::Bottom] {
+        for edge in Edge::ALL {
             for (li, l) in self.lanes(edge).iter().enumerate() {
                 if let Some(gi) = l.groups.iter().position(|g| g.id == group) { return Some((edge, li, gi)); }
             }
@@ -249,14 +258,17 @@ impl Layout {
         let lanes = |ls: &Vec<Lane>| -> Value {
             Value::Array(ls.iter().map(|l| json!({ "share": l.share, "groups": l.groups.iter().map(|g| json!({ "tabs": g.tabs, "current": g.current, "share": g.share })).collect::<Vec<_>>() })).collect())
         };
-        json!({ "right": lanes(&self.right), "bottom": lanes(&self.bottom), "window": self.window }).to_string()
+        json!({ "right": lanes(&self.right), "bottom": lanes(&self.bottom), "left": lanes(&self.left), "top": lanes(&self.top), "window": self.window }).to_string()
     }
 
     pub fn from_json(text: &str) -> Option<Layout> {
         let v: serde_json::Value = serde_json::from_str(text).ok()?;
-        let mut l = Layout { right: vec![], bottom: vec![], window: vec![], next: 1 };
-        for (edge, key) in [(Edge::Right, "right"), (Edge::Bottom, "bottom")] {
-            for lane in v.get(key)?.as_array()? {
+        let mut l = Layout { right: vec![], bottom: vec![], left: vec![], top: vec![], window: vec![], next: 1 };
+        for (edge, key) in [(Edge::Right, "right"), (Edge::Bottom, "bottom"), (Edge::Left, "left"), (Edge::Top, "top")] {
+            // Layouts saved before the left and top edges existed have no such keys.
+            let empty = vec![];
+            let lanes_in: &Vec<serde_json::Value> = if matches!(edge, Edge::Left | Edge::Top) { v.get(key).and_then(|k| k.as_array()).unwrap_or(&empty) } else { v.get(key)?.as_array()? };
+            for lane in lanes_in {
                 let mut groups = vec![];
                 for g in lane.get("groups")?.as_array()? {
                     let tabs: Vec<usize> = g.get("tabs")?.as_array()?.iter().filter_map(|n| n.as_u64().map(|n| n as usize)).collect();
@@ -373,5 +385,34 @@ mod tests {
         assert_eq!(back.window, l.window);
         assert_eq!(back.group_of(21).unwrap().current, 21);
         assert!(Layout::from_json("not json").is_none());
+    }
+
+    #[test]
+    fn the_left_and_top_edges_work_like_the_right_and_bottom() {
+        let mut l = Layout::default();
+        l.place(1, Spot::EdgeEnd(Edge::Left));
+        l.place(21, Spot::EdgeEnd(Edge::Top));
+        assert_eq!(l.edge_of(1), Some(Edge::Left));
+        assert_eq!(l.edge_of(21), Some(Edge::Top));
+        assert_eq!(l.right.len(), 1, "the right edge keeps the others");
+        // On the left the lanes are columns, so below a group is a new row; on the top they are rows, so beside a group is a new column.
+        let one = l.group_of(1).unwrap().id;
+        l.place(2, Spot::At { group: one, zone: Zone::Below });
+        assert_eq!(l.left.len(), 1);
+        assert_eq!(l.left[0].groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), vec![vec![1], vec![2]]);
+        let top = l.group_of(21).unwrap().id;
+        l.place(22, Spot::At { group: top, zone: Zone::Right });
+        assert_eq!(l.top.len(), 1);
+        assert_eq!(l.top[0].groups.len(), 2);
+        // Both come back after a restart, and a layout saved before these edges existed still loads.
+        assert_eq!(Layout::from_json(&l.to_json()).unwrap().to_json(), l.to_json());
+        let old = r#"{"right":[{"share":1.0,"groups":[{"tabs":[0],"current":0,"share":1.0}]}],"bottom":[],"window":[3]}"#;
+        let o = Layout::from_json(old).unwrap();
+        assert!(o.left.is_empty() && o.top.is_empty() && o.edge_of(0) == Some(Edge::Right));
+        // Moving the last tab away tidies the edge.
+        let mut l = Layout::default();
+        l.place(1, Spot::EdgeEnd(Edge::Left));
+        l.place(1, Spot::EdgeEnd(Edge::Right));
+        assert!(l.left.is_empty());
     }
 }

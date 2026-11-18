@@ -1554,7 +1554,7 @@ impl App {
             ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Where things are").strong());
-            ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, or out of the app for a window. Right-click a tab for the same moves from a menu.");
+            ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, to the left or top edge of the slide for a panel there, or out of the app for a window. Right-click a tab for the same moves from a menu.");
             ui.horizontal_wrapped(|ui| {
                 for pr in crate::dock::Preset::ALL {
                     if ui.button(pr.name()).on_hover_text(pr.about()).clicked() { preset = Some(pr); }

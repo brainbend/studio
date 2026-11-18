@@ -370,7 +370,7 @@ fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut u
             // Without dragging: the same moves from a menu, for the keyboard and for anyone who would rather not drag.
             if let Some(s) = salt {
                 r.context_menu(|ui| {
-                    for (n, text) in [(0u8, "Pop out into a window"), (1, "Move to the side panel"), (2, "Move to the bottom panel"), (3, "New column at the right"), (4, "New row at the bottom"), (5, "New group beside this one")] {
+                    for (n, text) in [(0u8, "Pop out into a window"), (1, "Move to the side panel"), (2, "Move to the bottom panel"), (3, "Move to the left panel"), (4, "Move to the top panel"), (5, "New column at the right"), (6, "New row at the bottom"), (7, "New group beside this one")] {
                         if ui.button(text).clicked() { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("tab-move", s)), (i, n))); ui.close(); }
                     }
                 });

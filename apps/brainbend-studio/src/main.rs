@@ -816,7 +816,12 @@ const PANEL_IDS: [usize; 6] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES];
 
 /// Where a tab is: in the side panel, in the bottom panel, or in a window of its own outside the app.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Area { Side, Bottom, Window }
+pub(crate) enum Area { Side, Bottom, Left, Top, Window }
+
+impl Area {
+    fn edge(self) -> Option<dock::Edge> { match self { Area::Side => Some(dock::Edge::Right), Area::Bottom => Some(dock::Edge::Bottom), Area::Left => Some(dock::Edge::Left), Area::Top => Some(dock::Edge::Top), Area::Window => None } }
+    fn of(edge: Option<dock::Edge>) -> Area { match edge { Some(dock::Edge::Right) => Area::Side, Some(dock::Edge::Bottom) => Area::Bottom, Some(dock::Edge::Left) => Area::Left, Some(dock::Edge::Top) => Area::Top, None => Area::Window } }
+}
 
 impl Tool {
     fn title(self) -> &'static str {
@@ -897,6 +902,15 @@ fn spot_at(ctx: &egui::Context, pos: egui::Pos2) -> Option<(dock::Spot, egui::Re
         let bottom = egui::Rect::from_min_max(egui::pos2(root.left(), root.bottom() - EDGE_STRIP), root.max);
         if right.contains(pos) && over.map_or(true, |g| g.edge == Edge::Right) { return Some((Spot::EdgeEnd(Edge::Right), right)); }
         if bottom.contains(pos) && over.map_or(true, |g| g.edge == Edge::Bottom) { return Some((Spot::EdgeEnd(Edge::Bottom), bottom)); }
+    }
+    // The left and top edges of the slide area: a new column on its left, a new row above it.
+    if let Some(canvas) = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))) {
+        let left = egui::Rect::from_min_size(canvas.min, egui::vec2(EDGE_STRIP, canvas.height()));
+        let top = egui::Rect::from_min_size(canvas.min, egui::vec2(canvas.width(), EDGE_STRIP));
+        if over.is_none() {
+            if left.contains(pos) { return Some((Spot::EdgeEnd(Edge::Left), left)); }
+            if top.contains(pos) { return Some((Spot::EdgeEnd(Edge::Top), top)); }
+        }
     }
     let g = over?;
     let r = g.rect;
@@ -982,7 +996,7 @@ impl App {
 
     /// Where a tab is: in the side panel, the bottom panel or a window of its own.
     fn area_of(&self, g: usize) -> Area {
-        match self.dock.edge_of(g) { Some(dock::Edge::Right) => Area::Side, Some(dock::Edge::Bottom) => Area::Bottom, None => Area::Window }
+        Area::of(self.dock.edge_of(g))
     }
 
     /// Remember the layout, and keep the list of docked tools (the setting that says a tool opens docked) in step with it.
@@ -999,7 +1013,7 @@ impl App {
 
     /// Put a tab in the side panel, the bottom panel or a window of its own. It is remembered.
     fn set_area(&mut self, g: usize, area: Area) {
-        match area { Area::Window => self.dock.pop_out(g), Area::Side => self.dock.dock(g, dock::Edge::Right), Area::Bottom => self.dock.dock(g, dock::Edge::Bottom) }
+        match area.edge() { None => self.dock.pop_out(g), Some(edge) => self.dock.dock(g, edge) }
         self.show_panel_tab(g);
         self.layout_changed();
     }
@@ -1029,7 +1043,7 @@ impl App {
     /// Show a tab if it is in a panel (the tab of a window is already showing).
     fn show_panel_tab(&mut self, g: usize) {
         self.dock.show(g);
-        match self.dock.edge_of(g) { Some(dock::Edge::Right) => self.right_tab = g, Some(dock::Edge::Bottom) => self.bottom_tab = g, None => {} }
+        match self.dock.edge_of(g) { Some(dock::Edge::Right | dock::Edge::Left) => self.right_tab = g, Some(dock::Edge::Bottom | dock::Edge::Top) => self.bottom_tab = g, None => {} }
     }
 
     /// Before a frame, `right_tab` and `bottom_tab` (the tab showing in the group that last had one set) are made the ones showing...
@@ -1048,8 +1062,8 @@ impl App {
     /// Whether the States panel is the one showing, wherever it is.
     fn states_showing(&self) -> bool {
         let showing = |edge: Option<dock::Edge>, g: Option<&dock::Group>| match edge {
-            Some(dock::Edge::Right) => self.right_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
-            Some(dock::Edge::Bottom) => self.bottom_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
+            Some(dock::Edge::Right | dock::Edge::Left) => self.right_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
+            Some(dock::Edge::Bottom | dock::Edge::Top) => self.bottom_tab == P_STATES || g.is_some_and(|g| g.current == P_STATES),
             None => true,
         };
         self.panels.states && showing(self.dock.edge_of(P_STATES), self.dock.group_of(P_STATES))
@@ -1057,7 +1071,7 @@ impl App {
 
     /// The tabs that show in the side panel or the bottom panel, in order across its groups; for a window, the panels that are windows and on.
     fn tabs_in(&self, area: Area) -> Vec<usize> {
-        let edge = match area { Area::Side => dock::Edge::Right, Area::Bottom => dock::Edge::Bottom, Area::Window => return self.dock.window.iter().copied().filter(|g| !Self::is_tool_id(*g) && self.tab_visible(*g)).collect() };
+        let Some(edge) = area.edge() else { return self.dock.window.iter().copied().filter(|g| !Self::is_tool_id(*g) && self.tab_visible(*g)).collect() };
         self.dock.lanes(edge).iter().flat_map(|l| l.groups.iter()).flat_map(|g| g.tabs.iter().copied()).filter(|g| self.tab_visible(*g)).collect()
     }
 
@@ -1141,7 +1155,11 @@ impl App {
     }
 
     /// Whether a tool shows as a tab of the side panel: where it was left, except in the 360° editor, whose panel is its own.
-    fn tool_docked(&self, t: Tool) -> bool { self.area_of(TOOL_TAB + t.index()) != Area::Window && self.can_dock_here() }
+    fn tool_docked(&self, t: Tool) -> bool {
+        let area = self.area_of(TOOL_TAB + t.index());
+        // The Scene View has only the side panel, so a tool docked anywhere else shows as a window there.
+        area != Area::Window && self.can_dock_here() && (!self.scene_view || area == Area::Side)
+    }
 
     /// Docking needs the side panel: the 360° editor and a web lesson have their own.
     fn can_dock_here(&self) -> bool { self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web()) }
@@ -1250,9 +1268,19 @@ impl App {
                 // A terminal wants room, so the side panel is wider while one is showing (and remembers each width).
                 let wide = plan.iter().flat_map(|l| l.2.iter()).any(|g| (g.3 == AI_TAB && self.assistant.shows_terminal()) || Self::is_tool_id(g.3));
                 let id = format!("{}{}", if wide { "inspector-terminal" } else { "inspector" }, if n > 1 { format!("-{n}") } else { String::new() });
-                // Whatever the window, the slide keeps room: the slide list and at least 360 points of canvas stay, and the columns share the rest.
-                let max = (ctx.content_rect().width() - 248.0 - 360.0).max(280.0);
+                // Whatever the window, the slide keeps room: at least 360 points of canvas stay, and the columns share the rest.
+                let max = (root.available_rect_before_wrap().width() - 360.0).max(280.0);
                 egui::Panel::right(id).default_size(((if wide { 560.0 } else { 326.0 }) * n as f32).min(max)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+            }
+            dock::Edge::Left => {
+                let id = if n > 1 { format!("dock-left-{n}") } else { "dock-left".to_string() };
+                let max = (root.available_rect_before_wrap().width() - 360.0).max(280.0);
+                egui::Panel::left(id).resizable(true).default_size((326.0 * n as f32).min(max)).min_size(200.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+            }
+            dock::Edge::Top => {
+                let id = if n > 1 { format!("dock-top-{n}") } else { "dock-top".to_string() };
+                let max = (root.available_rect_before_wrap().height() * 0.6).max(120.0);
+                egui::Panel::top(id).resizable(true).default_size((220.0 * n as f32).min(max)).min_size(80.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
             }
             dock::Edge::Bottom => {
                 let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
@@ -1274,7 +1302,7 @@ impl App {
     fn dock_lanes(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, edge: dock::Edge, plan: &[(u32, f32, Vec<(u32, f32, Vec<usize>, usize)>)], slide_idx: usize, wants: &mut SideWants) {
         const GAP: f32 = 6.0;
         let full = ui.available_rect_before_wrap();
-        let across = edge == dock::Edge::Right; // lanes are columns at the right edge, rows at the bottom
+        let across = edge.columns(); // lanes are columns at the left and right edges, rows at the top and bottom
         let split = |rect: egui::Rect, shares: &[f32], horizontal: bool, min: f32| -> Vec<egui::Rect> {
             let n = shares.len();
             let total = if horizontal { rect.width() } else { rect.height() } - GAP * n.saturating_sub(1) as f32;
@@ -1318,8 +1346,10 @@ impl App {
                                 0 => self.set_area(g, Area::Window),
                                 1 => self.set_area(g, Area::Side),
                                 2 => self.set_area(g, Area::Bottom),
-                                3 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Right)),
-                                4 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Bottom)),
+                                3 => self.set_area(g, Area::Left),
+                                4 => self.set_area(g, Area::Top),
+                                5 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Right)),
+                                6 => self.place_tab(g, dock::Spot::EdgeEnd(dock::Edge::Bottom)),
                                 _ => self.place_tab(g, dock::Spot::At { group: *gid, zone: if across { dock::Zone::Below } else { dock::Zone::Right } }),
                             }
                         }
@@ -1372,7 +1402,7 @@ impl App {
 
     /// A tab was chosen in a group: it is the tab showing, and the one `right_tab` or `bottom_tab` names if it is in the group they name.
     fn sync_current_out_to(&mut self, g: usize) {
-        match self.dock.edge_of(g) { Some(dock::Edge::Right) => self.right_tab = g, Some(dock::Edge::Bottom) => self.bottom_tab = g, None => {} }
+        match self.dock.edge_of(g) { Some(dock::Edge::Right | dock::Edge::Left) => self.right_tab = g, Some(dock::Edge::Bottom | dock::Edge::Top) => self.bottom_tab = g, None => {} }
     }
 
     /// The Properties tab: the settings of whatever is chosen. Also the body of its window when it is popped out.
@@ -7685,6 +7715,8 @@ impl App {
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
         self.dock_edge(root, ctx, dock::Edge::Right, slide_idx, &mut wants);
         self.panel_windows(ctx, slide_idx, &mut wants);
+        self.dock_edge(root, ctx, dock::Edge::Left, slide_idx, &mut wants);
+        self.dock_edge(root, ctx, dock::Edge::Top, slide_idx, &mut wants);
         self.dock_edge(root, ctx, dock::Edge::Bottom, slide_idx, &mut wants);
         ctx.data_mut(|d| { let next: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); d.insert_temp(egui::Id::new("group-rects"), next); });
         dock_drag_overlay(ctx);
@@ -7745,6 +7777,7 @@ impl App {
             let avail = ui.available_size();
             let (resp, painter) = ui.allocate_painter(avail, egui::Sense::click_and_drag());
             let area = resp.rect;
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("canvas-rect"), area));
             let painter = painter.with_clip_rect(area);
             painter.rect_filled(area, 0.0, if ui.visuals().dark_mode { egui::Color32::from_gray(42) } else { egui::Color32::from_gray(222) });
             let fit = ((avail.x - 40.0) / slide.width).min((avail.y - 40.0) / slide.height).max(0.02);
@@ -12077,6 +12110,29 @@ mod tests {
         let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
         let left = rects.iter().filter(|r| r.edge == dock::Edge::Right).map(|r| r.rect.left()).fold(f32::MAX, f32::min);
         assert!(left >= 248.0 + 360.0 - 1.0, "the columns start at {left}, leaving 360 points for the slide");
+    }
+
+    #[test]
+    fn panels_can_sit_at_the_left_and_the_top_of_the_slide() {
+        let mut a = app();
+        a.set_area(P_TRIGGERS, Area::Left);
+        a.set_area(P_NOTES, Area::Top);
+        assert_eq!(a.area_of(P_TRIGGERS), Area::Left);
+        assert_eq!(a.tabs_in(Area::Top), vec![P_NOTES]);
+        let mut h = harness(a);
+        h.run_steps(5);
+        let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+        let at = |e: dock::Edge| rects.iter().find(|r| r.edge == e).map(|r| r.rect);
+        let (left, top, canvas) = (at(dock::Edge::Left).expect("left panel"), at(dock::Edge::Top).expect("top panel"), h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("canvas"));
+        assert!(left.right() <= canvas.left() + 1.0 && top.bottom() <= canvas.top() + 1.0, "the panels are beside the canvas, not over it");
+        assert!(left.left() > 200.0, "the left panel is next to the slide list");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("left-top.png")).unwrap(); }
+        // A tab let go at the left or top edge of the slide area goes there.
+        let ctx = egui::Context::default();
+        ctx.data_mut(|d| { d.insert_temp(egui::Id::new("canvas-rect"), egui::Rect::from_min_max(egui::pos2(300.0, 100.0), egui::pos2(900.0, 600.0))); });
+        assert_eq!(spot_at(&ctx, egui::pos2(310.0, 300.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Left)));
+        assert_eq!(spot_at(&ctx, egui::pos2(600.0, 110.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Top)));
+        assert_eq!(spot_at(&ctx, egui::pos2(600.0, 300.0)).map(|s| s.0), None);
     }
 
     #[test]
