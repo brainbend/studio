@@ -4,6 +4,8 @@
 //! it is asked for from: a menu, a button, the keyboard. The Edit commands do the right thing for what has the keyboard (the slides when the slide
 //! list or Scene View has it, the objects on the slide otherwise); the Window commands show and hide the panels and lay them out.
 use crate::{dock, App};
+use eframe::egui;
+
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Cmd {
@@ -20,6 +22,40 @@ pub(crate) enum Cmd {
     TogglePanel(usize),
     /// Lay the panels out the way a preset says.
     Preset(dock::Preset),
+    New,
+    Open,
+    Save,
+    SaveAs,
+    Publish,
+    Settings,
+    Quit,
+    ZoomIn,
+    ZoomOut,
+    ZoomFit,
+    ZoomActual,
+    ShowRibbon,
+    DarkMode,
+    ShowMenuBar,
+    Docs,
+    SubmitIssue,
+    Community,
+    CheckForUpdates,
+}
+
+/// One line of a menu.
+#[derive(Clone, Copy)]
+pub(crate) enum Item { Do(Cmd), Gap }
+
+/// The menus, in order: what the menu bar (and later the macOS menu bar) shows.
+pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
+    use Item::{Do, Gap};
+    vec![
+        ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
+        ("Edit", vec![Do(Cmd::Undo), Do(Cmd::Redo), Gap, Do(Cmd::Cut), Do(Cmd::Copy), Do(Cmd::Paste), Do(Cmd::Delete), Gap, Do(Cmd::Duplicate), Do(Cmd::SelectAll), Gap, Do(Cmd::Find)]),
+        ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowRibbon), Do(Cmd::ShowMenuBar), Do(Cmd::DarkMode)]),
+        ("Window", PANELS.iter().map(|&g| Do(Cmd::TogglePanel(g))).chain([Gap]).chain(dock::Preset::ALL.iter().map(|&p| Do(Cmd::Preset(p)))).collect()),
+        ("Help", vec![Do(Cmd::Docs), Do(Cmd::SubmitIssue), Do(Cmd::Community), Gap, Do(Cmd::CheckForUpdates)]),
+    ]
 }
 
 /// The Edit menu, in order (a gap between the groups goes after Redo, Delete and SelectAll).
@@ -47,6 +83,24 @@ impl Cmd {
             Cmd::Find => "Find and Replace".into(),
             Cmd::TogglePanel(g) => App::panel_title(g).into(),
             Cmd::Preset(p) => p.name().into(),
+            Cmd::New => "New Project".into(),
+            Cmd::Open => "Open…".into(),
+            Cmd::Save => "Save".into(),
+            Cmd::SaveAs => "Save As…".into(),
+            Cmd::Publish => "Publish…".into(),
+            Cmd::Settings => "Studio Settings…".into(),
+            Cmd::Quit => if cfg!(target_os = "macos") { "Quit BrainBend Studio".into() } else { "Exit".into() },
+            Cmd::ZoomIn => "Zoom In".into(),
+            Cmd::ZoomOut => "Zoom Out".into(),
+            Cmd::ZoomFit => "Fit to Window".into(),
+            Cmd::ZoomActual => "Actual Size".into(),
+            Cmd::ShowRibbon => "Keep the Ribbon Open".into(),
+            Cmd::DarkMode => "Dark Mode".into(),
+            Cmd::ShowMenuBar => "Show Menu Bar".into(),
+            Cmd::Docs => "Documentation".into(),
+            Cmd::SubmitIssue => "Submit an Issue…".into(),
+            Cmd::Community => "BrainBend Community…".into(),
+            Cmd::CheckForUpdates => "Check for Updates".into(),
         }
     }
 
@@ -62,7 +116,13 @@ impl Cmd {
             Cmd::SelectAll => "A",
             Cmd::Find => "F",
             Cmd::Delete => return Some(if cfg!(target_os = "macos") { "⌫".into() } else { "Del".into() }),
-            Cmd::TogglePanel(_) | Cmd::Preset(_) => return None,
+            Cmd::New => "N",
+            Cmd::Open => "O",
+            Cmd::Save => "S",
+            Cmd::SaveAs => "⇧S",
+            Cmd::Quit => return Some(if cfg!(target_os = "macos") { "⌘Q".into() } else { "Alt+F4".into() }),
+            Cmd::Settings => return Some(if cfg!(target_os = "macos") { "⌘,".into() } else { "Ctrl+,".into() }),
+            _ => return None,
         };
         Some(if cfg!(target_os = "macos") { format!("⌘{}", key.replace("⇧", "⇧")) } else { format!("Ctrl+{}", key.replace('⇧', "Shift+")) })
     }
@@ -74,21 +134,32 @@ impl App {
 
     /// Whether a command can run now (a menu greys it out when not).
     pub(crate) fn cmd_enabled(&self, c: Cmd) -> bool {
-        if self.project.is_none() { return false; }
+        let has = self.project.is_some();
         let slides = self.editing_slides();
         match c {
+            Cmd::New | Cmd::Open | Cmd::Settings | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
+            Cmd::Docs => false,
+            Cmd::CheckForUpdates => !matches!(self.updater.state, crate::update::State::Checking(_)),
+            _ if !has => false,
             Cmd::Undo => !self.undo.is_empty(),
             Cmd::Redo => !self.redo.is_empty(),
             Cmd::Cut | Cmd::Delete => if slides { self.project.as_ref().is_some_and(|p| p.slides.len() > self.slide_selection().len()) } else { self.selected.is_some() },
             Cmd::Copy | Cmd::Duplicate => slides || self.selected.is_some(),
             Cmd::Paste => if slides { !self.slide_clip.is_empty() } else { self.clipboard.is_some() },
-            Cmd::SelectAll | Cmd::Find | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
+            Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ShowRibbon => true,
+            Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomFit | Cmd::ZoomActual => !self.scene_view && !self.file_view,
         }
     }
 
     /// Whether a switch is on: `None` for a command that is not a switch.
     pub(crate) fn cmd_checked(&self, c: Cmd) -> Option<bool> {
-        match c { Cmd::TogglePanel(g) => Some(self.panel_shown(g)), _ => None }
+        match c {
+            Cmd::TogglePanel(g) => Some(self.panel_shown(g)),
+            Cmd::ShowRibbon => Some(self.ribbon_pinned),
+            Cmd::ShowMenuBar => Some(self.show_menu_bar),
+            Cmd::DarkMode => Some(self.ctx_copy.as_ref().is_some_and(|c| c.theme() == egui::Theme::Dark)),
+            _ => None,
+        }
     }
 
     /// Do it.
@@ -106,7 +177,60 @@ impl App {
             Cmd::Find => { self.find.get_or_insert_with(Default::default).focus = true; }
             Cmd::TogglePanel(g) => { let on = !self.panel_shown(g); self.set_panel_shown(g, on); }
             Cmd::Preset(p) => self.apply_preset(p),
+            Cmd::New => self.guard(crate::Pending::New),
+            Cmd::Open => self.guard(crate::Pending::Open),
+            Cmd::Save => self.save(false),
+            Cmd::SaveAs => self.save(true),
+            Cmd::Publish => self.publish_open = true,
+            Cmd::Settings => self.settings_open = true,
+            Cmd::Quit => if let Some(ctx) = &self.ctx_copy { ctx.send_viewport_cmd(egui::ViewportCommand::Close); },
+            Cmd::ZoomIn => self.zoom = (self.zoom * 1.25).clamp(0.1, 8.0),
+            Cmd::ZoomOut => self.zoom = (self.zoom / 1.25).clamp(0.1, 8.0),
+            Cmd::ZoomFit => { self.zoom = 1.0; self.pan = egui::Vec2::ZERO; }
+            Cmd::ZoomActual => { self.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.pan = egui::Vec2::ZERO; }
+            Cmd::ShowRibbon => { self.ribbon_pinned = !self.ribbon_pinned; crate::prefs::set_bool("ribbon_pinned", self.ribbon_pinned); }
+            Cmd::ShowMenuBar => { self.show_menu_bar = !self.show_menu_bar; crate::prefs::set_bool("show_menu_bar", self.show_menu_bar); }
+            Cmd::DarkMode => if let Some(ctx) = &self.ctx_copy {
+                let dark = ctx.theme() == egui::Theme::Dark;
+                ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+            },
+            Cmd::Docs => {}
+            Cmd::SubmitIssue => crate::update::open_in_browser(crate::ribbon::ISSUES_URL),
+            Cmd::Community => crate::update::open_in_browser(crate::ribbon::COMMUNITY_URL),
+            Cmd::CheckForUpdates => if let Some(ctx) = self.ctx_copy.clone() { self.updater.check_now(&ctx); },
         }
+    }
+
+    /// The menu bar drawn inside the window: the menus of `menus()`, each line greyed out or ticked by the command's own rules.
+    pub(crate) fn menu_bar(&mut self, root: &mut egui::Ui) {
+        if !self.show_menu_bar { return; }
+        let bg = root.visuals().panel_fill;
+        egui::Panel::top("menubar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 0))).show_separator_line(false).show(root, |ui| {
+            let mut run: Option<Cmd> = None;
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.set_min_height(26.0);
+                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().button_padding = egui::vec2(9.0, 3.0);
+                ui.add_space(4.0);
+                for (name, items) in menus() {
+                    ui.menu_button(name, |ui| {
+                        ui.set_min_width(210.0);
+                        for item in items {
+                            match item {
+                                Item::Gap => { ui.separator(); }
+                                Item::Do(c) => {
+                                    let mut button = egui::Button::new(c.label());
+                                    if let Some(sc) = c.shortcut() { button = button.shortcut_text(sc); }
+                                    if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
+                                    if ui.add_enabled(self.cmd_enabled(c), button).clicked() { run = Some(c); ui.close(); }
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            if let Some(c) = run { self.run_cmd(c); }
+        });
     }
 
     /// Every slide of the scene being shown (or every slide, in the Scene View).

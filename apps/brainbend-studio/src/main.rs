@@ -251,6 +251,10 @@ struct App {
     slide_multi: Vec<String>,
     /// The last click was on a slide in the slide list, so the keys act on slides (the Scene View always counts).
     slides_focus: bool,
+    /// The window's context, kept so a command (from a menu or a key) can reach what needs it.
+    ctx_copy: Option<egui::Context>,
+    /// The menu bar drawn inside the window (File, Edit, View, Window, Help).
+    show_menu_bar: bool,
     /// A tab that was pulled out of a panel and is being carried to a new place as a window: the tab and where the pointer holds the window.
     tear: Option<(usize, egui::Vec2)>,
     /// A slide was pressed on during this frame (so the press did not take the focus away from the slides).
@@ -538,7 +542,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(target_os = "macos", test))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -7486,6 +7490,7 @@ impl App {
         self.menu_pick_clear(root.ctx());
         self.sync_tabs();
         self.begin_state_swap();
+        self.ctx_copy = Some(root.ctx().clone());
         self.drive_tear(&root.ctx().clone());
         self.show_frame(root);
         // A press anywhere but on a slide takes the keys back to the canvas.
@@ -12381,6 +12386,30 @@ mod tests {
         for c in commands::EDIT.into_iter().chain(commands::window()) { assert!(!c.label().is_empty()); }
         assert_eq!(Cmd::Undo.shortcut().map(|s| s.ends_with('Z')), Some(true));
         assert!(Cmd::TogglePanel(0).shortcut().is_none());
+    }
+
+    #[test]
+    fn the_menu_bar_draws_the_menus_from_the_commands_and_runs_them() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.show_menu_bar = true;
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        for m in ["Edit", "View", "Window"] { assert!(h.query_all_by_label(m).next().is_some(), "{m} menu is in the bar"); }
+        // Window: a switch for a panel.
+        h.get_all_by_label("Window").next().unwrap().click();
+        h.run_steps(3);
+        // The menu line, not the panel's own tab: the menu hangs from the top of the window.
+        h.get_all_by_label("Timeline").min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).unwrap().click();
+        h.run_steps(3);
+        assert!(!h.state().panels.timeline, "the Window menu hid the Timeline");
+        // Edit: a greyed line cannot be run.
+        h.get_all_by_label("Edit").next().unwrap().click();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Paste").is_some() && !h.state().cmd_enabled(commands::Cmd::Paste), "Paste is listed, and greyed out because nothing was copied");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("menu-bar.png")).unwrap(); }
+        assert_eq!(commands::menus().iter().map(|m| m.0).collect::<Vec<_>>(), vec!["File", "Edit", "View", "Window", "Help"]);
     }
 
     #[test]

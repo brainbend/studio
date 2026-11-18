@@ -503,7 +503,7 @@ pub const PROJECT_TAB: usize = 1;
 pub const SLIDES_TAB: usize = 2;
 pub const OBJECTS_TAB: usize = 3;
 pub const HELP_TAB: usize = 4;
-const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
+pub(crate) const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
 pub const COMMUNITY_URL: &str = "https://brainbend.org/discord/";
@@ -1122,6 +1122,7 @@ impl App {
         if !ctx.fonts(|f| f.families().contains(&icons())) { return; }
         self.sync_color_events(ctx);
         self.title_bar(root, ctx);
+        self.menu_bar(root);
         self.run_format_painter(ctx);
         // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
@@ -1583,12 +1584,14 @@ impl App {
         let mut hover = self.ribbon_hover;
         let mut each_tab = self.new_tab_each;
         let mut preset: Option<crate::dock::Preset> = None;
+        let mut menu_bar = self.show_menu_bar;
         let mut panels = self.panels;
         crate::dock_tool(ui, "Studio Settings", &mut open, |ui| {
             ui.label(egui::RichText::new("Windows and panels").strong());
             ui.checkbox(&mut one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
             ui.checkbox(&mut hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
             ui.checkbox(&mut each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
+            ui.checkbox(&mut menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
             ui.add_space(10.0);
             ui.label(egui::RichText::new("Where things are").strong());
             ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, to the left or top edge of the slide for a panel there, or out of the app for a window. Right-click a tab for the same moves from a menu.");
@@ -1621,6 +1624,7 @@ impl App {
             });
         });
         if let Some(pr) = preset { self.apply_preset(pr); }
+        if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
