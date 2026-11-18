@@ -12,13 +12,17 @@ use crate::view::View;
 pub(crate) struct SlideTab {
     pub slide_id: String,
     /// What the editor holds for this slide while another is showing: its layer, selection, zoom, pan and the rest (see `view.rs`).
-    view: View,
+    pub(crate) view: View,
     bottom_tab: usize,
+}
+
+impl SlideTab {
+    pub(crate) fn new(slide_id: String, view: View, bottom_tab: usize) -> SlideTab { SlideTab { slide_id, view, bottom_tab } }
 }
 
 impl App {
     /// The slide's number, written scene.position, e.g. "1.5".
-    fn slide_number(&self, i: usize) -> String {
+    pub(crate) fn slide_number(&self, i: usize) -> String {
         let Some(p) = &self.project else { return String::new() };
         let Some(s) = p.slides.get(i) else { return String::new() };
         let si = p.scenes.iter().position(|c| c.id == s.scene).unwrap_or(0);
@@ -190,6 +194,9 @@ impl App {
         let mut close: Option<usize> = None;
         let mut close_others: Option<usize> = None;
         let mut close_all = false;
+        let mut pop_out: Option<usize> = None;
+        let mut chip_keys: Vec<String> = vec![];
+        let mut chip_tear: Option<usize> = None;
         let mut moved_tab: Option<(usize, usize)> = None;
         let labels: Vec<(String, String)> = if let Some(st) = &self.master_stash {
             // The Layout Builder swaps the project's slides for its own, so the open slides are named from the copy kept at entry.
@@ -229,7 +236,7 @@ impl App {
         let dark = root.visuals().dark_mode;
         let band = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
         let line = root.visuals().selection.bg_fill;
-        egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
+        let strip_panel = egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
                 let mut slide_chips: Vec<egui::Response> = vec![];
@@ -241,6 +248,7 @@ impl App {
                         let (r, closed) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", shown, closable, 160.0);
                         if closed { close_scene = Some(key.clone()); } else if r.clicked() { go_story = true; scene_pick = Some(key.clone()); }
                         slide_chips.push(r);
+                        chip_keys.push(key.clone());
                         continue;
                     }
                     if key == "layout" {
@@ -250,6 +258,7 @@ impl App {
                         if closed { close_builder = true; }
                         else if r.clicked() && !master { open_builder = true; }
                         slide_chips.push(r);
+                        chip_keys.push(key.clone());
                         continue;
                     }
                     if key == "pano" {
@@ -260,6 +269,7 @@ impl App {
                         if closed { close_pano = true; }
                         else if r.clicked() && !pano_open { open_pano = true; }
                         slide_chips.push(r);
+                        chip_keys.push(key.clone());
                         continue;
                     }
                     let Some(k) = self.tabs.iter().position(|t| format!("s:{}", t.slide_id) == *key) else { continue };
@@ -272,13 +282,16 @@ impl App {
                     if in_mode { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone())); }
                     if closed || r.middle_clicked() { close = Some(k); } else if r.clicked() { go_slide = Some(id.clone()); }
                     slide_chips.push(r.clone());
+                    chip_keys.push(key.clone());
                     if !in_mode { r.context_menu(|ui| {
+                        if ui.button("Open in new window").clicked() { pop_out = Some(k); ui.close(); }
                         if ui.button("Close").clicked() { close = Some(k); ui.close(); }
                         if ui.add_enabled(labels.len() > 1, egui::Button::new("Close other tabs")).clicked() { close_others = Some(k); ui.close(); }
                         if ui.button("Close all tabs").clicked() { close_all = true; ui.close(); }
                     }); }
                 }
                 moved_tab = drag_reorder(ui, "strip", &slide_chips);
+                chip_tear = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("strip-tear", 0u8))));
                 // A "+" at the end opens the Scene View; if its tab was closed, the tab comes back at the right end.
                 let (plus, _) = tab_chip_sized(ui, None, "+", false, false, 34.0, 16.0);
                 plus.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Open Scene View"));
@@ -286,8 +299,16 @@ impl App {
             });
             let full = egui::Rect::from_min_max(egui::pos2(row.response.rect.left() - 8.0, row.response.rect.bottom() - 2.0), egui::pos2(ui.clip_rect().right().max(row.response.rect.right() + 8.0), row.response.rect.bottom()));
             ui.painter().rect_filled(full, 0.0, line);
+            open_under_active_tab(ui, full);
         });
+        // Where the strip is, so a slide's window carried over it can be put back.
+        root.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-strip-rect"), strip_panel.response.rect));
         if let Some((from, to)) = moved_tab { self.move_strip(from, to); }
+        if let Some(k) = pop_out { self.pop_out_slide_tab(k); }
+        else if let Some(k) = chip_tear.and_then(|n| chip_keys.get(n)).and_then(|key| key.strip_prefix("s:")).and_then(|id| self.tabs.iter().position(|t| t.slide_id == id)) {
+            root.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-drag", "strip"))));
+            self.begin_window_tear(&root.ctx().clone(), k);
+        }
         if open_scene { self.new_scene_tab(); go_story = true; }
         else if let Some(k) = scene_pick { self.scene_active = k; }
         if let Some(k) = close_scene {
@@ -400,7 +421,12 @@ fn panel_tabs_inner(ui: &mut egui::Ui, tabs: &[(usize, String)], current: &mut u
 
 /// The tab at the top of a tool's window of its own, drawn like the tabs of the panels: dragging it onto the side panel docks the tool
 /// there. Returns the tab.
-pub(super) fn window_tab(ui: &mut egui::Ui, label: &str, inset: f32) -> (egui::Response, bool) {
+pub(super) fn window_tab(ui: &mut egui::Ui, label: &str, inset: f32) -> (egui::Response, bool) { window_tab_styled(ui, label, inset, false) }
+
+/// `window_tab` for the window of a slide: its tab looks like the tabs of the strip it came from (lifted, with a bar on top), not like a panel's.
+pub(super) fn slide_window_tab(ui: &mut egui::Ui, label: &str, inset: f32) -> (egui::Response, bool) { window_tab_styled(ui, label, inset, true) }
+
+fn window_tab_styled(ui: &mut egui::Ui, label: &str, inset: f32, document: bool) -> (egui::Response, bool) {
     let before = ui.spacing().item_spacing.x;
     ui.spacing_mut().item_spacing.x = 0.0;
     let band = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
@@ -412,9 +438,10 @@ pub(super) fn window_tab(ui: &mut egui::Ui, label: &str, inset: f32) -> (egui::R
     // The strip is the window's title bar: its empty part moves the window, and `inset` leaves room for the system's window buttons.
     let strip = ui.interact(egui::Rect::from_min_max(egui::pos2(full.left(), top), egui::pos2(full.right(), top + 30.0)), ui.id().with("window-strip"), egui::Sense::click_and_drag());
     if strip.drag_started() { ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag); }
-    let row = ui.horizontal(|ui| { ui.add_space(inset); tab_chip_sized(ui, None, label, true, true, tw + 44.0, 12.5) });
+    let row = ui.horizontal(|ui| { ui.add_space(inset); if document { tab_chip(ui, None, label, true, true, (tw + 58.0).clamp(96.0, 220.0)) } else { tab_chip_sized(ui, None, label, true, true, tw + 44.0, 12.5) } });
     let bottom = row.response.rect.bottom();
     painter.rect_filled(egui::Rect::from_min_max(egui::pos2(full.left(), bottom - 2.0), egui::pos2(full.right(), bottom)), 0.0, ui.visuals().selection.bg_fill);
+    if document { open_under_active_tab(ui, egui::Rect::from_min_max(egui::pos2(full.left(), bottom - 2.0), egui::pos2(full.right(), bottom))); }
     ui.spacing_mut().item_spacing.x = before;
     ui.add_space(PANEL_TABS_GAP + 2.0);
     (row.inner.0.on_hover_text("Drag this onto the side panel to dock it there"), row.inner.1)
@@ -430,6 +457,10 @@ fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(
     let x = ui.ctx().pointer_latest_pos().map(|p| p.x).unwrap_or(dragged.rect.center().x);
     // Where it would go: after every tab whose middle is to its left.
     let slot = chips.iter().filter(|r| r.rect.center().x < x).count();
+    // A tab of the strip pulled well away from it comes out as a window of its own (the caller decides whether this tab can).
+    if salt == "strip" && dragged.dragged() && ui.ctx().pointer_latest_pos().is_some_and(|p| (p.y - dragged.rect.center().y).abs() > 34.0) {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("strip-tear", 0u8)), from));
+    }
     // Tabs of the panels (their salt starts with "g") can also be let go over another group: the place it would land shows while it is dragged.
     let panel = salt.starts_with('g');
     let pos_id = egui::Id::new("tab-drag-pos");
@@ -495,9 +526,13 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
     if blue {
         ui.painter().rect_filled(rect, top_round, ui.visuals().selection.bg_fill);
     } else if active {
-        let lift = if dark { egui::Color32::from_gray(66) } else { egui::Color32::from_gray(236) };
-        ui.painter().rect_filled(rect, top_round, lift);
-        ui.painter().rect_filled(egui::Rect::from_min_size(rect.left_top(), egui::vec2(rect.width(), 3.0)), egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, ui.visuals().selection.bg_fill);
+        // The tab showing is open at the bottom, like a folder tab: blue along its top and both sides, and the same color as the bar under the
+        // strip, so it joins what is below it. (The line under the strip is left out beneath it: see `open_under_active_tab`.)
+        let fill = if dark { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        ui.painter().rect_filled(rect, top_round, fill);
+        let blue = ui.visuals().selection.bg_fill;
+        ui.painter().add(egui::Shape::line(open_bottom_outline(rect.shrink(0.75), 4.0), egui::Stroke::new(1.5, blue)));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-tab-active"), Some((rect, fill))));
     } else if ui.rect_contains_pointer(rect) {
         ui.painter().rect_filled(rect, top_round, if dark { egui::Color32::from_white_alpha(14) } else { egui::Color32::from_black_alpha(12) });
     }
@@ -521,4 +556,28 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
     // Slide tabs share their words with the slide list, so only the tabs with an icon are named for screen readers here.
     if icon.is_some() { resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); }
     (resp.on_hover_text(label), closed)
+}
+
+/// The outline of a tab that is open at the bottom: up the left side, across the top and down the right side, with rounded top corners.
+fn open_bottom_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
+    let mut pts = vec![r.left_bottom()];
+    let corner = |pts: &mut Vec<egui::Pos2>, c: egui::Pos2, from: f32| {
+        for k in 0..=6 {
+            let a = from + (k as f32 / 6.0) * std::f32::consts::FRAC_PI_2;
+            pts.push(c + egui::vec2(a.cos(), a.sin()) * radius);
+        }
+    };
+    // Top left corner: from the left side round to the top.
+    corner(&mut pts, egui::pos2(r.left() + radius, r.top() + radius), std::f32::consts::PI);
+    // Top right corner: from the top round to the right side.
+    corner(&mut pts, egui::pos2(r.right() - radius, r.top() + radius), -std::f32::consts::FRAC_PI_2);
+    pts.push(r.right_bottom());
+    pts
+}
+
+/// The line under the strip stops under the tab that is showing, so the tab and what it shows are one piece. `line` is where the line was drawn.
+fn open_under_active_tab(ui: &egui::Ui, line: egui::Rect) {
+    let Some(Some((tab, fill))) = ui.ctx().data_mut(|d| d.remove_temp::<Option<(egui::Rect, egui::Color32)>>(egui::Id::new("doc-tab-active"))) else { return };
+    let gap = egui::Rect::from_min_max(egui::pos2(tab.left() + 1.6, line.top() - 0.5), egui::pos2(tab.right() - 1.6, line.bottom() + 0.5));
+    ui.painter().rect_filled(gap, 0.0, fill);
 }

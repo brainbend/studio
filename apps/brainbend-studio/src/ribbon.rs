@@ -2268,8 +2268,21 @@ impl App {
         if !self.show_insert_bar || self.scene_view || self.pano.edit.is_some() || self.try_mode { return; }
         let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
         egui::Panel::top("insert-bar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+            self.insert_bar_row(ui);
+        });
+    }
+
+    /// The same bar inside a window of its own (an editor window), on a band like the main window's.
+    pub(crate) fn insert_bar_in(&mut self, ui: &mut egui::Ui) {
+        if !self.show_insert_bar || self.try_mode { return; }
+        let band = if ui.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| self.insert_bar_row(ui));
+    }
+
+    /// The buttons of the insert bar, centered in the room there is.
+    fn insert_bar_row(&mut self, ui: &mut egui::Ui) {
             // The buttons sit in the middle of the bar. How wide they come to is known from the frame before, so they start that far in.
-            let width_id = egui::Id::new("insert-bar-width");
+            let width_id = ui.id().with("insert-bar-width");
             let avail = ui.available_width();
             let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
             let pad = ((avail - known) / 2.0).max(0.0);
@@ -2297,7 +2310,6 @@ impl App {
             // Wrapped onto two rows, the bar is as wide as it can be; otherwise it is as wide as the buttons (without the padding in front).
             let width = if wrapped || right <= left { avail } else { right - left };
             if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
-        });
     }
 
     /// Everything that can be added to a slide, as a menu with a search box on top: the gallery behind the + button and the Insert menu.
