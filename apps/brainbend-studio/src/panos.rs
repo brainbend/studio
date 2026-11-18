@@ -293,6 +293,24 @@ impl App {
         self.leave_master_view();
     }
 
+    /// Start editing the 360° image with id `obj_id` on slide `slide_id`, for an editor window: the session is handed back, and the main window is
+    /// left alone (its slide, its tabs and its own editing mode). One undo step is taken for the visit, as when the mode opens in the main window.
+    pub(super) fn new_pano_session(&mut self, slide_id: &str, obj_id: &str) -> Option<Edit> {
+        let (si, li, oi) = self.pano_position(slide_id, obj_id)?;
+        let o = &self.project.as_ref()?.slides[si].layers[li].objects[oi];
+        let (Kind::Pano(p), Some(key)) = (&o.kind, o.asset.clone()) else { return None };
+        let view = (p.yaw, p.pitch, p.fov);
+        self.snapshot();
+        Some(Edit { target: (li, oi), slide: si, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false })
+    }
+
+    /// Where a 360° image is: its slide, layer and object, found by their ids.
+    pub(super) fn pano_position(&self, slide_id: &str, obj_id: &str) -> Option<(usize, usize, usize)> {
+        let p = self.project.as_ref()?;
+        let si = p.slides.iter().position(|s| s.id == slide_id)?;
+        p.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, li, oi)))
+    }
+
     /// Open the editing mode again from its tab. The tab goes if the picture is no longer there.
     pub(super) fn reopen_pano_tab(&mut self) {
         let Some(t) = self.pano.tab.clone() else { return };

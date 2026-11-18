@@ -12764,6 +12764,62 @@ mod tests {
     }
 
     #[test]
+    fn a_360_image_pops_out_into_a_window_and_the_main_window_edits_slides_meanwhile() {
+        use egui_kittest::kittest::Queryable;
+        use brainbend_doc::pano::PinKind;
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().assets.insert("pano".into(), Asset { name: "lab.png".into(), mime: "image/png".into(), bytes: test_panorama(), file: None });
+        a.add_pano("pano".into(), "lab.png", 512.0, 256.0);
+        let at = a.view.selected.unwrap();
+        a.add_slide(SlideKind::Normal);
+        a.view.slide = 0;
+        a.open_pano_dialog(at);
+        assert!(a.pano.edit.is_some() && a.pano.tab.is_some());
+        // Pop it out: the main window leaves the editing mode, and the window holds the session.
+        let id = a.pop_out_pano_tab().expect("a window");
+        assert!(a.pano.edit.is_none() && a.pano.tab.is_none(), "the strip's tab and the main window's mode are gone");
+        assert!(a.editor_windows.iter().any(|w| w.id == id && w.pano.as_ref().is_some_and(|p| p.edit.is_some())));
+        let mut h = harness(a);
+        h.run_steps(5);
+        // The window draws the editing mode, with a bar of its own.
+        assert!(h.query_by_label("Add marker").is_some() && h.query_by_label("Draw hotspot").is_some(), "the window has the bar for what goes on the picture");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("pano-window.png")).unwrap(); }
+        h.get_by_label("Add marker").click();
+        h.run_steps(3);
+        let pins = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[0].layers[0].objects[at.1].kind { Kind::Pano(p) => p.pins.clone(), _ => panic!() };
+        assert_eq!(pins(&h).len(), 1, "the window added a marker");
+        assert_eq!(pins(&h)[0].kind, PinKind::Marker);
+        // Meanwhile the main window works on slides: the editing mode is not taking it over.
+        assert!(h.state().pano.edit.is_none(), "the main window is not in the editing mode");
+        h.state_mut().view.slide = 1;
+        h.state_mut().insert_rect();
+        h.run_steps(3);
+        assert!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len() == 1, "the main window added a shape to its own slide");
+        assert_eq!(pins(&h).len(), 1);
+        // Put it back: the tab returns and the mode shows in the main window, with the marker still there.
+        h.state_mut().window_to_tab(id);
+        h.run_steps(3);
+        assert!(h.state().editor_windows.is_empty() && h.state().pano.edit.is_some() && h.state().pano.tab.is_some());
+        assert_eq!(h.state().view.slide, 0);
+        assert_eq!(pins(&h).len(), 1);
+    }
+
+    #[test]
+    fn a_360_window_that_changed_nothing_leaves_no_undo_step() {
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().assets.insert("pano".into(), Asset { name: "lab.png".into(), mime: "image/png".into(), bytes: test_panorama(), file: None });
+        a.add_pano("pano".into(), "lab.png", 512.0, 256.0);
+        let at = a.view.selected.unwrap();
+        a.open_pano_dialog(at);
+        let before = a.undo.len();
+        let id = a.pop_out_pano_tab().unwrap();
+        a.close_editor_window(id);
+        assert_eq!(a.undo.len(), before - 1, "the visit's undo step goes when nothing was changed");
+    }
+
+    #[test]
     fn reset_layout_puts_every_tab_back_where_it_started() {
         let mut a = app();
         let main = a.dock.group_of(0).unwrap().id;

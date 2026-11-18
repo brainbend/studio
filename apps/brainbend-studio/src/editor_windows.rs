@@ -9,10 +9,19 @@
 use super::*;
 use crate::doc_tabs::SlideTab;
 
-/// A slide tab that is a window of its own.
+/// A slide tab or a 360° image tab that is a window of its own.
 pub(crate) struct EditorWindow {
     pub(crate) id: u32,
     pub(crate) tab: SlideTab,
+    /// Set for a 360° image: what it is and the editing session the window holds.
+    pub(crate) pano: Option<PanoWindow>,
+}
+
+/// The 360° image of a window: its object, its editing session, and how long the undo history was when the visit began.
+pub(crate) struct PanoWindow {
+    pub(crate) obj_id: String,
+    pub(crate) edit: Option<crate::panos::Edit>,
+    pub(crate) undo_len: usize,
 }
 
 /// What a tab that was pulled out and is being carried is: a panel's tab or an editor window.
@@ -35,7 +44,7 @@ impl App {
     fn add_editor_window(&mut self, tab: SlideTab) -> u32 {
         self.editor_window_next += 1;
         let id = self.editor_window_next;
-        self.editor_windows.push(EditorWindow { id, tab });
+        self.editor_windows.push(EditorWindow { id, tab, pano: None });
         self.focus_window = Some(id);
         id
     }
@@ -50,6 +59,7 @@ impl App {
 
     /// Put a window's tab back in the strip, showing.
     pub(crate) fn window_to_tab(&mut self, id: u32) {
+        if self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some()) { return self.pano_window_to_tab(id); }
         let Some(n) = self.editor_windows.iter().position(|w| w.id == id) else { return };
         let w = self.editor_windows.remove(n);
         if self.focus_window == Some(id) { self.focus_window = None; }
@@ -66,6 +76,12 @@ impl App {
 
     /// Close a window: its tab is gone (the slide is still in the Slide List to open again).
     pub(crate) fn close_editor_window(&mut self, id: u32) {
+        // A 360° visit that changed nothing leaves no undo step (if nothing else has been done since, so the step is the last one).
+        if let Some(w) = self.editor_windows.iter().find(|w| w.id == id) {
+            if let Some(p) = &w.pano {
+                if p.edit.as_ref().is_some_and(|e| !e.changed) && self.undo.len() == p.undo_len { self.undo.pop(); }
+            }
+        }
         self.editor_windows.retain(|w| w.id != id);
         if self.focus_window == Some(id) { self.focus_window = None; }
     }
@@ -110,8 +126,9 @@ impl App {
         let ids: Vec<u32> = self.editor_windows.iter().map(|w| w.id).collect();
         for id in ids {
             let Some(idx) = self.window_slide(id) else { continue };
-            let name = self.project.as_ref().map(|p| p.slides[idx].name.clone()).unwrap_or_default();
-            let title = format!("{} {}", self.slide_number(idx), name);
+            let pano_name = self.editor_windows.iter().find(|w| w.id == id).and_then(|w| w.pano.as_ref()).and_then(|p| self.project.as_ref().and_then(|pr| pr.slides[idx].layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == p.obj_id).map(|o| o.name.clone())));
+            let name = pano_name.clone().unwrap_or_else(|| self.project.as_ref().map(|p| p.slides[idx].name.clone()).unwrap_or_default());
+            let title = if pano_name.is_some() { name } else { format!("{} {}", self.slide_number(idx), name) };
             let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
             crate::os_window_inner(ctx, &Self::editor_key(id), &title, [1100.0, 760.0], &mut open, false, |ui| {
                 let (tab, closed) = doc_tabs::slide_window_tab(ui, &title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
@@ -121,8 +138,10 @@ impl App {
                 if pop_in_button(ui, at).clicked() { pop_in = true; }
                 dropped = crate::drag_window(ui.ctx(), &tab, "editor-drag-pos");
                 // A press in the window makes it the one the panels and the keys act on.
-                if ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) { self.focus_window = Some(id); }
+                let is_pano = self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some());
+                if !is_pano && ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) { self.focus_window = Some(id); }
                 let ctx = ui.ctx().clone();
+                if is_pano { if !self.pano_window_ui(ui, &ctx, id) { closed_here = true; } return; }
                 self.with_window_view(id, |a| {
                     a.window_keys(&ctx);
                     a.insert_bar_in(ui);
@@ -190,4 +209,78 @@ fn pop_in_button(ui: &mut egui::Ui, center: egui::Pos2) -> egui::Response {
     p.line_segment([c + egui::vec2(-1.0, 1.0), c + egui::vec2(3.5, 1.0)], st);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Put back in the main window"));
     resp.on_hover_text("Put this tab back in the main window")
+}
+
+impl App {
+    /// Pop the 360° image's tab out of the strip into a window of its own. The editing session goes with it.
+    pub(crate) fn pop_out_pano_tab(&mut self) -> Option<u32> {
+        let tab = self.pano.tab.clone()?;
+        // The session the main window has (if the tab is showing) moves to the window; otherwise a new one starts.
+        let edit = match self.pano.edit.take() {
+            Some(e) => Some(e),
+            None => self.new_pano_session(&tab.slide_id, &tab.obj_id),
+        };
+        edit.as_ref()?;
+        self.pano.tab = None;
+        let undo_len = self.undo.len();
+        self.editor_window_next += 1;
+        let id = self.editor_window_next;
+        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(tab.slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: tab.obj_id, edit, undo_len }) });
+        Some(id)
+    }
+
+    /// Put a 360° image's window back as its tab in the main window, with its editing mode showing.
+    pub(crate) fn pano_window_to_tab(&mut self, id: u32) {
+        let Some(n) = self.editor_windows.iter().position(|w| w.id == id) else { return };
+        let mut w = self.editor_windows.remove(n);
+        let Some(p) = w.pano.take() else { return };
+        // Whatever the main window was editing of a 360° image is put away first.
+        self.close_pano_edit();
+        self.leave_master_view();
+        let Some((si, _, _)) = self.pano_position(&w.tab.slide_id, &p.obj_id) else { return };
+        self.view.slide = si;
+        self.pano.edit = p.edit;
+        self.pano.tab = Some(crate::panos::Tab { slide_id: w.tab.slide_id, obj_id: p.obj_id });
+        self.scene_view = false;
+    }
+
+    /// The window of a 360° image: a bar with the things to add, then the editing mode's panels and picture. False when it should close
+    /// (the picture or its slide is gone).
+    fn pano_window_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, id: u32) -> bool {
+        let Some(at) = self.editor_windows.iter().position(|w| w.id == id) else { return false };
+        let slide_id = self.editor_windows[at].tab.slide_id.clone();
+        let Some(obj_id) = self.editor_windows[at].pano.as_ref().map(|p| p.obj_id.clone()) else { return false };
+        // The slide may have moved in the list since the last frame: find the picture again.
+        let Some((si, li, oi)) = self.pano_position(&slide_id, &obj_id) else { return false };
+        let Some(edit) = self.editor_windows[at].pano.as_mut().and_then(|p| p.edit.take()) else { return false };
+        let mut edit = edit;
+        edit.slide = si;
+        edit.target = (li, oi);
+        // The mode's code works on `App::pano.edit`: the window's session is put there while it is drawn, and taken back after.
+        let saved = std::mem::replace(&mut self.pano.edit, Some(edit));
+        let mut cmd = None;
+        let band = if ui.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Add marker").on_hover_text("A round button on the picture").clicked() { cmd = Some(crate::panos::Cmd::AddMarker); }
+                if ui.button("Draw hotspot").on_hover_text("Draw a shaded area on the picture, corner by corner").clicked() { cmd = Some(crate::panos::Cmd::StartHotspot); }
+            });
+        });
+        if let Some(c) = cmd { self.pano_cmd(c); }
+        let alive = self.pano_edit_ui(ui, ctx);
+        let back = std::mem::replace(&mut self.pano.edit, saved);
+        if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) { if let Some(p) = w.pano.as_mut() { p.edit = back; } }
+        alive
+    }
+
+    /// A 360° image's tab was pulled out of the strip: it is a window under the pointer now.
+    pub(crate) fn begin_pano_window_tear(&mut self, ctx: &egui::Context) {
+        let (local, inner) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.pointer.latest_pos(), i.viewport().inner_rect));
+        let grab = egui::vec2(if cfg!(target_os = "macos") { 76.0 + 50.0 } else { 58.0 }, 16.0);
+        let Some(id) = self.pop_out_pano_tab() else { return };
+        if let (Some(p), Some(inner)) = (local, inner) {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::editor_key(id))), inner.min + p.to_vec2() - grab));
+        }
+        self.tear = Some((TearTarget::Window(id), grab));
+    }
 }
