@@ -250,6 +250,8 @@ struct App {
     slide_multi: Vec<String>,
     /// The last click was on a slide in the slide list, so the keys act on slides (the Scene View always counts).
     slides_focus: bool,
+    /// A tab that was pulled out of a panel and is being carried to a new place as a window: the tab and where the pointer holds the window.
+    tear: Option<(usize, egui::Vec2)>,
     /// A slide was pressed on during this frame (so the press did not take the focus away from the slides).
     slide_hit: bool,
     /// Slides copied with ⌘C or ⌘X while the slide list or Scene View had the focus.
@@ -535,7 +537,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
             drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             zoom: 1.0, pan: egui::Vec2::ZERO, fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_view: None, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, player_open: false, publish_open: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), settings_open: false, docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -870,6 +872,28 @@ pub(crate) fn dock_tool(ui: &mut egui::Ui, _title: &str, open: &mut bool, conten
     (if docked || own_window { area } else { area.max_height(tall) }).show(ui, |ui| content(ui));
 }
 
+/// Share `total` between groups or lanes by their shares, giving none less than `min` (or an equal part when there is not room for that).
+/// What the small ones are given is taken from the others, so the lengths always add up to `total` and nothing spills out of the panel.
+fn split_lengths(total: f32, shares: &[f32], min: f32) -> Vec<f32> {
+    let n = shares.len();
+    if n == 0 { return vec![]; }
+    let min = min.min(total / n as f32);
+    let mut fixed = vec![false; n];
+    let mut lens = vec![0.0f32; n];
+    for _ in 0..=n {
+        let free: f32 = (0..n).filter(|&i| !fixed[i]).map(|i| shares[i].max(0.001)).sum();
+        let left = total - (0..n).filter(|&i| fixed[i]).count() as f32 * min;
+        let mut changed = false;
+        for i in 0..n {
+            if fixed[i] { lens[i] = min; continue; }
+            lens[i] = left * shares[i].max(0.001) / free.max(0.001);
+            if lens[i] < min { fixed[i] = true; changed = true; }
+        }
+        if !changed { break; }
+    }
+    lens
+}
+
 /// A draggable line between two groups or lanes. Returns how far it was dragged this frame along the axis it moves on.
 fn divider(ui: &mut egui::Ui, rect: egui::Rect, id: (&str, u32), horizontal_line: bool, color: egui::Color32) -> Option<f32> {
     let r = ui.interact(rect, egui::Id::new(id), egui::Sense::drag());
@@ -900,7 +924,9 @@ fn spot_at(ctx: &egui::Context, pos: egui::Pos2) -> Option<(dock::Spot, egui::Re
     let over = rects.iter().find(|g| g.rect.contains(pos)).copied();
     if let Some(root) = root {
         let right = egui::Rect::from_min_max(egui::pos2(root.right() - EDGE_STRIP, root.top()), root.max);
-        let bottom = egui::Rect::from_min_max(egui::pos2(root.left(), root.bottom() - EDGE_STRIP), root.max);
+        // Like the top strip, the bottom one runs along the slide area, not the whole window.
+        let canvas: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new("canvas-rect")));
+        let bottom = canvas.map(|c| egui::Rect::from_min_max(egui::pos2(c.left(), c.bottom() - EDGE_STRIP), c.max)).unwrap_or_else(|| egui::Rect::from_min_max(egui::pos2(root.left(), root.bottom() - EDGE_STRIP), root.max));
         if right.contains(pos) && over.map_or(true, |g| g.edge == Edge::Right) { return Some((Spot::EdgeEnd(Edge::Right), right)); }
         if bottom.contains(pos) && over.map_or(true, |g| g.edge == Edge::Bottom) { return Some((Spot::EdgeEnd(Edge::Bottom), bottom)); }
     }
@@ -1260,9 +1286,8 @@ impl App {
     /// or docked, so the side panel shows it.
     fn tool_windows(&mut self, ctx: &egui::Context) {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-variables"))).unwrap_or(false) { self.variables_open = true; }
-        // The buttons on a tool's tab in the Scene View's panel: close it, or pop it out into a window of its own.
+        // The × on a tool's tab in the Scene View's panel closes it.
         if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", "side")))) { self.close_panel_tab(g); }
-        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", "side")))) { self.set_area(g, Area::Window); }
         if self.file_view || self.project.is_none() { self.tools_seen.clear(); return; }
         // A docked tool that has just opened (or been docked) is the tab showing in its panel.
         let docked: Vec<usize> = TOOLS.iter().filter(|t| self.tool_open(**t) && self.tool_docked(**t)).map(|t| TOOL_TAB + t.index()).collect();
@@ -1287,6 +1312,41 @@ impl App {
         self.layout_changed();
     }
 
+    /// The key a tab's window has (the tools' windows are named by their title, the panels' by their number).
+    fn window_key(g: usize) -> String { match Self::tool_of(g) { Some(t) => t.title().to_string(), None => format!("panel-{g}") } }
+
+    /// A docked tab was pulled out of its row: it becomes a window right under the pointer, and follows it until the button is let go.
+    fn begin_tear(&mut self, ctx: &egui::Context, g: usize) {
+        let (local, inner) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.pointer.latest_pos(), i.viewport().inner_rect));
+        // The pointer holds the window by its tab: a little in from the corner (past the window buttons on macOS), a little down.
+        let grab = egui::vec2(if cfg!(target_os = "macos") { 76.0 + 50.0 } else { 58.0 }, 16.0);
+        if let (Some(p), Some(inner)) = (local, inner) {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::window_key(g))), inner.min + p.to_vec2() - grab));
+        }
+        self.set_area(g, Area::Window);
+        self.tear = Some((g, grab));
+    }
+
+    /// While a pulled-out tab is carried: the window goes where the pointer goes, the place it would dock shows, and letting go docks it there
+    /// (or leaves it a window). The main window keeps the pointer for the whole drag, so it is the one that watches.
+    fn drive_tear(&mut self, ctx: &egui::Context) {
+        let Some((g, grab)) = self.tear else { return };
+        let (down, local, inner) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.pointer.primary_down(), i.pointer.latest_pos(), i.viewport().inner_rect));
+        let inside = local.filter(|p| ctx.content_rect().contains(*p));
+        let pos_id = egui::Id::new("tab-drag-pos");
+        if let (Some(p), Some(inner)) = (local, inner) {
+            ctx.send_viewport_cmd_to(egui::ViewportId::from_hash_of(("pop-out", Self::window_key(g))), egui::ViewportCommand::OuterPosition(inner.min + p.to_vec2() - grab));
+        }
+        if down {
+            ctx.data_mut(|d| match inside { Some(p) => { d.insert_temp(pos_id, p); } None => { d.remove_temp::<egui::Pos2>(pos_id); } });
+            ctx.request_repaint();
+            return;
+        }
+        self.tear = None;
+        ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(pos_id));
+        if let Some((spot, _)) = inside.and_then(|p| spot_at(ctx, p)) { self.place_tab(g, spot); }
+    }
+
     /// The panels that are windows of their own, each with a tab strip at the top to drag it onto a panel.
     fn panel_windows(&mut self, ctx: &egui::Context, slide_idx: usize, wants: &mut SideWants) {
         if self.file_view || self.project.is_none() { return; }
@@ -1297,7 +1357,7 @@ impl App {
             let mut open = true;
             let mut closed_here = false;
             let mut to: Option<dock::Spot> = None;
-            os_window_inner(ctx, &format!("panel-{g}"), title, size, &mut open, false, |ui| {
+            os_window_inner(ctx, &Self::window_key(g), title, size, &mut open, false, |ui| {
                 let (tab, closed) = doc_tabs::window_tab(ui, title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
                 if closed { closed_here = true; }
                 to = drag_to_dock(ui.ctx(), &tab);
@@ -1348,14 +1408,14 @@ impl App {
             dock::Edge::Top => {
                 let id = if n > 1 { format!("dock-top-{n}") } else { "dock-top".to_string() };
                 let max = (root.available_rect_before_wrap().height() * 0.6).max(120.0);
-                egui::Panel::top(id).resizable(true).default_size((220.0 * n as f32).min(max)).min_size(80.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                egui::Panel::top(id).resizable(true).default_size((220.0 * n as f32).min(max)).min_size(120.0 + 100.0 * (n as f32 - 1.0)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
             }
             dock::Edge::Bottom => {
                 let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
                 // The height is the person's: dragging the top edge sets it, it does not follow what is in the tab, and it is remembered.
                 let saved = prefs::get_str("bottom_panel_height").and_then(|s| s.parse::<f32>().ok()).filter(|h| *h >= 80.0).unwrap_or(200.0);
-                let max = (ctx.content_rect().height() * 0.7).max(120.0);
-                let shown = egui::Panel::bottom(id).resizable(true).default_size(saved.min(max)).min_size(80.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                let max = (ctx.content_rect().height() * 0.7).max(120.0 + 100.0 * (n as f32 - 1.0));
+                let shown = egui::Panel::bottom(id).resizable(true).default_size((saved + 110.0 * (n as f32 - 1.0)).min(max)).min_size(120.0 + 100.0 * (n as f32 - 1.0)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
                 let h = shown.response.rect.height();
                 if !ctx.input(|i| i.pointer.any_down()) && (h - self.bottom_height_saved).abs() > 1.0 {
                     self.bottom_height_saved = h;
@@ -1373,12 +1433,11 @@ impl App {
         let across = edge.columns(); // lanes are columns at the left and right edges, rows at the top and bottom
         let split = |rect: egui::Rect, shares: &[f32], horizontal: bool, min: f32| -> Vec<egui::Rect> {
             let n = shares.len();
-            let total = if horizontal { rect.width() } else { rect.height() } - GAP * n.saturating_sub(1) as f32;
-            let sum: f32 = shares.iter().sum::<f32>().max(0.001);
+            let total = (if horizontal { rect.width() } else { rect.height() } - GAP * n.saturating_sub(1) as f32).max(0.0);
+            let lens = split_lengths(total, shares, min);
             let mut at = if horizontal { rect.left() } else { rect.top() };
             let mut out = vec![];
-            for s in shares {
-                let len = (total * s / sum).max(min.min(total / n as f32));
+            for len in lens {
                 out.push(if horizontal { egui::Rect::from_min_size(egui::pos2(at, rect.top()), egui::vec2(len, rect.height())) } else { egui::Rect::from_min_size(egui::pos2(rect.left(), at), egui::vec2(rect.width(), len)) });
                 at += len + GAP;
             }
@@ -1406,7 +1465,7 @@ impl App {
                         if cur != *current { self.dock.group_mut(*gid).map(|g| g.current = cur); self.sync_current_out_to(cur); crate::prefs::set_str("dock_layout", &self.dock.to_json()); }
                         // The buttons on the tab, and the tab let go somewhere else.
                         if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-closed", salt.as_str())))) { self.close_panel_tab(g); }
-                        if let Some(g) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-popped", salt.as_str())))) { self.set_area(g, Area::Window); }
+                        if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-tear", salt.as_str())))) { if let Some(&(g, _)) = labels.get(k) { self.begin_tear(ctx, g); } }
                         if let Some(k) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-dropped-outside", salt.as_str())))) { if let Some(&(g, _)) = labels.get(k) { self.set_area(g, Area::Window); } }
                         // The menu on a tab: move it without dragging.
                         if let Some((g, how)) = ctx.data_mut(|d| d.remove_temp::<(usize, u8)>(egui::Id::new(("tab-move", salt.as_str())))) {
@@ -2185,6 +2244,8 @@ pub(crate) fn os_window_inner(ctx: &egui::Context, key: &str, title: &str, size:
         .with_window_type(egui::viewport::X11WindowType::Utility);
     // On macOS the tab strip is the title bar, as in the main window; the window buttons stay where they are. A window that cannot dock
     // (Player Properties, Google Fonts) has no tab, so it keeps the system's title bar.
+    // A tab that was just pulled out of a panel opens right under the pointer.
+    let builder = match ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(egui::Id::new(("pop-out-start", key)))) { Some(p) => builder.with_position(p), None => builder };
     let builder = if cfg!(target_os = "macos") && !closer { builder.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false) } else { builder };
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(("pop-out", key)), builder, |ui, class| {
         if ui.ctx().input(|i| i.viewport().close_requested()) {
@@ -5679,8 +5740,9 @@ impl App {
         if self.visible.len() != n { self.visible = vec![true; n]; }
         // Docked, the panel has its tab (with the buttons that pop it out and hide it); in a window of its own the window's tab does.
         if !in_window { doc_tabs::panel_tabs_movable(ui, &[(0, "Slide Layers".to_string())], &mut 0, "layers"); }
-        let list_h = (ui.available_height() - 40.0).max(40.0);
-        egui::ScrollArea::vertical().id_salt("layers").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+        // The buttons under the list always fit in the room there is; the list takes what is left (and scrolls).
+        let list_h = (ui.available_height() - 40.0).max(0.0);
+        egui::ScrollArea::vertical().id_salt("layers").min_scrolled_height(0.0).max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             // Rows sit at the bottom of the list area.
             ui.add_space((list_h - n as f32 * 34.0).max(0.0));
@@ -7455,6 +7517,7 @@ impl App {
         self.menu_pick_clear(root.ctx());
         self.sync_tabs();
         self.begin_state_swap();
+        self.drive_tear(&root.ctx().clone());
         self.show_frame(root);
         // A press anywhere but on a slide takes the keys back to the canvas.
         if root.ctx().input(|i| i.pointer.any_pressed()) && !self.slide_hit { self.slides_focus = false; }
@@ -12144,6 +12207,10 @@ mod tests {
         assert_eq!(spot_at(&ctx, egui::pos2(310.0, 300.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Left)));
         assert_eq!(spot_at(&ctx, egui::pos2(600.0, 110.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Top)));
         assert_eq!(spot_at(&ctx, egui::pos2(600.0, 300.0)).map(|s| s.0), None);
+        // With the window's rectangle known too, the bottom strip is the slide area's bottom edge, not the window's.
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("root-rect"), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1200.0, 700.0))));
+        assert_eq!(spot_at(&ctx, egui::pos2(600.0, 590.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Bottom)));
+        assert_eq!(spot_at(&ctx, egui::pos2(100.0, 690.0)).map(|s| s.0), None, "under the slide list is not the slide area");
     }
 
     #[test]
@@ -12163,6 +12230,100 @@ mod tests {
         h.run_steps(3);
         assert_eq!(h.state().area_of(P_SLIDES), Area::Left);
         assert!(h.query_by_label("Slide List").is_some());
+    }
+
+    #[test]
+    fn two_rows_at_the_bottom_stay_inside_the_panel_and_the_divider_moves_up_when_dragged_up() {
+        let mut a = app();
+        a.place_tab(dock::LAYERS, dock::Spot::EdgeEnd(dock::Edge::Bottom));
+        let mut h = harness(a);
+        h.run_steps(6);
+        let rows = |h: &egui_kittest::Harness<'_, App>| {
+            let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+            let mut b: Vec<egui::Rect> = rects.iter().filter(|r| r.edge == dock::Edge::Bottom).map(|r| r.rect).collect();
+            b.sort_by(|a, b| a.top().total_cmp(&b.top()));
+            b
+        };
+        let before = rows(&h);
+        assert_eq!(before.len(), 2);
+        assert!(before[1].bottom() <= h.ctx.content_rect().bottom(), "the lower row ends inside the window");
+        let (x, from) = (700.0, (before[0].bottom() + before[1].top()) / 2.0);
+        h.event(egui::Event::PointerMoved(egui::pos2(x, from))); h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: egui::pos2(x, from), button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }); h.run_steps(1);
+        h.event(egui::Event::PointerMoved(egui::pos2(x, from - 20.0))); h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: egui::pos2(x, from - 20.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }); h.run_steps(2);
+        let after = rows(&h);
+        assert!(after[0].bottom() < before[0].bottom() - 5.0 && after[1].top() < before[1].top() - 5.0, "dragging up moves the divider up");
+        assert_eq!(after[1].bottom(), before[1].bottom(), "the lower row keeps its bottom edge");
+    }
+
+    #[test]
+    fn split_lengths_always_add_up_to_the_room_there_is() {
+        for (total, shares, min) in [(190.0, vec![0.5, 0.5], 120.0), (400.0, vec![0.9, 0.1], 120.0), (400.0, vec![0.5, 0.3, 0.2], 100.0), (50.0, vec![1.0, 1.0, 1.0], 120.0)] {
+            let lens = split_lengths(total, &shares, min);
+            assert!((lens.iter().sum::<f32>() - total).abs() < 0.01, "{lens:?} for {total}");
+        }
+        assert_eq!(split_lengths(400.0, &[0.9, 0.1], 120.0), vec![280.0, 120.0], "a small share still gets its minimum");
+    }
+
+    #[test]
+    fn the_layers_buttons_stay_inside_the_panel_however_short_it_is_dragged() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.set_area(dock::LAYERS, Area::Bottom);
+        a.show_panel_tab(dock::LAYERS);
+        let mut h = harness(a);
+        h.run_steps(6);
+        let group = |h: &egui_kittest::Harness<'_, App>| {
+            let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
+            rects.iter().find(|r| r.edge == dock::Edge::Bottom).map(|r| r.rect).unwrap()
+        };
+        let start = group(&h);
+        // Drag the panel's top edge down as far as it goes.
+        let (x, from) = (700.0, start.top() - 6.0);
+        h.event(egui::Event::PointerMoved(egui::pos2(x, from))); h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: egui::pos2(x, from), button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }); h.run_steps(1);
+        h.event(egui::Event::PointerMoved(egui::pos2(x, from + 400.0))); h.run_steps(3);
+        h.event(egui::Event::PointerButton { pos: egui::pos2(x, from + 400.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }); h.run_steps(3);
+        let short = group(&h);
+        assert!(short.height() < start.height() - 40.0, "the panel got shorter: {} -> {}", start.height(), short.height());
+        let dim = h.get_by_label("Dim").rect();
+        assert!(dim.bottom() <= short.bottom() + 1.0 && dim.top() >= short.top(), "the buttons ({dim:?}) are inside the panel ({short:?})");
+    }
+
+    #[test]
+    fn a_tab_pulled_out_of_its_row_becomes_a_window_at_once_and_docks_where_it_is_let_go() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.selected = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let tab = h.get_by_label("Slide Notes").rect().center();
+        let event = |h: &mut egui_kittest::Harness<'static, App>, e: egui::Event| { h.event(e); h.run_steps(2); };
+        event(&mut h, egui::Event::PointerMoved(tab));
+        event(&mut h, egui::Event::PointerButton { pos: tab, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        // Along the row nothing is torn off.
+        event(&mut h, egui::Event::PointerMoved(tab + egui::vec2(20.0, 0.0)));
+        assert!(h.state().tear.is_none() && h.state().area_of(P_NOTES) == Area::Bottom, "moving along the row only reorders");
+        // Out of the row, it is a window straight away.
+        event(&mut h, egui::Event::PointerMoved(tab + egui::vec2(20.0, -70.0)));
+        assert_eq!(h.state().tear.map(|t| t.0), Some(P_NOTES));
+        assert_eq!(h.state().area_of(P_NOTES), Area::Window, "it is a window of its own while it is carried");
+        // Over a group, the place it would land shows; let go there and it docks.
+        let props = h.get_by_label("Properties").rect().center();
+        event(&mut h, egui::Event::PointerMoved(props));
+        assert!(h.ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("tab-drag-pos"))).is_some(), "the drop place is shown");
+        event(&mut h, egui::Event::PointerButton { pos: props, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        assert!(h.state().tear.is_none());
+        assert_eq!(h.state().area_of(P_NOTES), Area::Side, "let go over the Properties group, it is docked there");
+        // And let go over nothing, it stays a window.
+        let tab = h.get_by_label("Timeline").rect().center();
+        event(&mut h, egui::Event::PointerMoved(tab));
+        event(&mut h, egui::Event::PointerButton { pos: tab, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        event(&mut h, egui::Event::PointerMoved(tab + egui::vec2(0.0, -80.0)));
+        event(&mut h, egui::Event::PointerMoved(egui::pos2(700.0, 300.0)));
+        event(&mut h, egui::Event::PointerButton { pos: egui::pos2(700.0, 300.0), button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        assert_eq!(h.state().area_of(P_TIMELINE), Area::Window, "over the slide itself it stays a window");
     }
 
     #[test]
@@ -12194,7 +12355,6 @@ mod tests {
         h.run_steps(4);
         assert_eq!(h.state().docked, vec![Tool::Variables]);
         assert_eq!(h.state().right_tab, TOOL_TAB + Tool::Variables.index(), "docked, it is the tab showing, in the Scene View too");
-        assert!(h.query_by_label("Pop out").is_some());
         // A second tool opens as a window and docks after the first.
         h.state_mut().focus_open = true;
         h.run_steps(3);
@@ -12204,11 +12364,11 @@ mod tests {
         assert_eq!(h.state().right_tab, TOOL_TAB + Tool::FocusOrder.index());
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("tool-dock.png")).unwrap(); }
         // Pop one out again, and close the other.
-        h.get_by_label("Pop out").click();
+        h.state_mut().set_area(TOOL_TAB + Tool::FocusOrder.index(), Area::Window);
         h.run_steps(4);
         assert_eq!(h.state().docked, vec![Tool::Variables]);
         assert!(h.query_by_label("Dock").is_some(), "back in a window");
-        h.get_by_label_contains("Pop out").click();
+        h.state_mut().set_area(TOOL_TAB + Tool::Variables.index(), Area::Window);
         h.run_steps(4);
         assert!(h.state().docked.is_empty(), "both are windows again");
         h.state_mut().docked.push(Tool::Variables);
