@@ -224,7 +224,7 @@ impl App {
             Cmd::ZoomIn => self.view.zoom = (self.view.zoom * 1.25).clamp(0.1, 8.0),
             Cmd::ZoomOut => self.view.zoom = (self.view.zoom / 1.25).clamp(0.1, 8.0),
             Cmd::ZoomFit => { self.view.zoom = 1.0; self.view.pan = egui::Vec2::ZERO; }
-            Cmd::ZoomActual => { self.view.zoom = (1.0 / self.fit_scale.max(0.01)).clamp(0.1, 8.0); self.view.pan = egui::Vec2::ZERO; }
+            Cmd::ZoomActual => { self.view.zoom = (1.0 / self.view.fit_scale.max(0.01)).clamp(0.1, 8.0); self.view.pan = egui::Vec2::ZERO; }
             Cmd::ShowRibbon => {
                 // The menu bar or the ribbon has to stay, or File and the rest are out of reach.
                 if self.show_ribbon && !self.show_menu_bar { self.status = "Show the menu bar first, or File and the other menus are out of reach".into(); }
@@ -318,8 +318,8 @@ impl App {
         let Some(p) = &self.project else { return };
         let li = self.view.layer.min(p.slides[self.view.slide].layers.len().saturating_sub(1));
         let objects = &p.slides[self.view.slide].layers[li].objects;
-        let Some(first) = objects.iter().position(|o| !o.hidden || self.show_hidden) else { return };
-        let ids: Vec<String> = objects.iter().enumerate().filter(|(k, o)| *k != first && (!o.hidden || self.show_hidden)).map(|(_, o)| o.id.clone()).collect();
+        let Some(first) = objects.iter().position(|o| !o.hidden || self.view.show_hidden) else { return };
+        let ids: Vec<String> = objects.iter().enumerate().filter(|(k, o)| *k != first && (!o.hidden || self.view.show_hidden)).map(|(_, o)| o.id.clone()).collect();
         self.view.selected = Some((li, first));
         self.view.multi = ids.into_iter().collect();
     }

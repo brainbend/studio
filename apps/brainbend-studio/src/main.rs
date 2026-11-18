@@ -98,8 +98,6 @@ struct App {
     path: Option<PathBuf>,
     /// The view being edited: the slide, its layer, the selection, the zoom and pan (see `view.rs`).
     view: view::View,
-    /// Rubber-band start in slide coordinates while dragging on empty canvas.
-    marquee: Option<egui::Pos2>,
     textures: HashMap<String, egui::TextureHandle>,
     undo: Vec<Snap>,
     redo: Vec<Snap>,
@@ -110,12 +108,9 @@ struct App {
     style_clip: Option<Box<Object>>,
     dirty: bool,
     edit_open: bool,
-    drag: Option<DragMode>,
-    drag_changed: bool,
     id_counter: u64,
     new_var_name: String,
     new_var_kind: usize, // 0 = true/false, 1 = number, 2 = text
-    fit_scale: f32,
     theme_colors_open: bool,
     /// A color just picked, to be remembered as recent once the pointer is released.
     pending_recent: Option<Rgba>,
@@ -183,9 +178,6 @@ struct App {
     /// The Equation window (Insert > Equation, or Edit equation in Properties), while it is open.
     eq_dialog: Option<equations::Dialog>,
     pano: panos::State,
-    /// Object row being renamed in the Objects tab, and the row being dragged to reorder.
-    obj_edit: Option<(usize, usize)>,
-    obj_drag: Option<usize>,
     /// Scene View (overview of all scenes) instead of the slide editor.
     scene_view: bool,
     /// The Player Properties window, and which pane of it is showing.
@@ -271,45 +263,14 @@ struct App {
     /// The full-screen File view is open.
     file_view: bool,
     file_page: backstage::FilePage,
-    /// Selected character range of the text being edited in place; lets ribbon buttons format just that part.
-    text_sel: Option<(usize, usize)>,
-    /// Where the text cursor last was while editing in place: (layer, object, character index). Insert > Symbol uses it,
-    /// since clicking the ribbon ends the in-place edit.
-    caret: Option<(usize, usize, usize)>,
     /// Timeline bar drag: (object index, which part, start ms, duration ms at drag start, accumulated px).
     tl_drag: Option<(usize, u8, u32, Option<u32>, f32)>,
     /// Groups whose members are listed under them in the timeline (group ids); others stay folded.
     tl_open: std::collections::HashSet<String>,
-    /// A timeline drag that started on a group's own row moves the whole group.
-    obj_drag_group: bool,
-    /// The group (id) being renamed in the timeline.
-    group_edit: Option<String>,
     /// A drag on a group's timing bar: (group id, 0 move / 1 length, each member's timing when it began, pixels dragged).
     tl_gdrag: Option<(String, u8, Vec<(usize, Option<Timing>)>, f32)>,
-    /// Draw outlines for objects that are hidden when the slide starts.
-    show_hidden: bool,
-    /// The id of the picture being cropped on the canvas (crop mode), if any.
-    crop_mode: Option<String>,
-    /// While cropping: the shape (width over height) the frame is held to, if one has been chosen.
-    crop_aspect: Option<f32>,
-    /// The id of the hotspot whose outline is being edited on the canvas, and the corner chosen in it.
-    outline_mode: Option<String>,
-    outline_sel: Option<usize>,
-    /// Corners (slide units) of a freeform hotspot being drawn by clicking on the slide.
-    draw_outline: Option<Vec<(f32, f32)>>,
-    draw_slide: usize,
-    /// Object whose text is being edited in place on the canvas, and its text before editing.
-    editing: Option<(usize, usize)>,
-    editing_old: String,
-    /// The edited object's rotation and text direction when last drawn: the edit box cannot turn, so a change ends the edit.
-    edit_turn: Option<(u32, i16)>,
     /// Where the slide sits on screen (its top-left corner and scale) as of the last frame; the tests find handles with it.
     #[cfg_attr(not(test), allow(dead_code))]
-    canvas_frame: Option<(egui::Pos2, f32)>,
-    /// The id of a text box made by double-clicking blank space; it goes again if it is left empty.
-    fresh_text: Option<String>,
-    /// Typing starts here on the next frame (the canvas of this frame was drawn before the box existed).
-    start_edit: Option<(usize, usize)>,
     /// Action waiting on the "unsaved changes" dialog.
     pending: Option<Pending>,
     allow_close: bool,
@@ -337,10 +298,6 @@ struct App {
     recovery_offer: bool,
     /// Slides to delete once the frame is drawn: the slide list and Scene View are still walking the old list.
     pending_delete: Option<Vec<usize>>,
-    /// A hotspot area being drawn on a question preview: (start, current) as fractions of the picture.
-    hot_drag: Option<((f32, f32), (f32, f32))>,
-    /// Far corner of a block of table cells chosen with shift-click (the near corner is the selected cell).
-    range_end: Option<(String, (u16, u16))>,
     /// Color and width the Table panel's border buttons apply.
     border_color: Rgba,
     border_width: f32,
@@ -529,11 +486,11 @@ enum DragMode {
 impl Default for App {
     fn default() -> Self {
         Self {
-            project: None, path: None, view: view::View::default(), marquee: None, textures: HashMap::new(),
-            undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, drag: None,
-            drag_changed: false, id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
-            fit_scale: 1.0, theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), obj_edit: None, obj_drag: None, scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, text_sel: None, caret: None, range_end: None, hot_drag: None, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), obj_drag_group: false, group_edit: None, tl_gdrag: None, show_hidden: false, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, canvas_frame: None, fresh_text: None, start_edit: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            project: None, path: None, view: view::View::default(), textures: HashMap::new(),
+            undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
+            id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
+            theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -2844,7 +2801,7 @@ impl App {
                 ui.label(format!("{}{}", self.status, if self.dirty { "   • unsaved changes" } else { "" }));
                 if editing_slide {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let scale = self.fit_scale * self.view.zoom;
+                        let scale = self.view.fit_scale * self.view.zoom;
                         if ui.add(egui::Button::new(egui::RichText::new(ribbon::FRAME.to_string()).family(ribbon::icons())).frame(false)).on_hover_text("Fit the slide in the window").clicked() { fit = true; }
                         if ui.add(egui::Button::new("+").frame(false)).on_hover_text("Zoom in").clicked() { zoom_to = Some(scale * 1.25); }
                         let mut pct = (scale * 100.0).clamp(10.0, 800.0);
@@ -2854,14 +2811,14 @@ impl App {
                         if ui.add(egui::Button::new(format!("{:.0}%", scale * 100.0)).frame(false)).on_hover_text("Actual size").clicked() { zoom_to = Some(1.0); }
                         // A view setting, with the zoom: it only changes how the canvas draws, and is not saved with the project.
                         ui.separator();
-                        ui.checkbox(&mut self.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
+                        ui.checkbox(&mut self.view.show_hidden, "Outline hidden objects").on_hover_text("Draw a dashed outline where an object that is hidden when the slide starts sits");
                     });
                 }
             });
         });
         if fit { self.view.zoom = 1.0; self.view.pan = egui::Vec2::ZERO; }
         if let Some(sc) = zoom_to {
-            self.view.zoom = (sc / self.fit_scale.max(0.01)).clamp(0.1, 8.0);
+            self.view.zoom = (sc / self.view.fit_scale.max(0.01)).clamp(0.1, 8.0);
             self.view.pan = egui::Vec2::ZERO;
         }
         if open_checker { self.check_results = self.project.as_ref().map(|p| p.check()); }
@@ -4215,7 +4172,7 @@ impl App {
             if let Some(o) = self.view.selected.and_then(|(li, oi)| self.project.as_mut()?.slides[self.view.slide].layers.get_mut(li)?.objects.get_mut(oi)) { o.edit_text(""); }
         }
         let Some((li, oi)) = self.view.selected else { return };
-        let (part, caret) = (self.text_sel, self.caret);
+        let (part, caret) = (self.view.text_sel, self.view.caret);
         self.snapshot();
         let slide = self.view.slide;
         let mut at = 0;
@@ -4234,8 +4191,8 @@ impl App {
             for st in o.states.iter_mut() { if st.text == old { st.text = o.text.clone(); st.rich = o.rich.clone(); } }
             at = a + s.chars().count();
         }
-        self.text_sel = None;
-        self.caret = Some((li, oi, at));
+        self.view.text_sel = None;
+        self.view.caret = Some((li, oi, at));
         self.dirty = true;
     }
 
@@ -4448,7 +4405,7 @@ impl App {
                         let arrow = ui.interact(egui::Rect::from_center_size(ac, egui::vec2(18.0, ROW_H)), ui.id().with(("tl-fold", gid.as_str())), egui::Sense::click());
                         ui.painter().text(egui::pos2(name_rect.left() + 28.0, row.center().y), egui::Align2::CENTER_CENTER, if table { ribbon::LIST_NUM } else { ribbon::STACK }, egui::FontId::new(13.0, ribbon::icons()), fg.gamma_multiply(dim));
                         let clip = egui::Rect::from_min_max(egui::pos2(name_rect.left() + 40.0, row.top()), egui::pos2(name_rect.right() - 22.0, row.bottom()));
-                        if self.group_edit.as_deref() == Some(gid.as_str()) {
+                        if self.view.group_edit.as_deref() == Some(gid.as_str()) {
                             let mut text = custom.clone().unwrap_or_else(|| if table { "Table".into() } else { "Group".into() });
                             let r = ui.put(clip.shrink2(egui::vec2(0.0, 1.0)), egui::TextEdit::singleline(&mut text).id(egui::Id::new("group-rename")));
                             if !r.has_focus() && !r.lost_focus() { r.request_focus(); }
@@ -4456,7 +4413,7 @@ impl App {
                                 if let Some(l) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)) { l.group_names.insert(gid.clone(), text); }
                                 self.dirty = true;
                             }
-                            if r.lost_focus() { self.group_edit = None; }
+                            if r.lost_focus() { self.view.group_edit = None; }
                         } else {
                             ui.painter().with_clip_rect(clip).text(egui::pos2(clip.left(), row.center().y), egui::Align2::LEFT_CENTER, &name, egui::FontId::proportional(12.0), fg.gamma_multiply(dim));
                         }
@@ -4475,12 +4432,12 @@ impl App {
                             self.view.selected = Some((li, top));
                             self.view.multi.clear();
                         }
-                        if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, top)); self.view.multi.clear(); self.group_edit = Some(gid.clone()); }
-                        if name_resp.drag_started() { self.obj_drag = Some(top); self.obj_drag_group = true; self.view.selected = Some((li, top)); self.view.multi.clear(); }
+                        if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, top)); self.view.multi.clear(); self.view.group_edit = Some(gid.clone()); }
+                        if name_resp.drag_started() { self.view.obj_drag = Some(top); self.view.obj_drag_group = true; self.view.selected = Some((li, top)); self.view.multi.clear(); }
                         if name_resp.secondary_clicked() && !selected { self.view.selected = Some((li, top)); self.view.multi.clear(); }
                         name_resp.context_menu(|ui| {
                             if ui.button(if open { "Fold" } else { "Show members" }).clicked() { if !self.tl_open.remove(&gid) { self.tl_open.insert(gid.clone()); } ui.close(); }
-                            if ui.button("Rename").clicked() { self.snapshot(); self.group_edit = Some(gid.clone()); ui.close(); }
+                            if ui.button("Rename").clicked() { self.snapshot(); self.view.group_edit = Some(gid.clone()); ui.close(); }
                             ui.separator();
                             if ui.button("Set start and length").on_hover_text("The same start and length for every member").clicked() { row_action = Some((top, 7)); ui.close(); }
                             if ui.button("Show for the whole timeline").clicked() { row_action = Some((top, 8)); ui.close(); }
@@ -4550,7 +4507,7 @@ impl App {
                 let fg = ui.visuals().text_color();
                 let dim = if hidden { 0.45 } else { 1.0 };
                 ui.painter().text(egui::pos2(name_rect.left() + 10.0, row.center().y), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(13.0, ribbon::icons()), fg.gamma_multiply(dim));
-                if self.obj_edit == Some((li, oi)) {
+                if self.view.obj_edit == Some((li, oi)) {
                     let er = egui::Rect::from_min_max(egui::pos2(name_rect.left() + 22.0, row.top() + 1.0), egui::pos2(name_rect.right() - 22.0, row.bottom() - 1.0));
                     let mut text = name.clone();
                     let r = ui.put(er, egui::TextEdit::singleline(&mut text).id(egui::Id::new("object-rename")));
@@ -4559,7 +4516,7 @@ impl App {
                         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[slide_idx].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { o.name = text; }
                         self.dirty = true;
                     }
-                    if r.lost_focus() { self.obj_edit = None; }
+                    if r.lost_focus() { self.view.obj_edit = None; }
                 } else {
                     let clip = egui::Rect::from_min_max(egui::pos2(name_rect.left() + 22.0, row.top()), egui::pos2(name_rect.right() - 22.0, row.bottom()));
                     ui.painter().with_clip_rect(clip).text(egui::pos2(clip.left(), row.center().y), egui::Align2::LEFT_CENTER, name.clone(), egui::FontId::proportional(12.0), fg.gamma_multiply(dim));
@@ -4581,11 +4538,11 @@ impl App {
                         self.view.multi.clear();
                     }
                 }
-                if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, oi)); self.view.multi.clear(); self.obj_edit = Some((li, oi)); }
-                if name_resp.drag_started() && self.obj_edit.is_none() { self.obj_drag = Some(oi); self.obj_drag_group = false; }
+                if name_resp.double_clicked() { self.snapshot(); self.view.selected = Some((li, oi)); self.view.multi.clear(); self.view.obj_edit = Some((li, oi)); }
+                if name_resp.drag_started() && self.view.obj_edit.is_none() { self.view.obj_drag = Some(oi); self.view.obj_drag_group = false; }
                 if name_resp.secondary_clicked() && !selected { self.view.selected = Some((li, oi)); self.view.multi.clear(); }
                 name_resp.context_menu(|ui| {
-                    if ui.button("Rename").clicked() { self.snapshot(); self.obj_edit = Some((li, oi)); ui.close(); }
+                    if ui.button("Rename").clicked() { self.snapshot(); self.view.obj_edit = Some((li, oi)); ui.close(); }
                     if ui.button("Duplicate").clicked() { row_action = Some((oi, 1)); ui.close(); }
                     if ui.button("Bring to front").clicked() { row_action = Some((oi, 2)); ui.close(); }
                     if ui.button("Send to back").clicked() { row_action = Some((oi, 3)); ui.close(); }
@@ -4652,7 +4609,7 @@ impl App {
                 if edge_resp.drag_stopped() || body_resp.drag_stopped() { self.tl_drag = None; }
             }
             // Drag to reorder: the object takes the z-position of the row it is dropped on (higher rows are in front).
-            if let Some(src) = self.obj_drag {
+            if let Some(src) = self.view.obj_drag {
                 let py = ui.ctx().pointer_interact_pos().map(|p| p.y).unwrap_or(0.0);
                 let dst = row_rects.iter().find(|(_, r)| py >= r.top() && py < r.bottom()).map(|(i, _)| *i)
                     .unwrap_or(if py < row_rects.first().map(|r| r.1.top()).unwrap_or(0.0) { row_rects.first().map(|r| r.0).unwrap_or(src) } else { row_rects.last().map(|r| r.0).unwrap_or(src) });
@@ -4664,9 +4621,9 @@ impl App {
                 }
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 if !ui.input(|i| i.pointer.primary_down()) {
-                    self.obj_drag = None;
-                    if dst != src { if self.obj_drag_group { self.move_group(li, src, dst); } else { self.reorder_object(li, src, dst); } }
-                    self.obj_drag_group = false;
+                    self.view.obj_drag = None;
+                    if dst != src { if self.view.obj_drag_group { self.move_group(li, src, dst); } else { self.reorder_object(li, src, dst); } }
+                    self.view.obj_drag_group = false;
                 }
             }
             if let Some((oi, what)) = row_action {
@@ -4751,7 +4708,7 @@ impl App {
         let objs = &self.project.as_ref().unwrap().slides[self.view.slide].layers[li].objects;
         let Some(k) = brainbend_doc::tables::cell_at(objs, &g, a.0, a.1) else { return };
         self.view.selected = Some((li, k));
-        self.range_end = Some((g, b));
+        self.view.range_end = Some((g, b));
     }
 
     /// Set borders on the chosen block of cells.
@@ -4770,7 +4727,7 @@ impl App {
         let o = self.selected_object()?;
         let (g, a) = (o.group.clone()?, o.table?);
         let objs = &self.project.as_ref()?.slides.get(self.view.slide)?.layers.get(self.view.selected?.0)?.objects;
-        let b = self.range_end.as_ref().filter(|(rg, _)| *rg == g).map(|(_, rc)| *rc).unwrap_or(a);
+        let b = self.view.range_end.as_ref().filter(|(rg, _)| *rg == g).map(|(_, rc)| *rc).unwrap_or(a);
         Some((g.clone(), brainbend_doc::tables::expand_range(objs, &g, a, b)))
     }
 
@@ -4784,7 +4741,7 @@ impl App {
         brainbend_doc::tables::merge(objs, &g, (r0, c0), (r1, c1));
         self.view.selected = objs.iter().position(|o| o.group.as_deref() == Some(g.as_str()) && o.table == Some((r0, c0))).map(|k| (li, k));
         self.view.multi.clear();
-        self.range_end = None;
+        self.view.range_end = None;
         self.dirty = true;
     }
 
@@ -4798,7 +4755,7 @@ impl App {
         let objs = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers[li].objects;
         brainbend_doc::tables::split(objs, &g, rc, &mut || ids.pop().unwrap_or_default());
         self.view.selected = Some((li, oi.min(objs.len() - 1)));
-        self.range_end = None;
+        self.view.range_end = None;
         self.dirty = true;
     }
 
@@ -4925,24 +4882,24 @@ impl App {
 
     /// The hotspot being edited, mutably, found by id (it may no longer be the selection).
     fn outline_object_mut(&mut self) -> Option<&mut Object> {
-        let id = self.outline_mode.clone()?;
+        let id = self.view.outline_mode.clone()?;
         self.project.as_mut()?.slides.get_mut(self.view.slide)?.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)
     }
 
     /// Start editing the selected hotspot's outline (it gets the frame's four corners if it had none).
     fn begin_outline(&mut self) {
         let Some(o) = self.selected_object().filter(|o| matches!(o.kind, Kind::Hotspot)) else { return };
-        self.outline_mode = Some(o.id.clone());
-        self.outline_sel = None;
-        self.crop_mode = None;
+        self.view.outline_mode = Some(o.id.clone());
+        self.view.outline_sel = None;
+        self.view.crop_mode = None;
         if let Some(o) = self.outline_object_mut() { outline::begin(o); }
     }
 
     /// Stop editing the outline; one that is just the frame's corners goes back to being no outline.
     fn end_outline(&mut self) {
         if let Some(o) = self.outline_object_mut() { outline::finish(o); }
-        self.outline_mode = None;
-        self.outline_sel = None;
+        self.view.outline_mode = None;
+        self.view.outline_sel = None;
     }
 
     /// Give the hotspot its box back: no outline.
@@ -4950,37 +4907,37 @@ impl App {
         let Some(o) = self.selected_object().filter(|o| matches!(o.kind, Kind::Hotspot) && o.hit_area.is_some()) else { return };
         let id = o.id.clone();
         self.snapshot();
-        self.outline_mode = Some(id);
+        self.view.outline_mode = Some(id);
         if let Some(o) = self.outline_object_mut() { o.hit_area = None; }
-        self.outline_mode = None;
-        self.outline_sel = None;
+        self.view.outline_mode = None;
+        self.view.outline_sel = None;
         self.dirty = true;
     }
 
     /// Shrink the hotspot's frame to its outline.
     fn fit_outline(&mut self) {
         let Some(o) = self.selected_object().filter(|o| matches!(o.kind, Kind::Hotspot) && o.hit_area.as_ref().is_some_and(|a| !outline::is_box(a))) else { return };
-        let keep = self.outline_mode.clone();
-        self.outline_mode = Some(o.id.clone());
+        let keep = self.view.outline_mode.clone();
+        self.view.outline_mode = Some(o.id.clone());
         self.snapshot();
         if let Some(o) = self.outline_object_mut() { outline::fit_frame(o); }
-        self.outline_mode = keep;
+        self.view.outline_mode = keep;
         self.dirty = true;
     }
 
     /// Remove the chosen corner of the outline being edited.
     fn remove_outline_point(&mut self) {
-        let Some(i) = self.outline_sel else { return };
+        let Some(i) = self.view.outline_sel else { return };
         if !self.outline_object_mut().is_some_and(|o| o.hit_area.as_ref().is_some_and(|a| a.len() > outline::MIN_POINTS && i < a.len())) { return; }
         self.snapshot();
         if let Some(a) = self.outline_object_mut().and_then(|o| o.hit_area.as_mut()) { outline::remove(a, i); }
-        self.outline_sel = None;
+        self.view.outline_sel = None;
         self.dirty = true;
     }
 
     /// Move the chosen corner of the outline being edited.
     fn nudge_outline_point(&mut self, dx: f32, dy: f32) {
-        let Some(i) = self.outline_sel else { return };
+        let Some(i) = self.view.outline_sel else { return };
         self.snapshot();
         if let Some(o) = self.outline_object_mut() { outline::nudge_point(o, i, (dx, dy)); }
         self.dirty = true;
@@ -4995,7 +4952,7 @@ impl App {
 
     /// Finish the freeform hotspot being drawn: a hotspot whose frame fits the corners clicked.
     fn finish_draw_outline(&mut self) {
-        let Some(points) = self.draw_outline.take() else { return };
+        let Some(points) = self.view.draw_outline.take() else { return };
         let Some((x, y, w, h, area)) = outline::from_points(&points) else {
             self.status = "A freeform hotspot needs at least three corners that do not lie on a line.".into();
             return;
@@ -5047,7 +5004,7 @@ impl App {
 
     /// Hold the crop frame to `ratio` (width over height) and close it in to that shape now.
     fn set_crop_aspect(&mut self, ratio: Option<f32>) {
-        self.crop_aspect = ratio;
+        self.view.crop_aspect = ratio;
         let Some(r) = ratio else { return };
         let Some((li, oi)) = self.view.selected else { return };
         self.snapshot();
@@ -5061,7 +5018,7 @@ impl App {
         self.snapshot();
         let Some((li, oi)) = self.view.selected else { return };
         if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) { crop::reset(o); }
-        self.crop_mode = None;
+        self.view.crop_mode = None;
     }
 
     fn delete_selected(&mut self) {
@@ -6140,7 +6097,7 @@ impl App {
     /// Paint `objects` (layer `li` of a slide); `selected` outlines the chosen object.
     #[allow(clippy::too_many_arguments)]
     fn paint_objects(&mut self, ctx: &egui::Context, painter: &egui::Painter, origin: egui::Pos2, scale: f32, objects: &[Object], li: usize, selected: Option<(usize, usize)>) {
-        let show_hidden = self.show_hidden;
+        let show_hidden = self.view.show_hidden;
         let to_screen = |x: f32, y: f32, w: f32, h: f32| {
             egui::Rect::from_min_size(origin + egui::vec2(x, y) * scale, egui::vec2(w, h) * scale)
         };
@@ -7501,7 +7458,7 @@ impl App {
                 cmd && i.key_pressed(egui::Key::O),
             )
         });
-        if let Some(e) = self.start_edit.take() { self.editing = Some(e); }
+        if let Some(e) = self.view.start_edit.take() { self.view.editing = Some(e); }
         if let Some(t) = self.clip_out.take() { ctx.copy_text(t.clone()); self.clip_text = t; }
         if self.project.is_some() && ctx.input(|i| i.key_pressed(egui::Key::F7)) { self.open_spelling(); }
         if self.project.is_some() && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) { self.run_cmd(commands::Cmd::Find); }
@@ -7561,8 +7518,8 @@ impl App {
             ));
             let step = if big { 10.0 } else { 1.0 };
             // With a corner of a hotspot's outline chosen, the keys act on that corner and not on the hotspot.
-            let corner = self.outline_mode.is_some() && self.outline_sel.is_some();
-            let cropping_now = self.crop_mode.is_some();
+            let corner = self.view.outline_mode.is_some() && self.view.outline_sel.is_some();
+            let cropping_now = self.view.crop_mode.is_some();
             if del { if corner { self.remove_outline_point(); } else { self.delete_selected(); } }
             if dup { self.run_cmd(commands::Cmd::Duplicate); }
             if corner {
@@ -7812,7 +7769,7 @@ impl App {
             let painter = painter.with_clip_rect(area);
             painter.rect_filled(area, 0.0, if ui.visuals().dark_mode { egui::Color32::from_gray(42) } else { egui::Color32::from_gray(222) });
             let fit = ((avail.x - 40.0) / slide.width).min((avail.y - 40.0) / slide.height).max(0.02);
-            self.fit_scale = fit;
+            self.view.fit_scale = fit;
 
             // Zoom (pinch or ⌘/Ctrl+scroll) about the pointer; plain scroll pans; middle-drag pans.
             if resp.hovered() {
@@ -7836,7 +7793,7 @@ impl App {
             let scale = fit * self.view.zoom;
             let size = egui::vec2(slide.width * scale, slide.height * scale);
             let origin = area.center() - size / 2.0 + self.view.pan;
-            self.canvas_frame = Some((origin, scale));
+            self.view.canvas_frame = Some((origin, scale));
             self.paint_backdrop(ctx, &painter, origin, scale, &slide);
             let to_screen = |x: f32, y: f32, w: f32, h: f32| {
                 egui::Rect::from_min_size(origin + egui::vec2(x, y) * scale, egui::vec2(w, h) * scale)
@@ -7851,14 +7808,14 @@ impl App {
                 if let Some(rect) = hot {
                         let frac = |pos: egui::Pos2| { let d = (pos - rect.min) / rect.size(); (d.x.clamp(0.0, 1.0), d.y.clamp(0.0, 1.0)) };
                         if resp.drag_started() {
-                            if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.hot_drag = Some((frac(pos), frac(pos))); }
+                            if let Some(pos) = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)) { self.view.hot_drag = Some((frac(pos), frac(pos))); }
                         }
-                        if let (Some((start, _)), Some(pos)) = (self.hot_drag, resp.interact_pointer_pos()) { self.hot_drag = Some((start, frac(pos))); }
-                        if let Some((a, b)) = self.hot_drag {
+                        if let (Some((start, _)), Some(pos)) = (self.view.hot_drag, resp.interact_pointer_pos()) { self.view.hot_drag = Some((start, frac(pos))); }
+                        if let Some((a, b)) = self.view.hot_drag {
                             let band = egui::Rect::from_two_pos(rect.min + egui::vec2(a.0, a.1) * rect.size(), rect.min + egui::vec2(b.0, b.1) * rect.size());
                             painter.rect(band, 0.0, egui::Color32::from_rgba_unmultiplied(10, 110, 235, 40), egui::Stroke::new(2.0, ribbon::ACCENT), egui::StrokeKind::Inside);
                             if resp.drag_stopped() || !resp.dragged() {
-                                self.hot_drag = None;
+                                self.view.hot_drag = None;
                                 let (x0, x1, y0, y1) = (a.0.min(b.0), a.0.max(b.0), a.1.min(b.1), a.1.max(b.1));
                                 if x1 - x0 >= 0.02 && y1 - y0 >= 0.02 {
                                     self.snapshot();
@@ -7977,7 +7934,7 @@ impl App {
                 }
             };
             // The object being edited shows its text in the edit box alone, so it is not drawn twice.
-            let slide = match self.editing.filter(|_| !try_on) {
+            let slide = match self.view.editing.filter(|_| !try_on) {
                 Some((li, oi)) if slide.layers.get(li).is_some_and(|l| oi < l.objects.len()) => {
                     let mut s = slide;
                     let o = &mut s.layers[li].objects[oi];
@@ -8037,18 +7994,18 @@ impl App {
             let to_slide = |p: egui::Pos2| (p - origin) / scale;
             let sel_all = self.selection();
             // Crop mode ends when anything but the picture being cropped is selected.
-            let cropping = self.crop_mode.as_deref().is_some_and(|id| sel_all.len() == 1 && self.selected_object().is_some_and(|o| o.id == id && matches!(o.kind, Kind::Image) && o.asset.is_some()));
-            if !cropping { self.crop_mode = None; self.crop_aspect = None; }
-            if cropping && ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter)) { self.crop_mode = None; self.crop_aspect = None; }
-            let cropping = cropping && self.crop_mode.is_some();
+            let cropping = self.view.crop_mode.as_deref().is_some_and(|id| sel_all.len() == 1 && self.selected_object().is_some_and(|o| o.id == id && matches!(o.kind, Kind::Image) && o.asset.is_some()));
+            if !cropping { self.view.crop_mode = None; self.view.crop_aspect = None; }
+            if cropping && ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter)) { self.view.crop_mode = None; self.view.crop_aspect = None; }
+            let cropping = cropping && self.view.crop_mode.is_some();
             // Outline mode ends when anything but the hotspot being edited is selected.
-            let outlining = self.outline_mode.as_deref().is_some_and(|id| sel_all.len() == 1 && self.selected_object().is_some_and(|o| o.id == id && matches!(o.kind, Kind::Hotspot)));
-            if self.outline_mode.is_some() && !outlining { self.end_outline(); }
+            let outlining = self.view.outline_mode.as_deref().is_some_and(|id| sel_all.len() == 1 && self.selected_object().is_some_and(|o| o.id == id && matches!(o.kind, Kind::Hotspot)));
+            if self.view.outline_mode.is_some() && !outlining { self.end_outline(); }
             if outlining && ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter)) { self.end_outline(); }
-            let outlining = outlining && self.outline_mode.is_some();
+            let outlining = outlining && self.view.outline_mode.is_some();
             // Drawing a freeform hotspot is abandoned when the slide changes.
-            if self.draw_outline.is_some() && self.draw_slide != slide_idx { self.draw_outline = None; }
-            let drawing = self.draw_outline.is_some() || self.hot_drag.is_some();
+            if self.view.draw_outline.is_some() && self.view.draw_slide != slide_idx { self.view.draw_outline = None; }
+            let drawing = self.view.draw_outline.is_some() || self.view.hot_drag.is_some();
             // A whole group (or table) gets one box around it instead of an outline per member.
             let one_group = sel_all.len() > 1 && sel_all.iter().all(|&(l, k)| slide.layers.get(l).and_then(|ly| ly.objects.get(k)).is_some_and(|o| o.group.is_some() && o.group == slide.layers[sel_all[0].0].objects[sel_all[0].1].group));
             if sel_all.len() > 1 && !one_group {
@@ -8117,7 +8074,7 @@ impl App {
             };
             let purple = ribbon::PURPLE;
             for (i, p) in outline_pts.iter().enumerate() {
-                let chosen = self.outline_sel == Some(i);
+                let chosen = self.view.outline_sel == Some(i);
                 // Orange squares like the crop handles; the chosen corner is larger and white inside.
                 let hr = egui::Rect::from_center_size(*p, egui::Vec2::splat(HANDLE_PX + if chosen { 4.0 } else { 0.0 }));
                 painter.rect_filled(hr, 1.0, if chosen { egui::Color32::WHITE } else { purple });
@@ -8231,7 +8188,7 @@ impl App {
                         Some(h) if sel_all.contains(&h) && self.view.selected != Some(h) && slide.layers[h.0].objects[h.1].table.is_some() && self.selected_object().is_some_and(|s| s.group == slide.layers[h.0].objects[h.1].group) => {
                             // Right-clicking another cell of the selected table: table commands act on that cell.
                             self.view.selected = Some(h);
-                            self.range_end = None;
+                            self.view.range_end = None;
                         }
                         Some(h) if !sel_all.contains(&h) => { self.view.selected = Some(h); self.view.multi.clear(); }
                         None => { self.view.selected = None; self.view.multi.clear(); }
@@ -8243,17 +8200,17 @@ impl App {
             // Drawing a freeform hotspot: each click is a corner; Enter, a double-click or a click on the first corner ends it.
             if drawing {
                 let (esc, enter, back) = ctx.input(|i| (i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Backspace)));
-                if esc { self.draw_outline = None; self.status = "Freeform hotspot cancelled.".into(); }
+                if esc { self.view.draw_outline = None; self.status = "Freeform hotspot cancelled.".into(); }
                 else if enter { self.finish_draw_outline(); }
-                else if back { if let Some(p) = self.draw_outline.as_mut() { p.pop(); } }
+                else if back { if let Some(p) = self.view.draw_outline.as_mut() { p.pop(); } }
                 else if let (true, Some(pos)) = (resp.clicked() || resp.double_clicked(), resp.interact_pointer_pos()) {
                     let at = to_slide(pos);
-                    let near_first = self.draw_outline.as_ref().and_then(|p| p.first()).is_some_and(|f| (origin + egui::vec2(f.0, f.1) * scale).distance(pos) <= HANDLE_PX && self.draw_outline.as_ref().is_some_and(|p| p.len() >= outline::MIN_POINTS));
+                    let near_first = self.view.draw_outline.as_ref().and_then(|p| p.first()).is_some_and(|f| (origin + egui::vec2(f.0, f.1) * scale).distance(pos) <= HANDLE_PX && self.view.draw_outline.as_ref().is_some_and(|p| p.len() >= outline::MIN_POINTS));
                     if resp.double_clicked() || near_first { self.finish_draw_outline(); }
-                    else if let Some(p) = self.draw_outline.as_mut() { p.push((at.x, at.y)); }
+                    else if let Some(p) = self.view.draw_outline.as_mut() { p.push((at.x, at.y)); }
                 }
             }
-            if let Some(pts) = self.draw_outline.as_ref() {
+            if let Some(pts) = self.view.draw_outline.as_ref() {
                 let screen: Vec<egui::Pos2> = pts.iter().map(|p| origin + egui::vec2(p.0, p.1) * scale).collect();
                 let tail = resp.hover_pos().filter(|_| !screen.is_empty());
                 let mut line = screen.clone();
@@ -8271,9 +8228,9 @@ impl App {
                 // A drag is only reported after the pointer has moved a few pixels, so grab where it was pressed.
                 let pressed = if resp.drag_started() { ctx.input(|i| i.pointer.press_origin()) } else { None };
                 if let Some(pos) = pressed.or(resp.interact_pointer_pos()) {
-                    self.drag_changed = false;
-                    self.text_sel = None;
-                    self.caret = None;
+                    self.view.drag_changed = false;
+                    self.view.text_sel = None;
+                    self.view.caret = None;
                     let mut outline_hit = false;
                     if outlining {
                         let at = to_slide(pos);
@@ -8281,24 +8238,24 @@ impl App {
                         if let Some(o) = o {
                             let area = o.hit_area.clone().unwrap_or_default();
                             if let Some(i) = outline::nearest_vertex(&o, &area, (at.x, at.y), HANDLE_PX / scale) {
-                                self.outline_sel = Some(i);
-                                self.drag = Some(DragMode::OutlinePoint(i));
+                                self.view.outline_sel = Some(i);
+                                self.view.drag = Some(DragMode::OutlinePoint(i));
                                 outline_hit = true;
                             } else if let Some((edge, p)) = outline::nearest_edge(&o, &area, (at.x, at.y), 6.0 / scale) {
                                 // A click on an edge adds a corner there, which can be dragged straight away.
                                 self.snapshot();
-                                self.drag_changed = true;
+                                self.view.drag_changed = true;
                                 let mut new_area = area.clone();
                                 let k = outline::insert(&mut new_area, edge, p);
                                 if let Some(o) = self.outline_object_mut() { o.hit_area = Some(new_area); }
-                                self.outline_sel = Some(k);
-                                self.drag = Some(DragMode::OutlinePoint(k));
+                                self.view.outline_sel = Some(k);
+                                self.view.drag = Some(DragMode::OutlinePoint(k));
                                 self.dirty = true;
                                 outline_hit = true;
                             } else if sel_rect.is_some_and(|r| inside_frame(r, sel_rot, pos)) {
                                 // Inside the hotspot: nothing to grab, so just let go of any chosen corner.
-                                self.outline_sel = None;
-                                self.drag = None;
+                                self.view.outline_sel = None;
+                                self.view.drag = None;
                                 outline_hit = true;
                             } else {
                                 // Clicking away finishes the outline and selects as usual.
@@ -8309,25 +8266,25 @@ impl App {
                     let mut crop_hit = outline_hit;
                     if cropping {
                         if let Some((hx, hy)) = handle_at(pos) {
-                            self.drag = Some(DragMode::Crop(hx, hy));
+                            self.view.drag = Some(DragMode::Crop(hx, hy));
                             crop_hit = true;
                         } else if sel_rect.is_some_and(|r| inside_frame(r, sel_rot, pos)) {
-                            self.drag = Some(DragMode::CropPan);
+                            self.view.drag = Some(DragMode::CropPan);
                             crop_hit = true;
                         } else {
                             // Clicking away finishes the crop and selects as usual.
-                            self.crop_mode = None;
+                            self.view.crop_mode = None;
                         }
                     }
                     if crop_hit {
                     } else if let Some(i) = path_at(pos) {
-                        self.drag = Some(DragMode::PathPoint(i));
+                        self.view.drag = Some(DragMode::PathPoint(i));
                     } else if rotate_at(pos) {
-                        self.drag = Some(DragMode::Rotate);
+                        self.view.drag = Some(DragMode::Rotate);
                     } else if let Some((vertical, i)) = border_at(pos) {
-                        self.drag = Some(DragMode::TableBorder(vertical, i));
+                        self.view.drag = Some(DragMode::TableBorder(vertical, i));
                     } else if let Some((hx, hy)) = handle_at(pos) {
-                        self.drag = Some(if sel_all.len() > 1 { DragMode::ResizeGroup(hx, hy) } else { DragMode::Resize(hx, hy) });
+                        self.view.drag = Some(if sel_all.len() > 1 { DragMode::ResizeGroup(hx, hy) } else { DragMode::Resize(hx, hy) });
                     } else {
                         let p = to_slide(pos);
                         let hit = hit_object(&slide, &shown, p, scale);
@@ -8340,8 +8297,8 @@ impl App {
                         });
                         if let (true, Some(end)) = (shift, same_table) {
                             // Shift-click in a table chooses a block of cells.
-                            self.range_end = Some(end);
-                            self.drag = None;
+                            self.view.range_end = Some(end);
+                            self.view.drag = None;
                         } else if shift && hit.is_some() && self.view.selected.is_some() {
                             // Toggle membership (same layer only).
                             let (h_li, h_oi) = hit.unwrap();
@@ -8360,23 +8317,23 @@ impl App {
                                     self.view.multi.push(id);
                                 }
                             }
-                            self.drag = None;
+                            self.view.drag = None;
                         } else if in_sel && sel_all.len() > 1 {
                             // Grabbing a member of a multi-selection moves the whole group.
                             if let Some(h) = hit.filter(|h| slide.layers[h.0].objects[h.1].table.is_some() && self.selected_object().is_some_and(|s| s.group == slide.layers[h.0].objects[h.1].group)) {
                                 // Within a table the clicked cell becomes the current cell.
-                                if self.view.selected != Some(h) { self.view.selected = Some(h); self.range_end = None; }
+                                if self.view.selected != Some(h) { self.view.selected = Some(h); self.view.range_end = None; }
                             }
-                            self.drag = Some(DragMode::Move);
+                            self.view.drag = Some(DragMode::Move);
                         } else {
                             self.view.selected = hit;
                             self.view.multi.clear();
-                            self.range_end = None;
-                            self.drag = Some(if hit.is_some() { DragMode::Move } else { DragMode::Marquee });
-                            if hit.is_none() { self.marquee = Some(p.to_pos2()); }
+                            self.view.range_end = None;
+                            self.view.drag = Some(if hit.is_some() { DragMode::Move } else { DragMode::Marquee });
+                            if hit.is_none() { self.view.marquee = Some(p.to_pos2()); }
                         }
                         self.drag_accum = egui::Vec2::ZERO;
-                        if let Some((li, oi)) = self.view.selected.filter(|_| matches!(self.drag, Some(DragMode::Move))) {
+                        if let Some((li, oi)) = self.view.selected.filter(|_| matches!(self.view.drag, Some(DragMode::Move))) {
                             let o = &slide.layers[li].objects[oi];
                             self.drag_origin = (o.x, o.y);
                         }
@@ -8393,12 +8350,12 @@ impl App {
                         } else if matches!(o.kind, Kind::Hotspot) {
                             if !outlining && !drawing { self.begin_outline(); }
                         } else if !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Unsupported(_)) {
-                            self.editing = Some((li, oi));
-                            self.editing_old = o.text.clone();
+                            self.view.editing = Some((li, oi));
+                            self.view.editing_old = o.text.clone();
                             self.snapshot();
                         }
                     }
-                } else if !outlining && !drawing && self.crop_mode.is_none() && !try_on {
+                } else if !outlining && !drawing && self.view.crop_mode.is_none() && !try_on {
                     // Double-clicking blank space makes a text box there and starts typing in it.
                     if let Some(pos) = resp.interact_pointer_pos().or(ctx.pointer_interact_pos()) {
                         let at = to_slide(pos);
@@ -8409,21 +8366,21 @@ impl App {
                                 o.x = at.x.min(sw - o.w).max(0.0).round();
                                 o.y = (at.y - 24.0).min(sh - o.h).max(0.0).round();
                                 o.text = String::new();
-                                self.fresh_text = Some(o.id.clone());
+                                self.view.fresh_text = Some(o.id.clone());
                             }
-                            self.start_edit = Some((li, oi));
-                            self.editing_old = String::new();
+                            self.view.start_edit = Some((li, oi));
+                            self.view.editing_old = String::new();
                         }
                     }
                 }
             }
             self.guides.clear();
             if resp.dragged_by(egui::PointerButton::Primary) {
-                if let (Some(mode), Some((li, oi))) = (self.drag, self.view.selected) {
+                if let (Some(mode), Some((li, oi))) = (self.view.drag, self.view.selected) {
                     let d = resp.drag_delta() / scale;
-                    if d != egui::Vec2::ZERO && !self.drag_changed && !matches!(mode, DragMode::Marquee | DragMode::Crop(..) | DragMode::CropPan) {
+                    if d != egui::Vec2::ZERO && !self.view.drag_changed && !matches!(mode, DragMode::Marquee | DragMode::Crop(..) | DragMode::CropPan) {
                         // One undo step per drag, taken at the first actual movement.
-                        self.drag_changed = true;
+                        self.view.drag_changed = true;
                         self.snapshot();
                     }
                     // Cropping records an undo step only when the drag actually changes the picture.
@@ -8434,13 +8391,13 @@ impl App {
                             let a = next.rotation.to_radians();
                             let local = (d.x * a.cos() + d.y * a.sin(), -d.x * a.sin() + d.y * a.cos());
                             match mode {
-                                DragMode::Crop(hx, hy) => match self.crop_aspect { Some(r) => crop::drag_edges_locked(&mut next, (hx, hy), local, r), None => crop::drag_edges(&mut next, (hx, hy), local) },
+                                DragMode::Crop(hx, hy) => match self.view.crop_aspect { Some(r) => crop::drag_edges_locked(&mut next, (hx, hy), local, r), None => crop::drag_edges(&mut next, (hx, hy), local) },
                                 _ => crop::pan(&mut next, local),
                             }
                             // Rounding in the crop sums leaves tiny differences that are not a change.
                             let (a, b, ca, cb) = ([next.x, next.y, next.w, next.h], [cur.x, cur.y, cur.w, cur.h], next.crop.unwrap_or([0.0; 4]), cur.crop.unwrap_or([0.0; 4]));
                             if a.iter().zip(b).any(|(p, q)| (p - q).abs() > 0.02) || ca.iter().zip(cb).any(|(p, q)| (p - q).abs() > 0.0003) {
-                                if !self.drag_changed { self.drag_changed = true; self.snapshot(); }
+                                if !self.view.drag_changed { self.view.drag_changed = true; self.snapshot(); }
                                 if let Some(o) = self.project.as_mut().unwrap().slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                                     (o.x, o.y, o.w, o.h, o.crop) = (next.x, next.y, next.w, next.h, next.crop);
                                 }
@@ -8569,7 +8526,7 @@ impl App {
                     }
                 }
             }
-            if let Some(start) = self.marquee {
+            if let Some(start) = self.view.marquee {
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     if let Some(pos) = resp.interact_pointer_pos() {
                         let cur = to_slide(pos).to_pos2();
@@ -8588,22 +8545,22 @@ impl App {
                         self.view.multi = found.iter().rev().skip(1).map(|&(l, k)| slide.layers[l].objects[k].id.clone()).collect();
                     }
                 }
-                if resp.drag_stopped() || !resp.dragged() { self.marquee = None; }
+                if resp.drag_stopped() || !resp.dragged() { self.view.marquee = None; }
             }
-            if resp.drag_stopped() { self.drag = None; self.guides.clear(); }
-            if let Some((li, oi)) = self.editing {
+            if resp.drag_stopped() { self.view.drag = None; self.guides.clear(); }
+            if let Some((li, oi)) = self.view.editing {
                 let valid = slide.layers.get(li).and_then(|l| l.objects.get(oi)).is_some();
                 if !valid {
-                    self.editing = None;
-                    self.edit_turn = None;
+                    self.view.editing = None;
+                    self.view.edit_turn = None;
                 } else {
-                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.editing = None; self.edit_turn = None; return };
+                    let Some(o_real) = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).cloned() else { self.view.editing = None; self.view.edit_turn = None; return };
                     let o = &o_real;
                     // The edit box cannot turn with the object, so turning it (the handle, the Properties field or the
                     // text direction buttons) ends the edit. The text is already in the object, so nothing is lost.
                     let turn_now = (o.rotation.to_bits(), o.text_rotation);
-                    let turned = self.edit_turn.is_some_and(|before| before != turn_now);
-                    self.edit_turn = Some(turn_now);
+                    let turned = self.view.edit_turn.is_some_and(|before| before != turn_now);
+                    self.view.edit_turn = Some(turn_now);
                     let r = egui::Rect::from_min_size(origin + egui::vec2(o.x, o.y) * scale, egui::vec2(o.w, o.h) * scale);
                     let font = egui::FontId::new((o.style.size * scale).max(8.0), font_family(&o.style.font_family));
                     let mut text = o.text.clone();
@@ -8763,10 +8720,10 @@ impl App {
                     let cur = egui::TextEdit::load_state(ctx, edit_id).and_then(|st| st.cursor.char_range());
                     if let Some(range) = cur {
                         let (p, q) = (range.primary.index.0, range.secondary.index.0);
-                        self.text_sel = (p != q).then(|| (p.min(q), p.max(q)));
-                        self.caret = Some((li, oi, q));
+                        self.view.text_sel = (p != q).then(|| (p.min(q), p.max(q)));
+                        self.view.caret = Some((li, oi, q));
                     }
-                    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.text_sel = None; }
+                    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) { self.view.text_sel = None; }
                     if let (Some(attr), Some(range)) = (attr, cur) {
                         let (p, q) = (range.primary.index.0, range.secondary.index.0);
                         let (a, b) = (p.min(q), p.max(q));
@@ -8779,21 +8736,21 @@ impl App {
                         }
                     }
                     if text != o.text {
-                        let old = self.editing_old.clone();
+                        let old = self.view.editing_old.clone();
                         if let Some(obj) = self.project.as_mut().unwrap().slides[slide_idx].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                             obj.edit_text(&text);
                             for st in obj.states.iter_mut() {
                                 if st.text == old { st.text = obj.text.clone(); st.rich = obj.rich.clone(); }
                             }
                         }
-                        self.editing_old = text;
+                        self.view.editing_old = text;
                         self.dirty = true;
                     }
                     if done {
-                        self.editing = None;
-                        self.edit_turn = None;
+                        self.view.editing = None;
+                        self.view.edit_turn = None;
                         // A text box made by double-clicking that was left empty is not wanted.
-                        if let Some(id) = self.fresh_text.take() {
+                        if let Some(id) = self.view.fresh_text.take() {
                             let empty = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)).is_some_and(|o| o.id == id && o.text.is_empty());
                             if empty {
                                 self.snapshot();
@@ -9692,7 +9649,7 @@ mod tests {
                     let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
                     let mut h = harness(a);
                     shot(&mut h, "9-picture-selected.png");
-                    h.state_mut().crop_mode = Some(id);
+                    h.state_mut().view.crop_mode = Some(id);
                     shot(&mut h, "9-crop-mode.png");
                 }
             }
@@ -9881,10 +9838,10 @@ mod tests {
         shot(&mut h, "5m3-spelling.png");
         h.state_mut().spell = None;
         h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[0].text = "Safty first, teh plan".into();
-        h.state_mut().editing = Some((0, 0));
+        h.state_mut().view.editing = Some((0, 0));
         h.run_steps(4);
         shot(&mut h, "5m4-squiggles.png");
-        h.state_mut().editing = None;
+        h.state_mut().view.editing = None;
         h.run_steps(2);
         h.state_mut().find = None;
         h.run_steps(2);
@@ -10054,7 +10011,7 @@ mod tests {
             h.state_mut().view.selected = Some((0, 0));
         }
         h.run_steps(4);
-        h.state_mut().editing = Some((0, 0));
+        h.state_mut().view.editing = Some((0, 0));
         h.run_steps(3);
         // Delete the slide the UI is looking at; the next frames must not index past the end.
         let last = h.state().project.as_ref().unwrap().slides.len() - 1;
@@ -10124,14 +10081,14 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("text-formats.png")).unwrap();
             // The same text while it is being edited in place.
-            h.state_mut().editing = Some((0, 0));
+            h.state_mut().view.editing = Some((0, 0));
             h.run_steps(4);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("text-formats-editing.png")).unwrap();
             // Centred and right-aligned text edits keep their alignment and indent too.
             h.state_mut().project.as_mut().unwrap().slides[0].layers[0].objects[0].style.align = Align::Center;
             h.run_steps(4);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("text-formats-editing-centre.png")).unwrap();
-            h.state_mut().editing = None;
+            h.state_mut().view.editing = None;
             h.run_steps(3);
             h.render().expect("renderer").save(std::path::Path::new(&dir).join("text-formats-centre.png")).unwrap();
             { use egui_kittest::kittest::Queryable; h.get_by_label("Normal Text").click(); }
@@ -10563,11 +10520,11 @@ mod tests {
         { let o = &mut a.project.as_mut().unwrap().slides[0].layers[0].objects[0]; o.text = "abcd".into(); o.format_range(0, 2, &Attr::ToggleBold); }
         a.insert_symbol("Ω");
         assert_eq!(a.selected_object().unwrap().text, "abcdΩ", "with no cursor known it goes at the end");
-        a.caret = Some((0, 0, 1));
+        a.view.caret = Some((0, 0, 1));
         a.insert_symbol("π");
         assert_eq!(a.selected_object().unwrap().text, "aπbcdΩ", "at the cursor");
         assert_eq!(a.selected_object().unwrap().char_fmts()[1].1.bold, Some(true), "it takes the formatting of the character before");
-        a.text_sel = Some((2, 4));
+        a.view.text_sel = Some((2, 4));
         a.insert_symbol("≤");
         assert_eq!(a.selected_object().unwrap().text, "aπ≤dΩ", "it replaces the chosen text");
         a.undo();
@@ -11290,8 +11247,8 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = PLACEHOLDER_TEXT.into();
         let mut h = harness(a);
         h.run_steps(3);
-        h.state_mut().editing = Some((li, oi));
-        h.state_mut().editing_old = PLACEHOLDER_TEXT.into();
+        h.state_mut().view.editing = Some((li, oi));
+        h.state_mut().view.editing_old = PLACEHOLDER_TEXT.into();
         h.run_steps(4);
         h
     }
@@ -12602,6 +12559,37 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_that_is_not_showing_can_be_worked_on_through_its_own_view() {
+        let mut a = app();
+        a.insert_rect();
+        a.add_slide(SlideKind::Normal);
+        a.insert_rect();
+        a.view.slide = 0;
+        a.new_tab_request = true;
+        a.sync_tabs();
+        a.view.slide = 1;
+        a.new_tab_request = true;
+        a.sync_tabs();
+        assert_eq!(a.active_tab, Some(1));
+        a.view.selected = None;
+        a.view.zoom = 3.0;
+        // Tab 0 is not showing: work on it as if it were, and see that the current view is left alone.
+        let seen = a.with_tab_view(0, |a| {
+            let at = (a.view.slide, a.view.zoom);
+            a.view.selected = Some((0, 0));
+            a.view.zoom = 0.5;
+            at
+        });
+        assert_eq!(seen, Some((0, 1.0)), "inside, the view is the tab's: its slide and its zoom");
+        assert_eq!((a.view.slide, a.view.zoom, a.view.selected), (1, 3.0, None), "the current view is as it was");
+        // What was done to tab 0's view stays there, and comes back when it is shown.
+        a.view.slide = 0;
+        a.sync_tabs();
+        assert_eq!((a.view.selected, a.view.zoom), (Some((0, 0)), 0.5));
+        assert_eq!(a.with_tab_view(7, |_| ()), None, "there is no such tab");
+    }
+
+    #[test]
     fn reset_layout_puts_every_tab_back_where_it_started() {
         let mut a = app();
         let main = a.dock.group_of(0).unwrap().id;
@@ -13055,13 +13043,13 @@ mod tests {
         }
         h.run_steps(3);
         assert_eq!(count(&h), n + 1, "a text box was made");
-        assert!(h.state().editing.is_some(), "and it is ready for typing");
+        assert!(h.state().view.editing.is_some(), "and it is ready for typing");
         assert_eq!(h.state().ribbon_tab, ribbon::OBJECTS_TAB);
         // Leaving it empty takes it away again.
         press(&mut h, egui::Key::Escape);
         h.run_steps(2);
         assert_eq!(count(&h), n, "an empty text box is not kept");
-        assert!(h.state().editing.is_none());
+        assert!(h.state().view.editing.is_none());
     }
 
     #[test]
@@ -13485,7 +13473,7 @@ mod tests {
             h.get_by_role_and_label(egui::accesskit::Role::Button, "Crop").click();
             h.run_steps(3);
         }
-        assert_eq!(h.state().crop_mode.as_deref(), Some("photo"), "the Crop button in the Picture bar starts cropping");
+        assert_eq!(h.state().view.crop_mode.as_deref(), Some("photo"), "the Crop button in the Picture bar starts cropping");
     }
 
     #[test]
@@ -13550,8 +13538,8 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
         let mut h = harness(a);
         h.run_steps(3);
-        h.state_mut().editing = Some((li, oi));
-        h.state_mut().editing_old = "Hello there".into();
+        h.state_mut().view.editing = Some((li, oi));
+        h.state_mut().view.editing_old = "Hello there".into();
         h.run_steps(4);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("text-editing.png")).unwrap();
@@ -13570,10 +13558,10 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].text = "Hello there".into();
         let mut h = harness(a);
         h.run_steps(3);
-        h.state_mut().editing = Some((li, oi));
-        h.state_mut().editing_old = "Hello there".into();
+        h.state_mut().view.editing = Some((li, oi));
+        h.state_mut().view.editing_old = "Hello there".into();
         h.run_steps(4);
-        assert!(h.state().editing.is_some(), "the box is being edited");
+        assert!(h.state().view.editing.is_some(), "the box is being edited");
         h
     }
 
@@ -13598,7 +13586,7 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.state().try_note.is_none(), "nothing pressed yet");
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
         let note = h.state().try_note.clone().expect("the press says what Try It did not do");
         assert!(note.contains("jumps to Quiz time") && note.contains("Preview"), "{note}");
@@ -13652,7 +13640,7 @@ mod tests {
     #[test]
     fn pressing_something_a_blocking_layer_covers_says_so() {
         let (mut h, o) = try_it_over_a_layer(true);
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
         let note = h.state().try_note.clone().expect("a dead-looking press explains itself");
         assert!(note.contains("Pop-up") && note.contains("Block clicks on the layers beneath"), "{note}");
@@ -13662,7 +13650,7 @@ mod tests {
     #[test]
     fn a_layer_that_lets_clicks_through_gives_no_blocked_note() {
         let (mut h, o) = try_it_over_a_layer(false);
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         click_at(&mut h, origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale);
         assert!(h.state().try_note.is_none(), "{:?}", h.state().try_note);
     }
@@ -13672,13 +13660,13 @@ mod tests {
         let mut h = editing_text_box();
         let (li, oi) = h.state().view.selected.unwrap();
         let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         let knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
         let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
         drag(&mut h, knob, centre + egui::vec2(150.0, 0.0));
         let after = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
         assert!(after.rotation.abs() > 1.0, "the handle still turns the box: {}", after.rotation);
-        assert!(h.state().editing.is_none(), "an edit box that cannot turn is not left behind a turned frame");
+        assert!(h.state().view.editing.is_none(), "an edit box that cannot turn is not left behind a turned frame");
         assert_eq!(after.text, "Hello there", "the typed text is kept");
     }
 
@@ -13689,7 +13677,7 @@ mod tests {
             let (li, oi) = h.state().view.selected.unwrap();
             change(&mut h.state_mut().project.as_mut().unwrap().slides[0].layers[li].objects[oi]);
             h.run_steps(3);
-            assert!(h.state().editing.is_none(), "turning the object ends the edit");
+            assert!(h.state().view.editing.is_none(), "turning the object ends the edit");
             assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].text, "Hello there");
         }
     }
@@ -13705,8 +13693,8 @@ mod tests {
         }
         let mut h = harness(a);
         h.run_steps(3);
-        h.state_mut().editing = Some((li, oi));
-        h.state_mut().editing_old = "Hello there".into();
+        h.state_mut().view.editing = Some((li, oi));
+        h.state_mut().view.editing_old = "Hello there".into();
         h.run_steps(5);
         h
     }
@@ -13715,14 +13703,14 @@ mod tests {
     fn a_turned_box_is_edited_upright_and_keeps_its_rotation() {
         let mut h = editing_a_turned_text_box();
         let (li, oi) = h.state().view.selected.unwrap();
-        assert!(h.state().editing.is_some(), "a rotation that was already there does not end the edit");
+        assert!(h.state().view.editing.is_some(), "a rotation that was already there does not end the edit");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("turned-box-editing.png")).unwrap(); }
         h.event(egui::Event::Text("!".into()));
         h.run_steps(3);
         // Finish with Escape, as a person would.
         h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: Some(egui::Key::Escape), pressed: true, repeat: false, modifiers: Default::default() });
         h.run_steps(3);
-        assert!(h.state().editing.is_none());
+        assert!(h.state().view.editing.is_none());
         let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
         assert!(o.text.contains('!'), "the typing reached the box");
         assert_eq!(o.rotation, 30.0, "only what is drawn was straightened, not the box itself");
@@ -13733,7 +13721,7 @@ mod tests {
         let mut h = editing_a_turned_text_box();
         let (li, oi) = h.state().view.selected.unwrap();
         let o = h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].clone();
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         // Where the rotate handle is when the frame is upright: straight above the middle of the top edge.
         let upright_knob = origin + egui::vec2(o.x + o.w / 2.0, o.y) * scale - egui::vec2(0.0, 26.0);
         let centre = origin + egui::vec2(o.x + o.w / 2.0, o.y + o.h / 2.0) * scale;
@@ -13750,9 +13738,9 @@ mod tests {
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].rotation = 30.0;
         let mut h = harness(a);
         h.run_steps(3);
-        h.state_mut().editing = Some((li, oi));
+        h.state_mut().view.editing = Some((li, oi));
         h.run_steps(5);
-        assert!(h.state().editing.is_some(), "only a change of rotation ends the edit, not a rotation that was already there");
+        assert!(h.state().view.editing.is_some(), "only a change of rotation ends the edit, not a rotation that was already there");
     }
 
     #[test]
@@ -13896,8 +13884,8 @@ mod tests {
             o.format_range(6, 10, &Attr::ToggleBold);
             o.format_range(0, 5, &Attr::ToggleItalic);
         }
-        a.editing = Some((li, oi));
-        a.editing_old = "Hello bold world".into();
+        a.view.editing = Some((li, oi));
+        a.view.editing_old = "Hello bold world".into();
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].rich.is_some());
@@ -13909,7 +13897,7 @@ mod tests {
         a.insert_text();
         let (li, oi) = a.view.selected.unwrap();
         a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].edit_text("Hello world");
-        a.text_sel = Some((0, 5));
+        a.view.text_sel = Some((0, 5));
         a.format_selection(Attr::ToggleBold);
         let o = a.selected_object().unwrap();
         let runs = &o.rich.as_ref().unwrap()[0].runs;
@@ -13957,7 +13945,7 @@ mod tests {
         };
         let start = line(&h);
         assert!(start.iter().all(|v| (-0.001..=1.001).contains(v)), "a new gradient's handles are on the slide: {start:?}");
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         let (w, hh) = { let s = &h.state().project.as_ref().unwrap().slides[0]; (s.width, s.height) };
         let at = |x: f32, y: f32| origin + egui::vec2(x * w, y * hh) * scale;
         let from = at(start[0], start[1]);
@@ -14097,10 +14085,10 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert_eq!(h.query_all_by_label("Outline hidden objects").count(), 1, "once, by the zoom, and not in the ribbon or the Properties");
-        assert!(!h.state().show_hidden);
+        assert!(!h.state().view.show_hidden);
         h.get_by_label("Outline hidden objects").click();
         h.run_steps(3);
-        assert!(h.state().show_hidden, "ticking it outlines the hidden objects on the canvas");
+        assert!(h.state().view.show_hidden, "ticking it outlines the hidden objects on the canvas");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::Path::new(&dir).join("status-outline.png")).unwrap(); }
     }
 
@@ -15423,13 +15411,13 @@ mod tests {
         click(&mut h, egui::pos2(410.0, y0));
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[2].hidden, "the eye hid it");
         // Renaming (double-click starts it): the edit box takes typing and keeps the new name.
-        h.state_mut().obj_edit = Some((0, 1));
+        h.state_mut().view.obj_edit = Some((0, 1));
         h.run_steps(3);
         h.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
         h.event(egui::Event::Text("Hero".into()));
         h.run_steps(3);
         assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[1].name, "Hero", "the name changed");
-        h.state_mut().obj_edit = None;
+        h.state_mut().view.obj_edit = None;
         h.run_steps(2);
         // Dragging the first row to the last sends that object to the back.
         let ids = |h: &egui_kittest::Harness<'static, App>| h.state().project.as_ref().unwrap().slides[0].layers[0].objects.iter().map(|o| o.id.clone()).collect::<Vec<_>>();
@@ -15517,7 +15505,7 @@ mod tests {
         assert!(timings(&h).iter().all(|t| t.is_none()), "one undo step puts it back");
         // Renaming the group.
         let gid = h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].group.clone().unwrap();
-        h.state_mut().group_edit = Some(gid.clone());
+        h.state_mut().view.group_edit = Some(gid.clone());
         h.run_steps(3);
         h.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
         h.event(egui::Event::Text("Hero set".into()));
@@ -15575,7 +15563,7 @@ mod tests {
         let g = objs(&a)[0].group.clone().unwrap();
         let k = objs(&a).iter().position(|o| o.table == Some((1, 0))).unwrap();
         a.view.selected = Some((0, k));
-        a.range_end = Some((g.clone(), (2, 1)));
+        a.view.range_end = Some((g.clone(), (2, 1)));
         assert_eq!(a.cell_block().unwrap().1, (1, 0, 2, 1));
         a.merge_cells();
         assert_eq!(objs(&a).len(), 9 - 3);
@@ -15899,7 +15887,7 @@ mod tests {
     #[test]
     fn holding_shift_while_dragging_a_corner_keeps_the_objects_proportions() {
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.expect("the canvas has been drawn");
+        let (origin, scale) = h.state().view.canvas_frame.expect("the canvas has been drawn");
         let corner = origin + egui::vec2(700.0, 500.0) * scale;
         drag_with_shift(&mut h, corner, corner + egui::vec2(120.0, 10.0) * scale);
         let (x, y, w, hgt) = resized_rect(&h);
@@ -15911,7 +15899,7 @@ mod tests {
     #[test]
     fn without_shift_a_corner_drag_still_resizes_freely() {
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         let corner = origin + egui::vec2(700.0, 500.0) * scale;
         drag(&mut h, corner, corner + egui::vec2(120.0, 10.0) * scale);
         let (_, _, w, hgt) = resized_rect(&h);
@@ -15921,7 +15909,7 @@ mod tests {
     #[test]
     fn shift_on_a_top_left_corner_keeps_the_bottom_right_corner_fixed() {
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         let corner = origin + egui::vec2(300.0, 300.0) * scale;
         drag_with_shift(&mut h, corner, corner + egui::vec2(-80.0, -5.0) * scale);
         let (x, y, w, hgt) = resized_rect(&h);
@@ -15932,7 +15920,7 @@ mod tests {
     #[test]
     fn shift_on_a_side_handle_keeps_the_proportions_growing_the_other_side_about_the_middle() {
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         // The right edge: the left edge stays, and the height grows evenly above and below.
         let right = origin + egui::vec2(700.0, 400.0) * scale;
         drag_with_shift(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
@@ -15942,7 +15930,7 @@ mod tests {
         assert!(((y + hgt / 2.0) - 400.0).abs() < 0.5, "it grew about the middle: y {y} h {hgt}");
         // The top edge: the bottom stays, and the width grows evenly left and right.
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         let top = origin + egui::vec2(500.0, 300.0) * scale;
         drag_with_shift(&mut h, top, top - egui::vec2(0.0, 60.0) * scale);
         let (x, y, w, hgt) = resized_rect(&h);
@@ -15954,7 +15942,7 @@ mod tests {
     #[test]
     fn without_shift_a_side_handle_changes_only_that_side() {
         let mut h = selected_rect_for_resizing();
-        let (origin, scale) = h.state().canvas_frame.unwrap();
+        let (origin, scale) = h.state().view.canvas_frame.unwrap();
         let right = origin + egui::vec2(700.0, 400.0) * scale;
         drag(&mut h, right, right + egui::vec2(100.0, 0.0) * scale);
         let (x, y, w, hgt) = resized_rect(&h);
@@ -15981,7 +15969,7 @@ mod tests {
         o.asset = Some("pic".into());
         a.insert(o);
         a.view.selected = Some((0, 0));
-        a.crop_mode = Some("photo".into());
+        a.view.crop_mode = Some("photo".into());
         let mut h = harness(a);
         h.run_steps(3);
         let state = |h: &egui_kittest::Harness<'_, App>| h.state().selected_object().unwrap().clone();
@@ -16005,7 +15993,7 @@ mod tests {
         assert!(after.w < before.w && (after.h - before.h).abs() < 0.01 && after.x > before.x, "{before:?} -> {after:?}");
         let now = crop::image_rect(&after);
         assert!((now.0 - whole.0).abs() < 0.1 && (now.2 - whole.2).abs() < 0.1, "the picture itself did not move: {whole:?} -> {now:?}");
-        assert_eq!(h.state().crop_mode.as_deref(), Some("photo"), "still in crop mode");
+        assert_eq!(h.state().view.crop_mode.as_deref(), Some("photo"), "still in crop mode");
 
         // Dragging inside the frame slides the picture under it.
         let centre = egui::pos2((by_x[0].x + by_x[7].x) / 2.0 + 40.0, (by_x[0].y + by_x[7].y) / 2.0);
@@ -16023,7 +16011,7 @@ mod tests {
         }
         h.key_press(egui::Key::Escape);
         h.run_steps(2);
-        assert_eq!(h.state().crop_mode, None, "Escape finishes cropping");
+        assert_eq!(h.state().view.crop_mode, None, "Escape finishes cropping");
         // Reset shows the whole picture again, where it was.
         let framed = state(&h);
         let picture = crop::image_rect(&framed);
@@ -16109,7 +16097,7 @@ mod tests {
         o.asset = Some("pic".into());
         a.insert(o);
         a.view.selected = Some((0, 0));
-        a.crop_mode = Some("photo".into());
+        a.view.crop_mode = Some("photo".into());
         assert_eq!(a.picture_ratio("photo"), Some(2.0), "the source picture is twice as wide as tall");
         a.set_crop_aspect(Some(1.0));
         let sq = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].clone();
@@ -16135,7 +16123,7 @@ mod tests {
         assert_eq!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects[0].crop.unwrap(), before, "one undo step per key press");
         // Free lets go of the ratio.
         h.state_mut().set_crop_aspect(None);
-        assert_eq!(h.state().crop_aspect, None);
+        assert_eq!(h.state().view.crop_aspect, None);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("9v-crop-square.png")).unwrap(); }
     }
 
@@ -16178,7 +16166,7 @@ mod tests {
         a.insert(blank_object("spot".into(), "Hotspot", Kind::Hotspot, 100.0, 100.0, 600.0, 400.0));
         a.view.selected = Some((0, 0));
         a.begin_outline();
-        assert_eq!(a.outline_mode.as_deref(), Some("spot"));
+        assert_eq!(a.view.outline_mode.as_deref(), Some("spot"));
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects[0].hit_area.as_ref().map(|a| a.len()), Some(4), "the box's four corners to start from");
         let mut h = harness(a);
         h.run_steps(3);
@@ -16193,7 +16181,7 @@ mod tests {
         assert_eq!(area.len(), 4);
         let moved = area.iter().filter(|p| p.0 > 0.05 && p.0 < 0.95 && p.1 > 0.05 && p.1 < 0.95).count();
         assert_eq!(moved, 1, "one corner moved in from the bottom-right: {area:?}");
-        assert!(h.state().outline_sel.is_some(), "and it is the chosen corner");
+        assert!(h.state().view.outline_sel.is_some(), "and it is the chosen corner");
         // Click the middle of the top edge: a corner is added there, and dragging moves it.
         let tl = *handles.iter().min_by(|a, b| (a.x + a.y).total_cmp(&(b.x + b.y))).unwrap();
         let top_right = *handles.iter().filter(|p| (p.y - tl.y).abs() < 3.0 && p.x > tl.x + 20.0).next().unwrap();
@@ -16207,20 +16195,20 @@ mod tests {
         // Delete removes the chosen (new) corner, not the hotspot.
         press(&mut h, egui::Key::Delete);
         assert_eq!(spot_of(&h).hit_area.unwrap().len(), 4);
-        assert!(h.state().outline_mode.is_some());
+        assert!(h.state().view.outline_mode.is_some());
         // Undo brings the corner back; undo again takes the edge drag away.
         h.state_mut().undo();
         assert_eq!(spot_of(&h).hit_area.unwrap().len(), 5);
         // The arrow keys move the chosen corner.
-        let before = spot_of(&h).hit_area.unwrap()[h.state().outline_sel.unwrap_or(0).min(4)];
-        h.state_mut().outline_sel = Some(2);
+        let before = spot_of(&h).hit_area.unwrap()[h.state().view.outline_sel.unwrap_or(0).min(4)];
+        h.state_mut().view.outline_sel = Some(2);
         let p2 = spot_of(&h).hit_area.unwrap()[2];
         press(&mut h, egui::Key::ArrowLeft);
         let after = spot_of(&h).hit_area.unwrap()[2];
         assert!(after.0 < p2.0, "moved left: {p2:?} -> {after:?} ({before:?})");
         // Escape finishes; the outline stays because it is no longer the box.
         press(&mut h, egui::Key::Escape);
-        assert_eq!(h.state().outline_mode, None);
+        assert_eq!(h.state().view.outline_mode, None);
         assert!(spot_of(&h).hit_area.is_some());
     }
 
@@ -16233,27 +16221,27 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         press(&mut h, egui::Key::Enter);
-        assert_eq!(h.state().outline_mode, None);
+        assert_eq!(h.state().view.outline_mode, None);
         assert_eq!(spot_of(&h).hit_area, None, "nothing was changed, so there is no outline");
     }
 
     #[test]
     fn gui_a_freeform_hotspot_is_drawn_by_clicking_its_corners() {
         let mut a = app();
-        a.draw_outline = Some(vec![]);
-        a.draw_slide = 0;
+        a.view.draw_outline = Some(vec![]);
+        a.view.draw_slide = 0;
         let mut h = harness(a);
         h.run_steps(3);
         // Canvas clicks well inside the slide area.
         let pts = [egui::pos2(500.0, 300.0), egui::pos2(800.0, 320.0), egui::pos2(760.0, 520.0), egui::pos2(520.0, 480.0)];
         for p in pts { click_at(&mut h, p); }
-        assert_eq!(h.state().draw_outline.as_ref().map(|p| p.len()), Some(4), "four corners so far");
+        assert_eq!(h.state().view.draw_outline.as_ref().map(|p| p.len()), Some(4), "four corners so far");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("9u-drawing-outline.png")).unwrap(); }
         press(&mut h, egui::Key::Backspace);
-        assert_eq!(h.state().draw_outline.as_ref().map(|p| p.len()), Some(3), "Backspace takes the last corner back");
+        assert_eq!(h.state().view.draw_outline.as_ref().map(|p| p.len()), Some(3), "Backspace takes the last corner back");
         click_at(&mut h, pts[3]);
         press(&mut h, egui::Key::Enter);
-        assert_eq!(h.state().draw_outline, None);
+        assert_eq!(h.state().view.draw_outline, None);
         let spot = spot_of(&h);
         let area = spot.hit_area.clone().expect("an outline");
         assert_eq!(area.len(), 4);
@@ -16267,20 +16255,20 @@ mod tests {
     #[test]
     fn gui_escape_cancels_a_freeform_hotspot_and_too_few_corners_make_none() {
         let mut a = app();
-        a.draw_outline = Some(vec![]);
+        a.view.draw_outline = Some(vec![]);
         let mut h = harness(a);
         h.run_steps(3);
         click_at(&mut h, egui::pos2(500.0, 300.0));
         click_at(&mut h, egui::pos2(800.0, 320.0));
         press(&mut h, egui::Key::Enter);
-        assert_eq!(h.state().draw_outline, None);
+        assert_eq!(h.state().view.draw_outline, None);
         assert!(h.state().project.as_ref().unwrap().slides[0].layers[0].objects.is_empty(), "two corners make no hotspot");
         assert!(h.state().status.contains("at least three"), "{}", h.state().status);
-        h.state_mut().draw_outline = Some(vec![]);
+        h.state_mut().view.draw_outline = Some(vec![]);
         h.run_steps(2);
         click_at(&mut h, egui::pos2(500.0, 300.0));
         press(&mut h, egui::Key::Escape);
-        assert_eq!(h.state().draw_outline, None);
+        assert_eq!(h.state().view.draw_outline, None);
     }
 
     #[test]
@@ -16346,7 +16334,7 @@ mod tests {
         let g = a.project.as_ref().unwrap().slides[0].layers[0].objects[0].group.clone().unwrap();
         let k = a.project.as_ref().unwrap().slides[0].layers[0].objects.iter().position(|o| o.table == Some((1, 0))).unwrap();
         a.view.selected = Some((0, k));
-        a.range_end = Some((g, (2, 1)));
+        a.view.range_end = Some((g, (2, 1)));
         let mut h = harness(a);
         h.run_steps(3);
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {

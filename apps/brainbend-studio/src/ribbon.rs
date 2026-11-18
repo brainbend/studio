@@ -1117,8 +1117,8 @@ fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
                 if menu_item(ui, RECT, "Rectangle").clicked() { a.insert_hotspot(false); ui.close(); }
                 if menu_item(ui, CIRCLE, "Oval").clicked() { a.insert_hotspot(true); ui.close(); }
                 if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
-                    a.draw_outline = Some(vec![]);
-                    a.draw_slide = a.view.slide;
+                    a.view.draw_outline = Some(vec![]);
+                    a.view.draw_slide = a.view.slide;
                     a.view.selected = None;
                     a.view.multi.clear();
                     a.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
@@ -1948,12 +1948,12 @@ impl App {
         group(ui, "Picture", |ui| {
             hwrap(ui, |ui| {
                 ui.add_enabled_ui(crop_info.is_some(), |ui| {
-                    let on = crop_info.as_ref().is_some_and(|(id, _)| self.crop_mode.as_deref() == Some(id.as_str()));
+                    let on = crop_info.as_ref().is_some_and(|(id, _)| self.view.crop_mode.as_deref() == Some(id.as_str()));
                     pr(ui, "Crop", |ui, w| {
                         let half = if w > 0.0 { (w - ui.spacing().item_spacing.x) / 2.0 } else { 0.0 };
                         if half > 0.0 { fill_next(ui, half); }
                         if big_toggle(ui, CROP, "Crop", "Crop the picture: drag its edges, or drag inside it to move the picture (Esc or Enter to finish)", on).clicked() {
-                            self.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
+                            self.view.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
                         }
                         ui.add_enabled_ui(crop_info.as_ref().is_some_and(|c| c.1), |ui| {
                             if half > 0.0 { fill_next(ui, half); }
@@ -1971,11 +1971,11 @@ impl App {
                         });
                     });
                     // The shape of the crop frame: pick one and the frame closes in to it and keeps it while dragged.
-                    ui.add_enabled_ui(self.crop_mode.is_some(), |ui| {
+                    ui.add_enabled_ui(self.view.crop_mode.is_some(), |ui| {
                         pr(ui, "Ratio", |ui, _| {
                             big_menu(ui, FRAME, "Ratio", "Hold the crop to a shape of frame: 1:1, 4:3, 16:9 ...", |ui| {
                                 let native = crop_info.as_ref().and_then(|(id, _)| self.picture_ratio(id));
-                                let cur = self.crop_aspect;
+                                let cur = self.view.crop_aspect;
                                 let pick = |ui: &mut egui::Ui, app: &mut Self, label: &str, r: Option<f32>| {
                                     let on = match (cur, r) { (None, None) => true, (Some(a), Some(b)) => (a - b).abs() < 0.001, _ => false };
                                     if ui.selectable_label(on, label).clicked() { app.set_crop_aspect(r); ui.close(); }
@@ -2000,7 +2000,7 @@ impl App {
                 // Only a single hotspot has an outline to edit: (its id, whether it has an outline that is not just its box).
                 let spot = (enabled && n_sel == 1 && matches!(obj.kind, Kind::Hotspot)).then(|| (obj.id.clone(), obj.hit_area.as_ref().is_some_and(|a| !outline::is_box(a)), obj.hit_area.is_some()));
                 ui.add_enabled_ui(spot.is_some(), |ui| {
-                    let on = spot.as_ref().is_some_and(|(id, _, _)| self.outline_mode.as_deref() == Some(id.as_str()));
+                    let on = spot.as_ref().is_some_and(|(id, _, _)| self.view.outline_mode.as_deref() == Some(id.as_str()));
                     pr(ui, "Outline", |ui, _| {
                         if big_toggle(ui, NODES, "Outline", "Edit the hotspot's outline: drag a corner, click an edge to add one, Delete removes the chosen corner (Esc or Enter to finish)", on).clicked() {
                             if on { self.end_outline(); } else { self.begin_outline(); }
@@ -2076,7 +2076,7 @@ impl App {
                         let shown_id = egui::Id::new("text_link_shown");
                         if link_btn.clicked() {
                             let cur = self.selected_object().and_then(|o| {
-                                let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
+                                let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
                                 o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
                             }).unwrap_or_default();
                             ui.data_mut(|d| { d.insert_temp(link_id, cur); d.insert_temp(shown_id, String::new()); });
@@ -2129,8 +2129,8 @@ impl App {
                         if menu_item(ui, RECT, "Rectangle").clicked() { self.insert_hotspot(false); ui.close(); }
                         if menu_item(ui, CIRCLE, "Oval").clicked() { self.insert_hotspot(true); ui.close(); }
                         if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
-                            self.draw_outline = Some(vec![]);
-                            self.draw_slide = self.view.slide;
+                            self.view.draw_outline = Some(vec![]);
+                            self.view.draw_slide = self.view.slide;
                             self.view.selected = None;
                             self.view.multi.clear();
                             self.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
@@ -2235,7 +2235,7 @@ impl App {
         ui.set_min_width(260.0);
         let has_text = self.selected_object().is_some_and(|o| !o.text.is_empty());
         let cur: String = self.selected_object().and_then(|o| {
-            let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
+            let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
             o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
         }).unwrap_or_default();
         let key = egui::Id::new("menu-link-form");
@@ -2511,7 +2511,7 @@ impl App {
     /// Link the selected text (or all of the selected object's text) to a web address; `None` removes the link.
     fn link_selected(&mut self, url: Option<String>) {
         let Some((li, oi)) = self.view.selected else { return };
-        let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
+        let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
         self.snapshot();
         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             let n = o.text.chars().count();
@@ -2704,7 +2704,7 @@ impl App {
 
     /// Format the characters selected in the in-place editor (set by the canvas while editing).
     pub(super) fn format_selection(&mut self, attr: Attr) {
-        let (Some((a, b)), Some((li, oi))) = (self.text_sel, self.view.selected) else { return };
+        let (Some((a, b)), Some((li, oi))) = (self.view.text_sel, self.view.selected) else { return };
         self.snapshot();
         if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             o.format_range(a, b, &attr);
@@ -2718,7 +2718,7 @@ impl App {
     pub(super) fn edit_text_range(&mut self, f: impl Fn(&mut Object, usize, usize, bool)) {
         let targets = self.format_targets();
         if targets.is_empty() { return; }
-        let (part, primary) = (self.text_sel, self.view.selected);
+        let (part, primary) = (self.view.text_sel, self.view.selected);
         self.snapshot();
         let slide = self.view.slide;
         let Some(p) = self.project.as_mut() else { return };

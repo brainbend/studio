@@ -8,8 +8,8 @@
 use super::*;
 use crate::view::View;
 
-#[derive(Clone, Debug)]
-pub struct SlideTab {
+#[derive(Clone)]
+pub(crate) struct SlideTab {
     pub slide_id: String,
     /// What the editor holds for this slide while another is showing: its layer, selection, zoom, pan and the rest (see `view.rs`).
     view: View,
@@ -88,6 +88,23 @@ impl App {
             let t = self.tab_for(self.view.slide.min(p.slides.len() - 1));
             self.tabs[k] = t;
         }
+    }
+
+    /// Run `f` as if the view of tab `k` were the current one, then put everything back: whatever `f` did to the view stays in the tab. This is how a
+    /// tab that is not the one showing (a window of its own, later: see #74) is drawn and handled while the rest of the app reads `self.view`.
+    /// For the tab that is showing, `f` just runs. `None` when there is no such tab or its slide has gone.
+    #[allow(dead_code)]
+    pub(crate) fn with_tab_view<R>(&mut self, k: usize, f: impl FnOnce(&mut App) -> R) -> Option<R> {
+        if k >= self.tabs.len() { return None; }
+        if self.active_tab == Some(k) { return Some(f(self)); }
+        let slide = self.project.as_ref()?.slides.iter().position(|s| s.id == self.tabs[k].slide_id)?;
+        let mut other = self.tabs[k].view.clone();
+        other.slide = slide;
+        std::mem::swap(&mut self.view, &mut other);
+        let r = f(self);
+        std::mem::swap(&mut self.view, &mut other);
+        self.tabs[k].view = other;
+        Some(r)
     }
 
     /// A new Scene View tab, at the right end of the strip, and the one showing.

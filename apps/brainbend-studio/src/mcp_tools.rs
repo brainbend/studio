@@ -336,7 +336,7 @@ impl App {
         let editing = access(name) == Some(Access::Edit);
         if editing {
             // The author is typing into a text box right now; changing the project under their cursor would lose their words.
-            if self.editing.is_some() { return Err("The author is typing in a text box. Try again in a moment.".into()); }
+            if self.view.editing.is_some() { return Err("The author is typing in a text box. Try again in a moment.".into()); }
             self.end_state_swap();
             self.leave_master_view();
         }
@@ -840,7 +840,7 @@ mod tests {
     #[test]
     fn changes_wait_while_the_author_is_typing() {
         let mut a = app_with(1);
-        a.editing = Some((0, 0));
+        a.view.editing = Some((0, 0));
         let e = run(&mut a, "add_text", json!({ "slide": 1, "text": "x" })).unwrap_err();
         assert!(e.contains("typing"), "{e}");
         assert_eq!(a.project.as_ref().unwrap().slides[0].layers[0].objects.len(), 0);

@@ -213,7 +213,7 @@ impl App {
                         if ui.selectable_label(obj.style.size == z, format!("{z:.0}")).clicked() { obj.style.size = z; *changed = true; }
                     }
                 });
-                let cur = self.text_sel.and_then(|(a, _)| obj.char_fmts().get(a).and_then(|(_, f)| f.size)).unwrap_or(obj.style.size);
+                let cur = self.view.text_sel.and_then(|(a, _)| obj.char_fmts().get(a).and_then(|(_, f)| f.size)).unwrap_or(obj.style.size);
                 for (up, tip) in [(true, "Grow font"), (false, "Shrink font")] {
                     if compact_text_button(ui, grow_job(ui, up), tip).clicked() {
                         let next = step_size(cur, up);
@@ -226,7 +226,7 @@ impl App {
                 if color_field(ui, w, &mut c, None) { if let Some(c) = c { obj.style.color = c; *changed = true; } }
             });
             // While text is selected on the slide these format just the selection.
-            let part = self.text_sel;
+            let part = self.view.text_sel;
             let (ra, rb) = part.unwrap_or((0, usize::MAX));
             let span: Vec<Fmt> = obj.char_fmts().into_iter().enumerate().filter(|(i, _)| *i >= ra && *i < rb).map(|(_, (_, f))| f).collect();
             let all_strike = !span.is_empty() && span.iter().all(|f| f.strike.unwrap_or(false));
