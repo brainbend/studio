@@ -12,6 +12,9 @@ use std::collections::HashMap;
 /// The Slide Layers panel's number.
 pub const LAYERS: usize = 30;
 
+/// The slide list's number.
+pub const SLIDES: usize = 31;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Edge { Right, Bottom, Left, Top }
 
@@ -56,6 +59,7 @@ impl Default for Layout {
     /// Properties, Triggers and AI at the right with Slide Layers under them; Timeline, Slide Notes and States at the bottom.
     fn default() -> Self {
         let mut l = Layout { right: vec![], bottom: vec![], left: vec![], top: vec![], window: vec![], next: 1 };
+        l.left = l.slide_list();
         let main = l.group(vec![0, 1, 2], 0.772);
         let layers = l.group(vec![LAYERS], 0.228);
         let lane = l.lane(vec![main, layers]);
@@ -70,7 +74,7 @@ impl Default for Layout {
 /// A ready-made arrangement for a kind of screen.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Preset {
-    /// Properties at the right with Slide Layers under it, the Timeline at the bottom.
+    /// Properties at the right with Slide Layers under it, the Timeline at the bottom, the slide list at the left.
     Standard,
     /// For wide screens: two columns at the right (Properties and Slide Layers, then the Timeline over Slide Notes and States), nothing at the bottom.
     Wide,
@@ -104,6 +108,7 @@ impl Layout {
                 let low = l.group(vec![21, 22], 0.5);
                 let second = l.lane(vec![time, low]);
                 l.right = vec![first, second];
+                l.left = l.slide_list();
                 l
             }
             Preset::Tall => {
@@ -113,10 +118,14 @@ impl Layout {
                 let layers = l.group(vec![LAYERS], 0.3);
                 let lane = l.lane(vec![main, low, layers]);
                 l.bottom = vec![lane];
+                l.left = l.slide_list();
                 l
             }
         }
     }
+
+    /// The slide list on its own at the left, as it has always been.
+    fn slide_list(&mut self) -> Vec<Lane> { let g = self.group(vec![SLIDES], 1.0); vec![self.lane(vec![g])] }
 
     fn id(&mut self) -> u32 { self.next += 1; self.next }
     fn group(&mut self, tabs: Vec<usize>, share: f32) -> Group { let current = tabs.first().copied().unwrap_or(0); Group { id: self.id(), tabs, current, share } }
@@ -366,9 +375,9 @@ mod tests {
         assert!(l.window.is_empty());
         // A tab the layout has not heard of (from a newer version) goes where it starts; one with no start is a window.
         let mut start = HashMap::new();
-        start.insert(31, Edge::Right);
-        l.include(&[31, 40], &start);
-        assert_eq!(l.edge_of(31), Some(Edge::Right));
+        start.insert(41, Edge::Right);
+        l.include(&[41, 40], &start);
+        assert_eq!(l.edge_of(41), Some(Edge::Right));
         assert_eq!(l.window, vec![40]);
     }
 
@@ -398,8 +407,8 @@ mod tests {
         // On the left the lanes are columns, so below a group is a new row; on the top they are rows, so beside a group is a new column.
         let one = l.group_of(1).unwrap().id;
         l.place(2, Spot::At { group: one, zone: Zone::Below });
-        assert_eq!(l.left.len(), 1);
-        assert_eq!(l.left[0].groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), vec![vec![1], vec![2]]);
+        assert_eq!(l.left.len(), 2, "the slide list's column and the new one");
+        assert_eq!(l.left[1].groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), vec![vec![1], vec![2]]);
         let top = l.group_of(21).unwrap().id;
         l.place(22, Spot::At { group: top, zone: Zone::Right });
         assert_eq!(l.top.len(), 1);
@@ -413,6 +422,6 @@ mod tests {
         let mut l = Layout::default();
         l.place(1, Spot::EdgeEnd(Edge::Left));
         l.place(1, Spot::EdgeEnd(Edge::Right));
-        assert!(l.left.is_empty());
+        assert_eq!(l.left.len(), 1, "only the slide list is left there");
     }
 }

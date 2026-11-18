@@ -1578,13 +1578,16 @@ impl App {
                 ui.checkbox(&mut panels.ai, "AI");
             });
             ui.label("Slide");
-            ui.checkbox(&mut panels.layers, "Slide Layers");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut panels.slides, "Slide List").on_hover_text("The slides of the scene, as thumbnails");
+                ui.checkbox(&mut panels.layers, "Slide Layers");
+            });
         });
         if let Some(pr) = preset { self.apply_preset(pr); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
         if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
-        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers)] {
+        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers), ("show_slides", self.panels.slides, panels.slides)] {
             if was != now { crate::prefs::set_bool(key, now); }
         }
         self.panels = panels;

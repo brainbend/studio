@@ -796,7 +796,7 @@ fn load_dock() -> dock::Layout {
     let mut l = prefs::get_str("dock_layout").and_then(|s| dock::Layout::from_json(&s)).unwrap_or_default();
     let mut start = HashMap::new();
     for t in TOOLS { if prefs::get_bool(t.key()).unwrap_or(false) { start.insert(TOOL_TAB + t.index(), dock::Edge::Right); } }
-    for g in PANEL_IDS { start.insert(g, if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
+    for g in PANEL_IDS { start.insert(g, if g == P_SLIDES { dock::Edge::Left } else if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
     start.insert(dock::LAYERS, dock::Edge::Right);
     let all: Vec<usize> = PANEL_IDS.iter().copied().chain([dock::LAYERS]).chain(TOOLS.iter().map(|t| TOOL_TAB + t.index())).collect();
     l.include(&all, &start);
@@ -812,7 +812,8 @@ const P_TRIGGERS: usize = 1;
 const P_TIMELINE: usize = 20;
 const P_NOTES: usize = 21;
 const P_STATES: usize = 22;
-const PANEL_IDS: [usize; 6] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES];
+const P_SLIDES: usize = dock::SLIDES;
+const PANEL_IDS: [usize; 7] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES, P_SLIDES];
 
 /// Where a tab is: in the side panel, in the bottom panel, or in a window of its own outside the app.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -978,11 +979,11 @@ impl App {
 
     /// Whether a panel (not a tool) is switched on in Studio Settings.
     fn panel_shown(&self, g: usize) -> bool {
-        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, dock::LAYERS => self.panels.layers, _ => false }
+        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, dock::LAYERS => self.panels.layers, P_SLIDES => self.panels.slides, _ => false }
     }
 
     fn panel_title(g: usize) -> &'static str {
-        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", _ => "States" }
+        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", P_SLIDES => "Slide List", _ => "States" }
     }
 
     /// Whether a tab shows where it is: a panel that is on in Studio Settings (Slide Layers is not part of the Layout Builder), or a
@@ -1084,6 +1085,8 @@ impl App {
         ids.iter().map(|&g| (g, match g {
             1 => { let n = self.trigger_count(slide_idx); if n > 0 { format!("Triggers ({n})") } else { "Triggers".to_string() } }
             2 => if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() },
+            // In the Layout Builder the slide list's place holds the layouts.
+            P_SLIDES if self.in_master_view() => "Layouts".to_string(),
             _ => match Self::tool_of(g) { Some(t) => t.title().to_string(), None => Self::panel_title(g).to_string() },
         })).collect()
     }
@@ -1101,6 +1104,69 @@ impl App {
         }).count()
     }
 
+    /// The slide list: the scene to show, its slides as thumbnails, and the buttons to add and arrange them. The body of the Slides tab.
+    fn slides_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.add_space(6.0);
+        if self.in_master_view() {
+            self.master_panel(ui, ctx);
+            return;
+        }
+        let cur_scene = self.current_scene();
+        let mut goto_scene: Option<usize> = None;
+        let mut new_scene = false;
+        {
+            let proj = self.project.as_ref().unwrap();
+            let names: Vec<String> = proj.scenes.iter().map(|c| match c.bank { Some(b) => format!("{} (bank: {})", c.name, if b.draw == 0 { "all".to_string() } else { format!("draw {}", b.draw) }), None => c.name.clone() }).collect();
+            combo("scene-picker").width(ui.available_width() - 8.0).selected_text(names.get(cur_scene).cloned().unwrap_or_default()).show_ui(ui, |ui| {
+                for (si, n) in names.iter().enumerate() {
+                    if ui.selectable_label(si == cur_scene, n).clicked() { goto_scene = Some(si); }
+                }
+                ui.separator();
+                if ui.button("+ New scene").clicked() { new_scene = true; ui.close(); }
+            });
+        }
+        if let Some(si) = goto_scene {
+            if let Some(&i) = self.project.as_ref().unwrap().scene_slides(si).first() { self.open_slide(i); }
+        }
+        if new_scene { self.add_scene(); self.scene_view = false; }
+        ui.add_space(4.0);
+        let mut clicked: Option<usize> = None;
+        let fit_w = ui.available_width() - 6.0;
+        let list_h = (ui.available_height() - if self.slide_multi.is_empty() { 44.0 } else { 64.0 }).max(80.0);
+        // Right-clicking between the slides adds one (or a scene); the thumbnails above this take their own clicks.
+        let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), egui::Id::new("slides-bg"), egui::Sense::click());
+        list_bg.context_menu(|ui| self.new_slide_items(ui, Some(cur_scene)));
+        egui::ScrollArea::both().id_salt("slides").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+            let (sel, opn) = self.scene_flow(ui, ctx, cur_scene, 64.0, Some(fit_w));
+            clicked = sel.or(opn);
+        });
+        if let Some(i) = clicked {
+            self.slide = i; self.layer = 0; self.selected = None;
+            self.reset_visibility();
+        }
+        if !self.slide_multi.is_empty() {
+            ui.weak(format!("{} slides selected", self.slide_multi.len() + 1));
+        }
+        ui.horizontal(|ui| {
+            ui.menu_button("+ Add slide", |ui| self.new_slide_items(ui, None));
+            ui.menu_button("Slide", |ui| {
+                if ui.button("Duplicate").clicked() { self.duplicate_slides(); ui.close(); }
+                if ui.button("Move up").clicked() { self.move_slides(false); ui.close(); }
+                if ui.button("Move down").clicked() { self.move_slides(true); ui.close(); }
+                ui.separator();
+                ui.menu_button("Move to scene", |ui| {
+                    let names: Vec<String> = self.project.as_ref().unwrap().scenes.iter().map(|c| c.name.clone()).collect();
+                    let here = self.current_scene();
+                    for (si, n) in names.iter().enumerate() {
+                        if ui.add_enabled(si != here || !self.slide_multi.is_empty(), egui::Button::new(n)).clicked() { self.move_selected_slides_to_scene(si); ui.close(); }
+                    }
+                });
+                ui.separator();
+                if ui.button(if self.slide_multi.is_empty() { "Delete" } else { "Delete selected slides" }).clicked() { self.pending_delete = Some(self.slide_selection()); ui.close(); }
+            });
+        });
+    }
+
     /// What a tab shows: its panel's body, or its tool.
     fn panel_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, g: usize, wants: &mut SideWants) {
         match g {
@@ -1112,6 +1178,7 @@ impl App {
             P_STATES => { egui::ScrollArea::vertical().id_salt("states-scroll").auto_shrink([false, false]).show(ui, |ui| self.states_tab(ui, slide_idx)); }
             P_NOTES => self.notes_panel(ui, slide_idx),
             dock::LAYERS => self.layers_panel(ui, ctx, slide_idx, true),
+            P_SLIDES => self.slides_body(ui, ctx),
             _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
         }
     }
@@ -1123,6 +1190,7 @@ impl App {
             0 => ("show_properties", &mut self.panels.properties), 1 => ("show_triggers", &mut self.panels.triggers), 2 => ("show_ai", &mut self.panels.ai),
             P_TIMELINE => ("show_timeline", &mut self.panels.timeline), P_NOTES => ("show_notes", &mut self.panels.notes), P_STATES => ("show_states", &mut self.panels.states),
             dock::LAYERS => ("show_layers", &mut self.panels.layers),
+            P_SLIDES => ("show_slides", &mut self.panels.slides),
             _ => return,
         };
         *flag = false;
@@ -1275,7 +1343,7 @@ impl App {
             dock::Edge::Left => {
                 let id = if n > 1 { format!("dock-left-{n}") } else { "dock-left".to_string() };
                 let max = (root.available_rect_before_wrap().width() - 360.0).max(280.0);
-                egui::Panel::left(id).resizable(true).default_size((326.0 * n as f32).min(max)).min_size(200.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                egui::Panel::left(id).resizable(true).default_size((250.0 * n as f32).min(max)).min_size(200.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
             }
             dock::Edge::Top => {
                 let id = if n > 1 { format!("dock-top-{n}") } else { "dock-top".to_string() };
@@ -7610,68 +7678,6 @@ impl App {
             return;
         }
 
-        egui::Panel::left("slides").default_size(240.0).show(root, |ui| {
-            ui.add_space(6.0);
-            if self.in_master_view() {
-                self.master_panel(ui, ctx);
-                return;
-            }
-            let cur_scene = self.current_scene();
-            let mut goto_scene: Option<usize> = None;
-            let mut new_scene = false;
-            {
-                let proj = self.project.as_ref().unwrap();
-                let names: Vec<String> = proj.scenes.iter().map(|c| match c.bank { Some(b) => format!("{} (bank: {})", c.name, if b.draw == 0 { "all".to_string() } else { format!("draw {}", b.draw) }), None => c.name.clone() }).collect();
-                combo("scene-picker").width(ui.available_width() - 8.0).selected_text(names.get(cur_scene).cloned().unwrap_or_default()).show_ui(ui, |ui| {
-                    for (si, n) in names.iter().enumerate() {
-                        if ui.selectable_label(si == cur_scene, n).clicked() { goto_scene = Some(si); }
-                    }
-                    ui.separator();
-                    if ui.button("+ New scene").clicked() { new_scene = true; ui.close(); }
-                });
-            }
-            if let Some(si) = goto_scene {
-                if let Some(&i) = self.project.as_ref().unwrap().scene_slides(si).first() { self.open_slide(i); }
-            }
-            if new_scene { self.add_scene(); self.scene_view = false; }
-            ui.add_space(4.0);
-            let mut clicked: Option<usize> = None;
-            let fit_w = ui.available_width() - 6.0;
-            let list_h = (ui.available_height() - if self.slide_multi.is_empty() { 44.0 } else { 64.0 }).max(80.0);
-            // Right-clicking between the slides adds one (or a scene); the thumbnails above this take their own clicks.
-            let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), egui::Id::new("slides-bg"), egui::Sense::click());
-            list_bg.context_menu(|ui| self.new_slide_items(ui, Some(cur_scene)));
-            egui::ScrollArea::both().id_salt("slides").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
-                let (sel, opn) = self.scene_flow(ui, ctx, cur_scene, 64.0, Some(fit_w));
-                clicked = sel.or(opn);
-            });
-            if let Some(i) = clicked {
-                self.slide = i; self.layer = 0; self.selected = None;
-                self.reset_visibility();
-            }
-            if !self.slide_multi.is_empty() {
-                ui.weak(format!("{} slides selected", self.slide_multi.len() + 1));
-            }
-            ui.horizontal(|ui| {
-                ui.menu_button("+ Add slide", |ui| self.new_slide_items(ui, None));
-                ui.menu_button("Slide", |ui| {
-                    if ui.button("Duplicate").clicked() { self.duplicate_slides(); ui.close(); }
-                    if ui.button("Move up").clicked() { self.move_slides(false); ui.close(); }
-                    if ui.button("Move down").clicked() { self.move_slides(true); ui.close(); }
-                    ui.separator();
-                    ui.menu_button("Move to scene", |ui| {
-                        let names: Vec<String> = self.project.as_ref().unwrap().scenes.iter().map(|c| c.name.clone()).collect();
-                        let here = self.current_scene();
-                        for (si, n) in names.iter().enumerate() {
-                            if ui.add_enabled(si != here || !self.slide_multi.is_empty(), egui::Button::new(n)).clicked() { self.move_selected_slides_to_scene(si); ui.close(); }
-                        }
-                    });
-                    ui.separator();
-                    if ui.button(if self.slide_multi.is_empty() { "Delete" } else { "Delete selected slides" }).clicked() { self.pending_delete = Some(self.slide_selection()); ui.close(); }
-                });
-            });
-        });
-
         if !self.import_report.is_empty() {
             let mut close = false;
             egui::Window::new("Import report").collapsible(false).resizable(true).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).default_width(460.0).show(ctx, |ui| {
@@ -7713,11 +7719,13 @@ impl App {
         self.sync_current_in();
         let window = ctx.content_rect();
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
-        self.dock_edge(root, ctx, dock::Edge::Right, slide_idx, &mut wants);
-        self.panel_windows(ctx, slide_idx, &mut wants);
+        // The slide list can add or delete slides, so each edge reads the index again after the one before it.
+        let current = |a: &App| a.slide.min(a.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
         self.dock_edge(root, ctx, dock::Edge::Left, slide_idx, &mut wants);
-        self.dock_edge(root, ctx, dock::Edge::Top, slide_idx, &mut wants);
-        self.dock_edge(root, ctx, dock::Edge::Bottom, slide_idx, &mut wants);
+        self.dock_edge(root, ctx, dock::Edge::Right, current(self), &mut wants);
+        self.panel_windows(ctx, current(self), &mut wants);
+        self.dock_edge(root, ctx, dock::Edge::Top, current(self), &mut wants);
+        self.dock_edge(root, ctx, dock::Edge::Bottom, current(self), &mut wants);
         ctx.data_mut(|d| { let next: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); d.insert_temp(egui::Id::new("group-rects"), next); });
         dock_drag_overlay(ctx);
         self.sync_current_out();
@@ -7772,6 +7780,7 @@ impl App {
             }
         }
 
+        let slide_idx = current(self);
         egui::CentralPanel::default().show(root, |ui| {
             let slide = self.project.as_ref().unwrap().slides[slide_idx].clone();
             let avail = ui.available_size();
@@ -12108,14 +12117,15 @@ mod tests {
         *h.state_mut() = a;
         h.run_steps(6);
         let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
-        let left = rects.iter().filter(|r| r.edge == dock::Edge::Right).map(|r| r.rect.left()).fold(f32::MAX, f32::min);
-        assert!(left >= 248.0 + 360.0 - 1.0, "the columns start at {left}, leaving 360 points for the slide");
+        let canvas = h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("canvas");
+        assert!(rects.iter().any(|r| r.edge == dock::Edge::Right));
+        assert!(canvas.width() >= 300.0, "the slide area is {} wide", canvas.width());
     }
 
     #[test]
     fn panels_can_sit_at_the_left_and_the_top_of_the_slide() {
         let mut a = app();
-        a.set_area(P_TRIGGERS, Area::Left);
+        a.place_tab(P_TRIGGERS, dock::Spot::EdgeEnd(dock::Edge::Left));
         a.set_area(P_NOTES, Area::Top);
         assert_eq!(a.area_of(P_TRIGGERS), Area::Left);
         assert_eq!(a.tabs_in(Area::Top), vec![P_NOTES]);
@@ -12123,9 +12133,10 @@ mod tests {
         h.run_steps(5);
         let rects: Vec<GroupRect> = h.ctx.data(|d| d.get_temp(egui::Id::new("group-rects"))).unwrap_or_default();
         let at = |e: dock::Edge| rects.iter().find(|r| r.edge == e).map(|r| r.rect);
-        let (left, top, canvas) = (at(dock::Edge::Left).expect("left panel"), at(dock::Edge::Top).expect("top panel"), h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("canvas"));
+        let left = rects.iter().filter(|r| r.edge == dock::Edge::Left).map(|r| r.rect).reduce(|a, b| a.union(b)).expect("left panel");
+        let (_, top, canvas) = (at(dock::Edge::Left), at(dock::Edge::Top).expect("top panel"), h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("canvas"));
         assert!(left.right() <= canvas.left() + 1.0 && top.bottom() <= canvas.top() + 1.0, "the panels are beside the canvas, not over it");
-        assert!(left.left() > 200.0, "the left panel is next to the slide list");
+        assert!(rects.iter().filter(|r| r.edge == dock::Edge::Left).count() == 2, "the slide list and Triggers are two columns at the left");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("left-top.png")).unwrap(); }
         // A tab let go at the left or top edge of the slide area goes there.
         let ctx = egui::Context::default();
@@ -12133,6 +12144,25 @@ mod tests {
         assert_eq!(spot_at(&ctx, egui::pos2(310.0, 300.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Left)));
         assert_eq!(spot_at(&ctx, egui::pos2(600.0, 110.0)).map(|s| s.0), Some(dock::Spot::EdgeEnd(dock::Edge::Top)));
         assert_eq!(spot_at(&ctx, egui::pos2(600.0, 300.0)).map(|s| s.0), None);
+    }
+
+    #[test]
+    fn the_slide_list_is_a_tab_that_can_be_moved_hidden_and_brought_back() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        assert_eq!(a.area_of(P_SLIDES), Area::Left, "it starts at the left, as it always was");
+        a.set_area(P_SLIDES, Area::Bottom);
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("Slide List").is_some() && h.state().bottom_tab_ids().contains(&P_SLIDES), "it can be a tab of the bottom panel");
+        h.state_mut().close_panel_tab(P_SLIDES);
+        h.run_steps(3);
+        assert!(h.query_by_label("Slide List").is_none() && !h.state().panels.slides, "closing hides it");
+        h.state_mut().panels.slides = true;
+        h.state_mut().apply_preset(dock::Preset::Standard);
+        h.run_steps(3);
+        assert_eq!(h.state().area_of(P_SLIDES), Area::Left);
+        assert!(h.query_by_label("Slide List").is_some());
     }
 
     #[test]
@@ -15907,10 +15937,10 @@ mod tests {
             (0..3).map(|c| o.iter().find(|x| x.table == Some((0, c))).unwrap().w).collect::<Vec<_>>()
         };
         let before = widths(&h);
-        // The first column border sits near x=629 in the 1500x950 window (see the 9b-table screenshot).
+        // The first column border sits near x=589 in the 1500x950 window (see the 9b-table screenshot).
         let mut moved = false;
         'scan: for y in [456, 396] {
-            for x in 627..633 {
+            for x in 586..593 {
                 let (from, to) = (egui::pos2(x as f32, y as f32), egui::pos2(x as f32 + 60.0, y as f32));
                 h.event(egui::Event::PointerMoved(from));
                 h.run_steps(1);
