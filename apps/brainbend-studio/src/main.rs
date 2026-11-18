@@ -12409,7 +12409,43 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_by_label_contains("Paste").is_some() && !h.state().cmd_enabled(commands::Cmd::Paste), "Paste is listed, and greyed out because nothing was copied");
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("menu-bar.png")).unwrap(); }
-        assert_eq!(commands::menus().iter().map(|m| m.0).collect::<Vec<_>>(), vec!["File", "Edit", "View", "Window", "Help"]);
+        assert_eq!(commands::menus().iter().map(|m| m.0).collect::<Vec<_>>(), vec!["File", "Edit", "View", "Tools", "Window", "Help"]);
+    }
+
+    #[test]
+    fn tools_commands_open_the_tools_and_change_the_slide_size() {
+        use commands::Cmd;
+        let mut a = app();
+        assert!(a.cmd_enabled(Cmd::Tool(Tool::Variables)) && a.cmd_enabled(Cmd::LayoutBuilder));
+        a.run_cmd(Cmd::Tool(Tool::Variables));
+        assert!(a.variables_open && a.tool_open(Tool::Variables));
+        a.run_cmd(Cmd::Tool(Tool::FocusOrder));
+        assert!(a.focus_open);
+        a.run_cmd(Cmd::Tool(Tool::Check));
+        assert!(a.check_results.is_some(), "the accessibility check runs");
+        a.run_cmd(Cmd::Tool(Tool::Colors));
+        assert!(a.theme_colors_open);
+        a.run_cmd(Cmd::PlayerSettings);
+        assert!(a.player_open);
+        // Slide size: every slide, one undo step, and the current size is the one ticked.
+        a.ctx_copy = Some(egui::Context::default());
+        a.add_slide(SlideKind::Normal);
+        assert_eq!(a.cmd_checked(Cmd::SlideSize(1920, 1080)), Some(true));
+        a.run_cmd(Cmd::SlideSize(1280, 720));
+        let p = a.project.as_ref().unwrap();
+        assert!(p.slides.iter().all(|s| s.width == 1280.0 && s.height == 720.0));
+        assert_eq!(a.cmd_checked(Cmd::SlideSize(1280, 720)), Some(true));
+        assert_eq!(a.cmd_checked(Cmd::SlideSize(1920, 1080)), Some(false));
+        a.undo();
+        assert!(a.project.as_ref().unwrap().slides.iter().all(|s| s.width == 1920.0), "one undo puts the size back");
+        a.run_cmd(Cmd::LayoutBuilder);
+        assert!(a.in_master_view());
+        assert!(!a.cmd_enabled(Cmd::LayoutBuilder), "already in it");
+        // With no project open, the project's tools are off, and the app's own are on.
+        let mut b = App::default();
+        assert!(!b.cmd_enabled(Cmd::Tool(Tool::Variables)) && !b.cmd_enabled(Cmd::LayoutBuilder) && !b.cmd_enabled(Cmd::SlideSize(1280, 720)));
+        assert!(b.cmd_enabled(Cmd::Tool(Tool::Settings)) && b.cmd_enabled(Cmd::Open));
+        assert_eq!(Cmd::Tool(Tool::Spelling).shortcut().as_deref(), Some("F7"));
     }
 
     #[test]

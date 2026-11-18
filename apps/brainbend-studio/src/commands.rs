@@ -40,19 +40,29 @@ pub(crate) enum Cmd {
     SubmitIssue,
     Community,
     CheckForUpdates,
+    /// Open one of the working tools (Variables, Focus Order, Spelling, the accessibility check, Brand Colors).
+    Tool(crate::Tool),
+    LayoutBuilder,
+    PlayerSettings,
+    /// Make every slide this size, in points.
+    SlideSize(u32, u32),
 }
 
+/// The slide sizes the Tools menu offers.
+pub(crate) const SLIDE_SIZES: [(u32, u32); 4] = [(1920, 1080), (1280, 720), (1440, 1080), (1024, 768)];
+
 /// One line of a menu.
-#[derive(Clone, Copy)]
-pub(crate) enum Item { Do(Cmd), Gap }
+#[derive(Clone)]
+pub(crate) enum Item { Do(Cmd), Gap, Sub(&'static str, Vec<Cmd>) }
 
 /// The menus, in order: what the menu bar (and later the macOS menu bar) shows.
 pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
-    use Item::{Do, Gap};
+    use Item::{Do, Gap, Sub};
     vec![
         ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
         ("Edit", vec![Do(Cmd::Undo), Do(Cmd::Redo), Gap, Do(Cmd::Cut), Do(Cmd::Copy), Do(Cmd::Paste), Do(Cmd::Delete), Gap, Do(Cmd::Duplicate), Do(Cmd::SelectAll), Gap, Do(Cmd::Find)]),
         ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowRibbon), Do(Cmd::ShowMenuBar), Do(Cmd::DarkMode)]),
+        ("Tools", vec![Do(Cmd::LayoutBuilder), Sub("Slide Size", SLIDE_SIZES.iter().map(|&(w, h)| Cmd::SlideSize(w, h)).collect()), Do(Cmd::Tool(crate::Tool::Colors)), Do(Cmd::PlayerSettings), Gap, Do(Cmd::Tool(crate::Tool::Variables)), Do(Cmd::Tool(crate::Tool::FocusOrder)), Gap, Do(Cmd::Tool(crate::Tool::Spelling)), Do(Cmd::Tool(crate::Tool::Check))]),
         ("Window", PANELS.iter().map(|&g| Do(Cmd::TogglePanel(g))).chain([Gap]).chain(dock::Preset::ALL.iter().map(|&p| Do(Cmd::Preset(p)))).collect()),
         ("Help", vec![Do(Cmd::Docs), Do(Cmd::SubmitIssue), Do(Cmd::Community), Gap, Do(Cmd::CheckForUpdates)]),
     ]
@@ -101,6 +111,10 @@ impl Cmd {
             Cmd::SubmitIssue => "Submit an Issue…".into(),
             Cmd::Community => "BrainBend Community…".into(),
             Cmd::CheckForUpdates => "Check for Updates".into(),
+            Cmd::Tool(t) => match t { crate::Tool::Check => "Accessibility Check", t => t.title() }.into(),
+            Cmd::LayoutBuilder => "Layout Builder".into(),
+            Cmd::PlayerSettings => "Player Settings…".into(),
+            Cmd::SlideSize(w, h) => format!("{w} × {h} ({})", if w * 9 == h * 16 { "16:9" } else { "4:3" }),
         }
     }
 
@@ -122,6 +136,7 @@ impl Cmd {
             Cmd::SaveAs => "⇧S",
             Cmd::Quit => return Some(if cfg!(target_os = "macos") { "⌘Q".into() } else { "Alt+F4".into() }),
             Cmd::Settings => return Some(if cfg!(target_os = "macos") { "⌘,".into() } else { "Ctrl+,".into() }),
+            Cmd::Tool(crate::Tool::Spelling) => return Some("F7".into()),
             _ => return None,
         };
         Some(if cfg!(target_os = "macos") { format!("⌘{}", key.replace("⇧", "⇧")) } else { format!("Ctrl+{}", key.replace('⇧', "Shift+")) })
@@ -139,6 +154,11 @@ impl App {
         match c {
             Cmd::New | Cmd::Open | Cmd::Settings | Cmd::Quit | Cmd::DarkMode | Cmd::ShowMenuBar | Cmd::SubmitIssue | Cmd::Community | Cmd::TogglePanel(_) | Cmd::Preset(_) => true,
             Cmd::Docs => false,
+            Cmd::Tool(crate::Tool::Settings | crate::Tool::Find) => true,
+            Cmd::PlayerSettings | Cmd::Tool(_) | Cmd::LayoutBuilder | Cmd::SlideSize(..) if !has => false,
+            Cmd::LayoutBuilder => !self.in_master_view() && !self.project.as_ref().is_some_and(|p| p.is_web()),
+            Cmd::PlayerSettings | Cmd::Tool(_) => true,
+            Cmd::SlideSize(..) => true,
             Cmd::CheckForUpdates => !matches!(self.updater.state, crate::update::State::Checking(_)),
             _ if !has => false,
             Cmd::Undo => !self.undo.is_empty(),
@@ -157,6 +177,7 @@ impl App {
             Cmd::TogglePanel(g) => Some(self.panel_shown(g)),
             Cmd::ShowRibbon => Some(self.ribbon_pinned),
             Cmd::ShowMenuBar => Some(self.show_menu_bar),
+            Cmd::SlideSize(w, h) => self.project.as_ref().map(|p| p.slides.first().is_some_and(|s| s.width as u32 == w && s.height as u32 == h)),
             Cmd::DarkMode => Some(self.ctx_copy.as_ref().is_some_and(|c| c.theme() == egui::Theme::Dark)),
             _ => None,
         }
@@ -195,6 +216,24 @@ impl App {
                 ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
             },
             Cmd::Docs => {}
+            Cmd::Tool(t) => match t {
+                crate::Tool::Variables => self.variables_open = true,
+                crate::Tool::FocusOrder => self.focus_open = !self.focus_open,
+                crate::Tool::Spelling => self.open_spelling(),
+                crate::Tool::Find => { self.find.get_or_insert_with(Default::default).focus = true; }
+                crate::Tool::Check => self.check_results = self.project.as_ref().map(|p| p.check()),
+                crate::Tool::Colors => self.theme_colors_open = true,
+                crate::Tool::Settings => self.settings_open = true,
+            },
+            Cmd::LayoutBuilder => self.enter_master_view(),
+            Cmd::PlayerSettings => self.player_open = true,
+            Cmd::SlideSize(w, h) => {
+                let Some(ctx) = self.ctx_copy.clone() else { return };
+                let Some(proj) = self.project.as_mut() else { return };
+                let before = crate::Snap::of(proj);
+                for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
+                self.commit_project_edit(&ctx, before);
+            }
             Cmd::SubmitIssue => crate::update::open_in_browser(crate::ribbon::ISSUES_URL),
             Cmd::Community => crate::update::open_in_browser(crate::ribbon::COMMUNITY_URL),
             Cmd::CheckForUpdates => if let Some(ctx) = self.ctx_copy.clone() { self.updater.check_now(&ctx); },
@@ -218,6 +257,15 @@ impl App {
                         for item in items {
                             match item {
                                 Item::Gap => { ui.separator(); }
+                                Item::Sub(name, cmds) => {
+                                    ui.menu_button(name, |ui| {
+                                        for c in cmds {
+                                            let mut button = egui::Button::new(c.label());
+                                            if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
+                                            if ui.add_enabled(self.cmd_enabled(c), button).clicked() { run = Some(c); ui.close(); }
+                                        }
+                                    });
+                                }
                                 Item::Do(c) => {
                                     let mut button = egui::Button::new(c.label());
                                     if let Some(sc) = c.shortcut() { button = button.shortcut_text(sc); }
