@@ -63,6 +63,15 @@ fn window_builder() -> egui::ViewportBuilder {
     }
 }
 
+/// The size a person left a side or top panel at (by its id), or `default`; a saved size below `min` is not believed.
+fn saved_panel_size(id: &str, default: f32, min: f32) -> f32 {
+    parse_panel_size(prefs::get_str(&format!("panel_size:{id}")).as_deref(), default, min)
+}
+
+fn parse_panel_size(text: Option<&str>, default: f32, min: f32) -> f32 {
+    text.and_then(|s| s.parse::<f32>().ok()).filter(|w| w.is_finite() && *w >= min).unwrap_or(default)
+}
+
 fn main() -> eframe::Result {
     let opts = eframe::NativeOptions {
         viewport: window_builder(),
@@ -219,6 +228,8 @@ struct App {
     strip_order: Vec<String>,
     /// The bottom panel's height as last saved.
     bottom_height_saved: f32,
+    /// The last size written to the settings for each side or top panel (by its id), so a drag is written once.
+    panel_sizes_saved: HashMap<String, f32>,
     /// Where the tabs are: groups in the side and bottom panels, and which are windows. Remembered per person.
     dock: dock::Layout,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
@@ -505,7 +516,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(),
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -1366,6 +1377,15 @@ impl App {
         out
     }
 
+    /// Write a side or top panel's size to the settings once a drag has ended, so the next launch starts with it. A size that the window
+    /// squeezed to its limit is not written: it is the window's, not the person's.
+    fn remember_panel_size(&mut self, ctx: &egui::Context, id: &str, start: f32, size: f32, max: f32) {
+        if ctx.input(|i| i.pointer.any_down()) || size >= max - 1.0 { return; }
+        if (*self.panel_sizes_saved.entry(id.to_string()).or_insert(start) - size).abs() <= 1.0 { return; }
+        self.panel_sizes_saved.insert(id.to_string(), size);
+        prefs::set_str(&format!("panel_size:{id}"), &format!("{size:.0}"));
+    }
+
     /// One edge of the editor: its lanes side by side (the right edge) or stacked (the bottom edge), each holding groups of tabs.
     fn dock_edge(&mut self, root: &mut egui::Ui, ctx: &egui::Context, edge: dock::Edge, slide_idx: usize, wants: &mut SideWants) {
         let plan = self.dock_plan(edge);
@@ -1379,17 +1399,24 @@ impl App {
                 let id = format!("{}{}", if wide { "inspector-terminal" } else { "inspector" }, if n > 1 { format!("-{n}") } else { String::new() });
                 // Whatever the window, the slide keeps room: at least 360 points of canvas stay, and the columns share the rest.
                 let max = (root.available_rect_before_wrap().width() - 360.0).max(280.0);
-                egui::Panel::right(id).default_size(((if wide { 560.0 } else { 326.0 }) * n as f32).min(max)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                let start = saved_panel_size(&id, (if wide { 560.0 } else { 326.0 }) * n as f32, 200.0).min(max);
+                let shown = egui::Panel::right(id.clone()).default_size(start).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                self.remember_panel_size(ctx, &id, start, shown.response.rect.width(), max);
             }
             dock::Edge::Left => {
                 let id = if n > 1 { format!("dock-left-{n}") } else { "dock-left".to_string() };
                 let max = (root.available_rect_before_wrap().width() - 360.0).max(280.0);
-                egui::Panel::left(id).resizable(true).default_size((250.0 * n as f32).min(max)).min_size(200.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                let start = saved_panel_size(&id, 250.0 * n as f32, 200.0).min(max);
+                let shown = egui::Panel::left(id.clone()).resizable(true).default_size(start).min_size(200.0).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                self.remember_panel_size(ctx, &id, start, shown.response.rect.width(), max);
             }
             dock::Edge::Top => {
                 let id = if n > 1 { format!("dock-top-{n}") } else { "dock-top".to_string() };
                 let max = (root.available_rect_before_wrap().height() * 0.6).max(120.0);
-                egui::Panel::top(id).resizable(true).default_size((220.0 * n as f32).min(max)).min_size(120.0 + 100.0 * (n as f32 - 1.0)).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                let min = 120.0 + 100.0 * (n as f32 - 1.0);
+                let start = saved_panel_size(&id, 220.0 * n as f32, min).min(max);
+                let shown = egui::Panel::top(id.clone()).resizable(true).default_size(start).min_size(min).max_size(max).frame(frame).show(root, |ui| self.dock_lanes(ui, ctx, edge, &plan, slide_idx, wants));
+                self.remember_panel_size(ctx, &id, start, shown.response.rect.height(), max);
             }
             dock::Edge::Bottom => {
                 let id = if n > 1 { format!("timeline-{n}") } else { "timeline".to_string() };
@@ -12427,6 +12454,14 @@ mod tests {
         h.run_steps(3);
         assert!(h.query_all_by_label_contains("Picture").count() < pictures, "typing took the Picture line out of the gallery");
         assert!(h.query_all_by_label_contains("Hotspot").next().is_some());
+    }
+
+    #[test]
+    fn a_saved_panel_size_is_used_unless_it_is_missing_or_too_small() {
+        assert_eq!(parse_panel_size(Some("412"), 250.0, 200.0), 412.0);
+        assert_eq!(parse_panel_size(None, 250.0, 200.0), 250.0);
+        assert_eq!(parse_panel_size(Some("12"), 250.0, 200.0), 250.0, "too small to be right");
+        assert_eq!(parse_panel_size(Some("wide"), 250.0, 200.0), 250.0);
     }
 
     #[test]
