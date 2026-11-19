@@ -23,6 +23,12 @@ pub(crate) struct EditorWindow {
     pub(crate) placed: bool,
 }
 
+/// A Scene View tab that is a window of its own: it shows the same scenes as the tab did.
+pub(crate) struct SceneWindow {
+    pub(crate) id: u32,
+    pub(crate) rect: Option<[f32; 4]>,
+}
+
 /// The 360° image of a window: its object, its editing session, and how long the undo history was when the visit began.
 pub(crate) struct PanoWindow {
     pub(crate) obj_id: String,
@@ -150,6 +156,7 @@ impl App {
     /// Draw every editor window: its tab, its insert bar and its canvas.
     pub(crate) fn editor_windows_ui(&mut self, ctx: &egui::Context) {
         if self.file_view || self.project.is_none() { return; }
+        self.scene_windows_ui(ctx);
         // A window of the layouts whose layout has gone (deleted, or undone) goes to the master; a slide's window whose slide has been deleted goes with it.
         for w in self.editor_windows.iter_mut().filter(|w| w.layouts) {
             if self.project.as_ref().is_some_and(|p| p.layouts_open() && p.slide_index_of(&w.tab.slide_id).is_none()) { w.tab.slide_id = brainbend_doc::master::MASTER_STAND_IN.to_string(); }
@@ -466,5 +473,53 @@ impl App {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::editor_key(id))), inner.min + p.to_vec2() - grab));
         }
         self.tear = Some((TearTarget::Window(id), grab));
+    }
+}
+
+impl App {
+    /// A Scene View tab was popped out of the strip: a window of its own shows the scenes.
+    pub(crate) fn add_scene_window(&mut self) -> u32 {
+        self.editor_window_next += 1;
+        let id = self.editor_window_next;
+        self.scene_windows.push(SceneWindow { id, rect: None });
+        id
+    }
+
+    /// Put a Scene View window back in the strip, as a tab that is showing.
+    pub(crate) fn scene_window_to_tab(&mut self, id: u32) {
+        let Some(n) = self.scene_windows.iter().position(|w| w.id == id) else { return };
+        self.scene_windows.remove(n);
+        self.save_active_tab();
+        self.new_scene_tab();
+        self.scene_view = true;
+    }
+
+    fn scene_windows_ui(&mut self, ctx: &egui::Context) {
+        let ids: Vec<u32> = self.scene_windows.iter().map(|w| w.id).collect();
+        for id in ids {
+            let size = self.scene_windows.iter().find(|w| w.id == id).and_then(|w| w.rect).map(|r| [r[2].max(300.0), r[3].max(220.0)]).unwrap_or([1000.0, 700.0]);
+            let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
+            crate::os_window_inner(ctx, &Self::editor_key(id), "Scene View", size, &mut open, false, |ui| {
+                if let (Some(outer), Some(inner)) = ui.ctx().input(|i| (i.viewport().outer_rect, i.viewport().inner_rect)) {
+                    if let Some(w) = self.scene_windows.iter_mut().find(|w| w.id == id) { w.rect = Some([outer.min.x, outer.min.y, inner.width(), inner.height()]); }
+                }
+                let (tab, closed) = doc_tabs::slide_window_tab(ui, "SCENE VIEW", if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
+                if closed { closed_here = true; }
+                let at = egui::pos2(ui.max_rect().right() - 18.0, tab.rect.center().y);
+                if pop_in_button(ui, at).clicked() { pop_in = true; }
+                dropped = crate::drag_window(ui.ctx(), &tab, "editor-drag-pos");
+                let ctx = ui.ctx().clone();
+                // The scenes are drawn as the Scene View is (it counts as showing while its window is drawn).
+                let was = std::mem::replace(&mut self.scene_view, true);
+                self.scene_view_ui(ui, &ctx);
+                self.scene_view = was;
+            });
+            if pop_in { self.scene_window_to_tab(id); continue; }
+            if let Some(p) = dropped {
+                let strip: Option<egui::Rect> = ctx.data(|d| d.get_temp(egui::Id::new("doc-strip-rect")));
+                if strip.is_some_and(|r| r.expand(4.0).contains(p)) { self.scene_window_to_tab(id); continue; }
+            }
+            if closed_here || !open { self.scene_windows.retain(|w| w.id != id); }
+        }
     }
 }
