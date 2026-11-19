@@ -41,3 +41,7 @@ egui_kittest = { version = "0.36", features = ["snapshot", "wgpu"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = "0.21.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }
+raw-window-handle = "0.6"

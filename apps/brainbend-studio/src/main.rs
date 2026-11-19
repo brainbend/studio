@@ -9,6 +9,8 @@ mod editor_windows;
 mod commands;
 #[cfg(target_os = "macos")]
 mod native_menu;
+#[cfg(target_os = "macos")]
+mod mac_window;
 mod panos;
 mod icons;
 mod markers;
@@ -7477,6 +7479,8 @@ fn sync_app_icon(ctx: &egui::Context) {
 
 impl eframe::App for App {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        mac_window::place_buttons(_frame, mac_window::INSET, ribbon::TITLE_BAR_HEIGHT as f64);
         sync_app_icon(root.ctx());
         // A window the person pops out of the app is a real operating-system window (eframe turns that on); nothing else is.
         self.show(root);
@@ -10998,7 +11002,7 @@ mod tests {
         // Dragging the area's grip moves it; one undo step puts it back.
         let area = |h: &egui_kittest::Harness<'_, App>| match &h.state().project.as_ref().unwrap().slides[1].kind { SlideKind::Question(q) => q.area.unwrap(), _ => unreachable!() };
         let before = area(&h);
-        let (from, to) = (egui::pos2(378.0, 213.0), egui::pos2(478.0, 263.0));
+        let (from, to) = (egui::pos2(378.0, 218.0), egui::pos2(478.0, 268.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
@@ -11014,7 +11018,7 @@ mod tests {
         h.run_steps(2);
         assert_eq!(area(&h).x, before.x);
         // The bottom-right handle resizes it.
-        let (from, to) = (egui::pos2(793.0, 568.0), egui::pos2(743.0, 518.0));
+        let (from, to) = (egui::pos2(793.0, 573.0), egui::pos2(743.0, 523.0));
         h.event(egui::Event::PointerMoved(from));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });

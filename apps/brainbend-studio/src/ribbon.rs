@@ -106,6 +106,9 @@ fn icon_text(c: char, size: f32) -> egui::RichText {
 /// Corner radius used throughout the ribbon (card, buttons, fields).
 pub const RIBBON_RADIUS: f32 = 4.0;
 
+/// The height of the title bar: the 24-point row and the margin above and below it (see `title_bar`).
+pub const TITLE_BAR_HEIGHT: f32 = 24.0 + 2.0 * 8.0;
+
 /// Make ordinary buttons flat: no background or outline until hovered, like the Office ribbon.
 pub(super) fn flat(ui: &mut egui::Ui) {
     let r = egui::CornerRadius::same(RIBBON_RADIUS as u8);
@@ -532,8 +535,10 @@ fn pill(ui: &mut egui::Ui, id: &str, p: Pill) -> egui::Response {
     let _ = p.bold;
     let left = slot.center().x - (galley.size().x + caret_w) / 2.0;
     let gw = galley.size().x;
-    painter.galley(egui::pos2(left, slot.center().y - galley.size().y / 2.0), galley, p.ink);
-    if p.caret { chevron(painter, egui::pos2(left + gw + 10.0, slot.center().y + 0.5), 3.0, p.ink); }
+    // The tab hangs from the top edge, so what shows is the frame, and the label is centered in that.
+    let mid = frame.center().y;
+    painter.galley(egui::pos2(left, mid - galley.size().y / 2.0), galley, p.ink);
+    if p.caret { chevron(painter, egui::pos2(left + gw + 10.0, mid + 0.5), 3.0, p.ink); }
     resp
 }
 
@@ -1224,27 +1229,29 @@ impl App {
 
     fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
         if master { return; }
-        ui.spacing_mut().item_spacing.x = 4.0;
-        // Publish is the main action, so it is a solid button in the main-action color; it darkens while the
-        // pointer is over it, and more while pressed or while the Publish window is open.
-        let backing = ui.painter().add(egui::Shape::Noop);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        // The same hanging tabs as the theme toggle. The row runs right to left, so Publish comes first and ends up furthest right;
+        // it is the main action, so it is the one in the main-action color.
+        let ink = text_col(ui);
+        let hanging = egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 };
         let publishing = self.file_view && self.file_page == backstage::FilePage::Publish;
-        let on_primary = if ui.visuals().dark_mode { egui::Color32::from_gray(20) } else { egui::Color32::WHITE };
-        let resp = ui.scope(|ui| {
-            let v = ui.visuals_mut();
-            v.override_text_color = Some(on_primary);
-            for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
-            compact_widget_in(ui, EXPORT, "Publish", false, false, false)
-        }).inner.on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
-        if resp.clicked() { self.open_file_page(backstage::FilePage::Publish); }
-        let base = primary(ui);
-        let fill = if publishing || resp.is_pointer_button_down_on() { shade(base, 0.28) } else if resp.hovered() { shade(base, 0.14) } else { base };
-        ui.painter().set(backing, egui::Shape::rect_filled(resp.rect, RIBBON_RADIUS, fill));
-        let preview = compact_widget(ui, PLAY, "Preview", true, false).on_hover_text("Play the lesson in your browser");
+        let (base, on) = (primary(ui), on_primary(ui));
+        let fill = if publishing { shade(base, 0.2) } else { base };
+        let publish = pill(ui, "publish", Pill { icon: Some((EXPORT, on)), label: "Publish", caret: false, fill: Some(fill), ink: on, outline: false, bold: true, radius: hanging, lift: 3.0, min_w: 60.0 })
+            .on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
+        publish.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Publish"));
+        if publish.clicked() { self.open_file_page(backstage::FilePage::Publish); }
+        let preview = pill(ui, "preview", Pill { icon: Some((PLAY, ink)), label: "Preview", caret: true, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+            .on_hover_text("Play the lesson in your browser");
+        preview.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Preview"));
         egui::Popup::from_toggle_button_response(&preview).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| { ui.set_min_width(190.0); self.preview_items(ui); });
         if self.can_try() {
             let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops.";
-            if compact_widget(ui, CLICK, "Try It", false, self.try_mode).on_hover_text(tip).clicked() { self.try_mode = !self.try_mode; }
+            let lit = if self.try_mode { ACCENT } else { ink.gamma_multiply(0.14) };
+            let try_it = pill(ui, "try-it", Pill { icon: Some((CLICK, if self.try_mode { egui::Color32::WHITE } else { ink })), label: "Try It", caret: false, fill: Some(lit), ink: if self.try_mode { egui::Color32::WHITE } else { ink }, outline: !self.try_mode, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+                .on_hover_text(tip);
+            try_it.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.try_mode, "Try It"));
+            if try_it.clicked() { self.try_mode = !self.try_mode; }
         }
     }
 
@@ -1443,7 +1450,7 @@ impl App {
     /// the centred title, and the theme toggle plus Publish at the right.
     fn title_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         let bg = root.visuals().panel_fill;
-        egui::Panel::top("titlebar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+        egui::Panel::top("titlebar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(14, 8))).show_separator_line(false).show(root, |ui| {
             flat(ui);
             let bar = ui.max_rect();
             // Drag the window by its empty area; double-click maximizes.
@@ -1459,7 +1466,7 @@ impl App {
             let has = self.project.is_some();
             ui.horizontal(|ui| {
                 ui.set_min_height(24.0);
-                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_space(if cfg!(target_os = "macos") { 76.0 } else { 4.0 });
                 if has { ui.scope(|ui| {
                     if title_icon(ui, SAVE, "Save (⌘S)").clicked() { self.save(false); }
@@ -1469,6 +1476,12 @@ impl App {
                 }); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
+                    // Publish, Preview and Try It live here.
+                    if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+                        let master = self.in_master_view();
+                        self.tab_actions(ui, master);
+                        ui.add_space(6.0);
+                    }
                     let dark = ctx.theme() == egui::Theme::Dark;
                     // The moon is black so it shows on the light theme; the sun keeps its yellow.
                     let ink = text_col(ui);
@@ -1476,12 +1489,6 @@ impl App {
                         .on_hover_text(if dark { "Switch to light mode" } else { "Switch to dark mode" });
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
-                    }
-                    // Publish, Preview and Try It live here.
-                    if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
-                        let master = self.in_master_view();
-                        ui.add_space(6.0);
-                        self.tab_actions(ui, master);
                     }
                     // A newer release is out: a red button to the left of the theme toggle opens the update window.
                     if let Some(r) = self.updater.available().cloned() {
