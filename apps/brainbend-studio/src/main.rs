@@ -236,6 +236,8 @@ struct App {
     editor_windows: Vec<editor_windows::EditorWindow>,
     editor_window_next: u32,
     focus_window: Option<u32>,
+    /// The stand-in slides of the master and layouts as they were when this frame began (empty while they are closed), for the undo step of an edit made in it.
+    frame_layouts: Vec<Slide>,
     /// The saved text of the open windows as last written (see `windows_json`).
     editor_windows_saved: String,
     /// The window's context, kept so a command (from a menu or a key) can reach what needs it.
@@ -427,18 +429,21 @@ impl Meta {
 #[derive(Clone)]
 struct Snap {
     slides: Vec<Slide>,
+    /// The master's and layouts' stand-in slides while they are open (see `Project::open_layouts`).
+    layout_slides: Vec<Slide>,
     meta: Meta,
 }
 
 impl Snap {
     fn of(p: &Project) -> Self {
-        Self { slides: p.slides.clone(), meta: Meta::of(p) }
+        Self { slides: p.slides.clone(), layout_slides: p.layout_slides.clone(), meta: Meta::of(p) }
     }
 
     /// Install this snapshot into the project and return what it replaced.
     fn swap_into(self, p: &mut Project) -> Snap {
         let current = Snap::of(p);
         p.slides = self.slides;
+        p.layout_slides = self.layout_slides;
         self.meta.apply(p);
         current
     }
@@ -497,7 +502,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -5232,7 +5237,8 @@ impl App {
     fn push_undo(&mut self, mut before: Vec<Slide>) {
         self.unswapped(&mut before);
         if let Some(p) = &self.project {
-            self.undo.push(Snap { slides: before, meta: Meta::of(p) });
+            // The stand-ins as they were when the frame began: the edit that is being recorded was made since.
+            self.undo.push(Snap { slides: before, layout_slides: self.frame_layouts.clone(), meta: Meta::of(p) });
             self.redo.clear();
         }
     }
@@ -5242,7 +5248,7 @@ impl App {
         if let Some(p) = &self.project {
             let mut slides = p.slides.clone();
             self.unswapped(&mut slides);
-            self.undo.push(Snap { slides, meta: before });
+            self.undo.push(Snap { slides, layout_slides: p.layout_slides.clone(), meta: before });
             self.redo.clear();
             self.dirty = true;
         }
@@ -7477,12 +7483,15 @@ impl App {
         self.sync_tabs();
         self.begin_state_swap();
         self.ctx_copy = Some(root.ctx().clone());
+        self.frame_layouts = self.project.as_ref().map(|p| p.layout_slides.clone()).unwrap_or_default();
         // A press in the main window makes it the one the panels and the keys act on.
         if root.ctx().input(|i| i.pointer.any_pressed()) { self.focus_window = None; }
         self.drive_tear(&root.ctx().clone());
         self.show_frame(root);
         // The editor windows are drawn whatever the main window is showing (the Scene View, say, once its only slide tab has been popped out).
         self.editor_windows_ui(&root.ctx().clone());
+        // What was done to the master's and the layouts' slides this frame is copied into the master and the layouts, and on to the slides that follow them.
+        if let Some(p) = self.project.as_mut() { if p.sync_layouts() { self.dirty = true; } }
         self.save_editor_windows(&root.ctx().clone());
         // A press anywhere but on a slide takes the keys back to the canvas.
         if root.ctx().input(|i| i.pointer.any_pressed()) && !self.slide_hit { self.slides_focus = false; }
@@ -12921,6 +12930,35 @@ mod tests {
             h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("a slide area")
         };
         assert_eq!(rect(true), rect(false), "the left and top drop edges belong to the main window's slide area, whatever windows are open");
+    }
+
+    #[test]
+    fn edits_to_the_master_and_layouts_open_as_slides_sync_every_frame_and_undo_with_everything_else() {
+        let mut a = app();
+        a.view.selected = None;
+        let n = a.project.as_ref().unwrap().slides.len();
+        a.project.as_mut().unwrap().open_layouts();
+        let objects_in_master = |a: &App| a.project.as_ref().unwrap().master.objects.len();
+        let before = objects_in_master(&a);
+        let mut h = harness(a);
+        h.run_steps(3);
+        // An edit of the master's stand-in, as the editor makes edits: a snapshot, then the change.
+        h.state_mut().snapshot();
+        h.state_mut().project.as_mut().unwrap().slide_mut(n).layers[0].objects.push(Object::new("logo", "Logo", Kind::Rect, 0.0, 0.0, 50.0, 50.0));
+        assert_eq!(objects_in_master(h.state()), before, "the master has not seen it yet");
+        h.run_steps(2);
+        assert_eq!(objects_in_master(h.state()), before + 1, "a frame later the master has it, and the project is changed");
+        assert!(h.state().dirty);
+        // Undo puts back the stand-in and the master together.
+        h.state_mut().undo();
+        assert_eq!(objects_in_master(h.state()), before);
+        assert!(h.state().project.as_ref().unwrap().slide(n).layers[0].objects.iter().all(|o| o.id != "logo"), "and the stand-in");
+        h.run_steps(2);
+        assert_eq!(objects_in_master(h.state()), before, "a frame later nothing has come back");
+        h.state_mut().redo();
+        assert!(h.state().project.as_ref().unwrap().slide(n).layers[0].objects.iter().any(|o| o.id == "logo"));
+        h.run_steps(2);
+        assert_eq!(objects_in_master(h.state()), before + 1);
     }
 
     #[test]
