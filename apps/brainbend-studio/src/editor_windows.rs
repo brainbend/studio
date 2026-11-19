@@ -15,6 +15,10 @@ pub(crate) struct EditorWindow {
     pub(crate) tab: SlideTab,
     /// Set for a 360° image: what it is and the editing session the window holds.
     pub(crate) pano: Option<PanoWindow>,
+    /// Where the window is and how big: x, y, width, height. Known once it has been on screen, or from a saved layout.
+    pub(crate) rect: Option<[f32; 4]>,
+    /// Whether the window has been put where `rect` says (a window restored from a saved layout is, the first time it is drawn).
+    pub(crate) placed: bool,
 }
 
 /// The 360° image of a window: its object, its editing session, and how long the undo history was when the visit began.
@@ -44,7 +48,7 @@ impl App {
     fn add_editor_window(&mut self, tab: SlideTab) -> u32 {
         self.editor_window_next += 1;
         let id = self.editor_window_next;
-        self.editor_windows.push(EditorWindow { id, tab, pano: None });
+        self.editor_windows.push(EditorWindow { id, tab, pano: None, rect: None, placed: true });
         self.focus_window = Some(id);
         id
     }
@@ -137,7 +141,15 @@ impl App {
             let name = pano_name.clone().unwrap_or_else(|| self.project.as_ref().map(|p| p.slides[idx].name.clone()).unwrap_or_default());
             let title = if pano_name.is_some() { name } else { format!("{} {}", self.slide_number(idx), name) };
             let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
-            crate::os_window_inner(ctx, &Self::editor_key(id), &title, [1100.0, 760.0], &mut open, false, |ui| {
+            // A window brought back from a saved layout opens where it was and as big as it was.
+            let saved = self.editor_windows.iter_mut().find(|w| w.id == id).and_then(|w| { if w.placed { None } else { w.placed = true; w.rect } });
+            if let Some([x, y, _, _]) = saved { ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::editor_key(id))), egui::pos2(x, y))); }
+            let size = self.editor_windows.iter().find(|w| w.id == id).and_then(|w| w.rect).map(|r| [r[2].max(300.0), r[3].max(220.0)]).unwrap_or([1100.0, 760.0]);
+            crate::os_window_inner(ctx, &Self::editor_key(id), &title, size, &mut open, false, |ui| {
+                // Where the window is now, for the saved layout.
+                if let (Some(outer), Some(inner)) = ui.ctx().input(|i| (i.viewport().outer_rect, i.viewport().inner_rect)) {
+                    if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) { w.rect = Some([outer.min.x, outer.min.y, inner.width(), inner.height()]); }
+                }
                 // A window's tab is blue while it is the one the panels act on, and gray while another editor is.
                 let is_pano = self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some());
                 let dim = !is_pano && self.focus_window != Some(id);
@@ -236,7 +248,7 @@ impl App {
         let undo_len = self.undo.len();
         self.editor_window_next += 1;
         let id = self.editor_window_next;
-        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(tab.slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: tab.obj_id, edit, undo_len }) });
+        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(tab.slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: tab.obj_id, edit, undo_len }), rect: None, placed: true });
         Some(id)
     }
 
@@ -293,5 +305,82 @@ impl App {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::editor_key(id))), inner.min + p.to_vec2() - grab));
         }
         self.tear = Some((TearTarget::Window(id), grab));
+    }
+}
+
+impl App {
+    /// The open editor windows as saved text: each one's kind, slide, 360° image, view and place.
+    pub(crate) fn windows_json(&self) -> String {
+        use serde_json::json;
+        let list: Vec<serde_json::Value> = self.editor_windows.iter().map(|w| {
+            let mut o = json!({ "slide": w.tab.slide_id, "zoom": w.tab.view.zoom, "pan": [w.tab.view.pan.x, w.tab.view.pan.y], "layer": w.tab.view.layer });
+            if let Some(p) = &w.pano { o["kind"] = "pano".into(); o["obj"] = p.obj_id.clone().into(); } else { o["kind"] = "slide".into(); }
+            if let Some(r) = w.rect { o["rect"] = json!(r); }
+            o
+        }).collect();
+        serde_json::Value::Array(list).to_string()
+    }
+
+    fn windows_key(&self) -> Option<String> { self.path.as_ref().map(|p| format!("editor_windows:{}", p.display())) }
+
+    /// Remember which windows are open for this project (it needs a file: an unsaved project is not remembered). Runs every frame and writes
+    /// only when something changed, and not in the middle of a drag.
+    pub(crate) fn save_editor_windows(&mut self, ctx: &egui::Context) {
+        let Some(key) = self.windows_key() else { return };
+        if ctx.input_for(egui::ViewportId::ROOT, |i| i.pointer.any_down()) { return; }
+        let now = self.windows_json();
+        let stamp = format!("{key}\n{now}");
+        if stamp == self.editor_windows_saved { return; }
+        crate::prefs::set_str(&key, &now);
+        self.editor_windows_saved = stamp;
+    }
+
+    /// Open the windows this project had open the last time (after the project has been opened).
+    pub(crate) fn restore_editor_windows(&mut self) {
+        let Some(key) = self.windows_key() else { return };
+        let Some(text) = crate::prefs::get_str(&key) else { return };
+        self.restore_windows_from(&text);
+        self.editor_windows_saved = format!("{key}\n{}", self.windows_json());
+    }
+
+    /// Open the windows described by `text` (see `windows_json`), leaving out those whose slide or picture is gone.
+    pub(crate) fn restore_windows_from(&mut self, text: &str) {
+        let Ok(serde_json::Value::Array(list)) = serde_json::from_str::<serde_json::Value>(text) else { return };
+        for o in list {
+            let Some(slide_id) = o.get("slide").and_then(|s| s.as_str()).map(str::to_string) else { continue };
+            if !self.project.as_ref().is_some_and(|p| p.slides.iter().any(|s| s.id == slide_id)) { continue; }
+            let num = |k: &str, d: f32| o.get(k).and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(d);
+            let rect = o.get("rect").and_then(|r| r.as_array()).filter(|r| r.len() == 4).map(|r| { let v: Vec<f32> = r.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect(); [v[0], v[1], v[2], v[3]] });
+            // A place that is plainly nowhere (a monitor that was unplugged) is not used: the window opens where the system puts it.
+            let rect = rect.filter(|r| r[0] > -3000.0 && r[0] < 8000.0 && r[1] > -500.0 && r[1] < 5000.0 && r[2] >= 200.0 && r[3] >= 150.0);
+            let id = if o.get("kind").and_then(|k| k.as_str()) == Some("pano") {
+                let Some(obj) = o.get("obj").and_then(|s| s.as_str()).map(str::to_string) else { continue };
+                // The visit takes an undo step as when it opens by hand; the project is not changed by opening it, so it stays as saved.
+                let dirty = self.dirty;
+                let edit = self.new_pano_session(&slide_id, &obj);
+                self.dirty = dirty;
+                let Some(edit) = edit else { continue };
+                self.editor_window_next += 1;
+                let id = self.editor_window_next;
+                let undo_len = self.undo.len();
+                self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: obj, edit: Some(edit), undo_len }), rect, placed: rect.is_none() });
+                id
+            } else {
+                let Some(idx) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == slide_id)) else { continue };
+                let Some(id) = self.open_slide_window(idx) else { continue };
+                self.with_window_view(id, |a| {
+                    a.view.zoom = num("zoom", 1.0).clamp(0.1, 8.0);
+                    let pan = o.get("pan").and_then(|p| p.as_array()).filter(|p| p.len() == 2).map(|p| egui::vec2(p[0].as_f64().unwrap_or(0.0) as f32, p[1].as_f64().unwrap_or(0.0) as f32)).unwrap_or(egui::Vec2::ZERO);
+                    a.view.pan = pan;
+                    let layers = a.project.as_ref().map(|p| p.slides[a.view.slide].layers.len()).unwrap_or(1);
+                    a.view.layer = (num("layer", 0.0) as usize).min(layers.saturating_sub(1));
+                });
+                if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) { w.rect = rect; w.placed = rect.is_none(); }
+                id
+            };
+            let _ = id;
+        }
+        // The main window is the one the panels act on to begin with.
+        self.focus_window = None;
     }
 }

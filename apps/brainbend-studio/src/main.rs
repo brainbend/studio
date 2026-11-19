@@ -236,6 +236,8 @@ struct App {
     editor_windows: Vec<editor_windows::EditorWindow>,
     editor_window_next: u32,
     focus_window: Option<u32>,
+    /// The saved text of the open windows as last written (see `windows_json`).
+    editor_windows_saved: String,
     /// The window's context, kept so a command (from a menu or a key) can reach what needs it.
     ctx_copy: Option<egui::Context>,
     /// The menu bar drawn inside the window (File, Edit, View, Window, Help).
@@ -495,7 +497,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
             last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
         }
     }
@@ -2567,6 +2569,8 @@ impl App {
                 self.scene_view = self.open_to_scene_view;
                 self.tabs.clear();
                 self.active_tab = None;
+                self.editor_windows.clear();
+                self.focus_window = None;
                 self.layout_tab = false;
                 self.project = Some(p);
                 self.file_view = false;
@@ -2584,6 +2588,8 @@ impl App {
                 self.redo.clear();
                 self.dirty = ext == "story" || ext == "pptx";
                 self.remember(path);
+                // The windows this project had open come back (they were remembered by the file's place).
+                self.restore_editor_windows();
                 self.offer_video_support_for_open_project();
             }
             Err(e) => self.status = format!("Could not open {}: {e}", file_label(&path)),
@@ -2863,6 +2869,9 @@ impl App {
 
     fn new_project(&mut self) {
         self.leave_master_view();
+        self.editor_windows.clear();
+        self.focus_window = None;
+        self.editor_windows_saved.clear();
         self.layout_tab = false;
         let mut p = Project::new("Untitled");
         p.slides.push(Slide {
@@ -7474,6 +7483,7 @@ impl App {
         self.show_frame(root);
         // The editor windows are drawn whatever the main window is showing (the Scene View, say, once its only slide tab has been popped out).
         self.editor_windows_ui(&root.ctx().clone());
+        self.save_editor_windows(&root.ctx().clone());
         // A press anywhere but on a slide takes the keys back to the canvas.
         if root.ctx().input(|i| i.pointer.any_pressed()) && !self.slide_hit { self.slides_focus = false; }
         self.slide_hit = false;
@@ -12849,6 +12859,52 @@ mod tests {
         assert!(h.state().focus_window.is_none(), "a press in the main window makes it the active editor again");
         h.run_steps(3);
         assert!(h.query_all_by_label_contains("· 1.2 Slide 2").next().is_none(), "the note goes with the focus");
+    }
+
+    #[test]
+    fn open_windows_are_remembered_with_their_view_and_place_and_come_back() {
+        let mut a = App::default();
+        a.new_project();
+        a.project.as_mut().unwrap().assets.insert("pano".into(), Asset { name: "lab.png".into(), mime: "image/png".into(), bytes: test_panorama(), file: None });
+        a.add_pano("pano".into(), "lab.png", 512.0, 256.0);
+        let at = a.view.selected.unwrap();
+        a.add_slide(SlideKind::Normal);
+        a.view.slide = 0;
+        a.view.selected = None;
+        // A slide window with its own zoom and place, and a 360° window.
+        let w = a.open_slide_window(1).unwrap();
+        a.with_window_view(w, |a| { a.view.zoom = 2.5; a.view.pan = egui::vec2(10.0, -4.0); });
+        a.editor_windows.iter_mut().find(|x| x.id == w).unwrap().rect = Some([120.0, 80.0, 900.0, 600.0]);
+        let pano_slide = a.project.as_ref().unwrap().slides[0].id.clone();
+        a.open_pano_dialog(at);
+        a.pop_out_pano_tab().unwrap();
+        let text = a.windows_json();
+        assert!(text.contains("\"kind\":\"pano\"") && text.contains("\"kind\":\"slide\""));
+        // Close them all, as if the app had been quit and started again with the same project.
+        a.editor_windows.clear();
+        let dirty = a.dirty;
+        let undo = a.undo.len();
+        a.restore_windows_from(&text);
+        assert_eq!(a.editor_windows.len(), 2, "both windows are back");
+        let slide_win = a.editor_windows.iter().find(|x| x.pano.is_none()).unwrap();
+        assert_eq!(slide_win.rect, Some([120.0, 80.0, 900.0, 600.0]));
+        assert!(!slide_win.placed, "it will be put where it was the first time it is drawn");
+        let wid = slide_win.id;
+        assert_eq!(a.with_window_view(wid, |a| (a.view.slide, a.view.zoom, a.view.pan)), Some((1, 2.5, egui::vec2(10.0, -4.0))));
+        let pano_win = a.editor_windows.iter().find(|x| x.pano.is_some()).unwrap();
+        assert_eq!(pano_win.tab.slide_id, pano_slide);
+        assert!(pano_win.pano.as_ref().unwrap().edit.is_some(), "the 360° window has its editing session again");
+        assert_eq!(a.dirty, dirty, "bringing the windows back does not make the project look changed");
+        assert!(a.undo.len() <= undo + 1);
+        assert!(a.focus_window.is_none(), "the main window is the active editor");
+        // What cannot come back is left out: a slide that is gone, a place that is nowhere.
+        a.editor_windows.clear();
+        let bad = r#"[{"kind":"slide","slide":"no-such-slide"},{"kind":"slide","slide":"SLIDE","rect":[99999,0,800,600]}]"#.replace("SLIDE", &pano_slide);
+        a.restore_windows_from(&bad);
+        assert_eq!(a.editor_windows.len(), 1);
+        assert_eq!(a.editor_windows[0].rect, None, "a place that is plainly off every screen is not used");
+        a.restore_windows_from("not json");
+        assert_eq!(a.editor_windows.len(), 1);
     }
 
     #[test]
