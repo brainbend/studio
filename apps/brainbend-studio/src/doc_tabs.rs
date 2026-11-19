@@ -199,21 +199,11 @@ impl App {
         let mut chip_keys: Vec<String> = vec![];
         let mut chip_tear: Option<usize> = None;
         let mut moved_tab: Option<(usize, usize)> = None;
-        let labels: Vec<(String, String)> = if let Some(st) = &self.master_stash {
-            // The Layout Builder swaps the project's slides for its own, so the open slides are named from the copy kept at entry.
-            self.tabs.iter().filter_map(|t| {
-                let (i, s) = st.entry_slides().iter().enumerate().find(|(_, s)| s.id == t.slide_id)?;
-                let scenes = st.entry_scenes();
-                let si = scenes.iter().position(|c| c.id == s.scene).unwrap_or(0);
-                let n = st.entry_slides().iter().filter(|x| x.scene == s.scene).position(|x| x.id == s.id).map(|k| k + 1).unwrap_or(i + 1);
-                Some((t.slide_id.clone(), format!("{}.{} {}", si + 1, n, s.name)))
-            }).collect()
-        } else {
-            self.tabs.iter().filter_map(|t| {
-                let i = self.project.as_ref()?.slides.iter().position(|s| s.id == t.slide_id)?;
-                Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slide(i).name)))
-            }).collect()
-        };
+        // The slides are the project's own while the Layout Builder is open too, so the tabs are named the same way.
+        let labels: Vec<(String, String)> = self.tabs.iter().filter_map(|t| {
+            let i = self.project.as_ref()?.slides.iter().position(|s| s.id == t.slide_id)?;
+            Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slide(i).name)))
+        }).collect();
         // The strip's order: what was kept, then whatever is new. The tabs of the Layout Builder and of a 360° image can be
         // dragged among the slide tabs like any other.
         if self.scene_tabs.is_none() { self.scene_tabs = Some(vec![]); self.new_scene_tab(); }

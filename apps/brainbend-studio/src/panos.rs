@@ -329,7 +329,7 @@ impl App {
     pub(super) fn pano_tab_name(&self) -> Option<String> {
         let t = self.pano.tab.as_ref()?;
         // The Layout Builder swaps the project's slides for stand-ins, so the name is read from the copy kept at entry.
-        let slides: &[_] = match &self.master_stash { Some(st) => st.entry_slides(), None => &self.project.as_ref()?.slides };
+        let slides: &[_] = &self.project.as_ref()?.slides;
         let s = slides.iter().find(|s| s.id == t.slide_id)?;
         s.layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == t.obj_id).map(|o| o.name.clone())
     }

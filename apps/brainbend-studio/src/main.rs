@@ -1576,7 +1576,8 @@ impl App {
                 let picture_name = match &proj.slide(slide_idx).background { Some(Background::Image { asset }) => proj.assets.get(asset).map(|a| a.name.clone()), _ => None };
                 ribbon::format_panel::section(ui, "slide-background", "Background", false, |ui| {
                     let theme = proj.theme.clone();
-                    changed |= ribbon::background_controls(ui, &mut proj.slide_mut(slide_idx).background, &theme, (slide_w, slide_h), slide_idx > 0, picture_name, &mut want_bg_picture);
+                    let inherits = if in_layout { proj.slide(slide_idx).layout.is_some() } else { slide_idx > 0 };
+                    changed |= ribbon::background_controls(ui, &mut proj.slide_mut(slide_idx).background, &theme, (slide_w, slide_h), inherits, picture_name, &mut want_bg_picture);
                 });
                 match &mut proj.slide_mut(slide_idx).kind {
                     SlideKind::Question(q) => {
@@ -2811,8 +2812,11 @@ impl App {
             self.status_issues = (now, self.project.as_ref().map(|p| p.check().len()).unwrap_or(0));
         }
         let info = self.project.as_ref().map(|p| {
-            let s = &p.slide(self.view.slide.min(p.slides.len().saturating_sub(1)));
-            (self.view.slide.min(p.slides.len().saturating_sub(1)) + 1, p.slides.len(), s.width as i32, s.height as i32, p.theme.name.clone())
+            let i = self.view.slide.min(p.slide_count().saturating_sub(1));
+            let s = p.slide(i);
+            // A layout (in the Layout Builder) is named; a slide is counted.
+            let label = if i >= p.slides.len() { s.name.clone() } else { format!("Slide {} of {}", i + 1, p.slides.len()) };
+            (label, s.width as i32, s.height as i32, p.theme.name.clone())
         });
         let editing_slide = self.project.is_some() && !self.file_view && !self.scene_view && self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web());
         let mut open_checker = false;
@@ -2820,8 +2824,8 @@ impl App {
         let mut fit = false;
         egui::Panel::bottom("status").show(root, |ui| {
             ui.horizontal(|ui| {
-                if let Some((n, total, w, h, theme)) = &info {
-                    ui.label(format!("Slide {n} of {total}"));
+                if let Some((label, w, h, theme)) = &info {
+                    ui.label(label.clone());
                     ui.separator();
                     ui.label(format!("{w} × {h}"));
                     ui.separator();
@@ -5267,6 +5271,7 @@ impl App {
             let cur = prev.swap_into(p);
             self.redo.push(cur);
             self.clear_selections();
+            self.settle_layouts();
             self.dirty = true;
         }
     }
@@ -5277,6 +5282,7 @@ impl App {
             let cur = next.swap_into(p);
             self.undo.push(cur);
             self.clear_selections();
+            self.settle_layouts();
             self.dirty = true;
         }
     }
@@ -7503,13 +7509,13 @@ impl App {
     }
 
     /// The slide being edited, kept inside the project's slides.
-    fn current_slide(&self) -> usize { self.view.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1)) }
+    fn current_slide(&self) -> usize { self.view.slide.min(self.project.as_ref().map(|p| p.slide_count()).unwrap_or(1).saturating_sub(1)) }
 
     /// The panels (the docked groups, the windows of panels, and what the Properties tab asks for), for the view that is current.
     fn panels_frame(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         // Inspector
         // The left panel can add or delete slides; re-read the index before anything else uses it.
-        let slide_idx = self.view.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
+        let slide_idx = self.view.slide.min(self.project.as_ref().map(|p| p.slide_count()).unwrap_or(1).saturating_sub(1));
         let mut wants = SideWants::default();
         // Picking an object, a layer or another slide shows its Properties: Triggers is somewhere to go on purpose, and staying on it hid
         // the Properties from anyone who did not know to look. Picking an owner from the Triggers tab stays put.
@@ -7697,7 +7703,6 @@ impl App {
         if save_k { self.save(false); }
         let mut do_open = open_k;
 
-        self.sync_master();
         self.chrome(root, ctx);
         self.equation_window(ctx);
         self.tool_windows(ctx);
@@ -12937,7 +12942,7 @@ mod tests {
         let mut a = app();
         a.view.selected = None;
         let n = a.project.as_ref().unwrap().slides.len();
-        a.project.as_mut().unwrap().open_layouts();
+        a.enter_master_view();
         let objects_in_master = |a: &App| a.project.as_ref().unwrap().master.objects.len();
         let before = objects_in_master(&a);
         let mut h = harness(a);
@@ -15052,7 +15057,8 @@ mod tests {
         assert!(h.query_by_label("Publish").is_some() && h.query_by_label("Try It").is_some(), "shown outside the Layout Builder");
         assert!(h.query_by_label("Placeholder").is_some(), "Placeholder is in the Objects tab outside the Layout Builder");
         h.state_mut().enter_master_view();
-        h.state_mut().view.slide = 1;
+        let base = h.state().project.as_ref().unwrap().slides.len();
+        h.state_mut().view.slide = base + 1;
         h.run_steps(4);
         assert!(h.query_by_label("Placeholder").is_some(), "and inside it");
         assert!(h.query_all_by_label("Close").next().is_none() && h.query_all_by_label_contains("Insert Layout").next().is_none(), "no builder-only ribbon controls");
@@ -15069,15 +15075,15 @@ mod tests {
         h.state_mut().undo();
         h.run_steps(2);
         assert!(h.state().project.as_ref().unwrap().layouts[0].show_master, "and it can be undone");
-        h.state_mut().view.slide = 0;
+        h.state_mut().view.slide = base;
         h.run_steps(4);
         assert!(h.query_all_by_label_contains("appear on every layout").next().is_some(), "the master explains itself instead");
         // Placeholder puts a placeholder on the layout.
-        h.state_mut().view.slide = 1;
+        h.state_mut().view.slide = base + 1;
         h.run_steps(2);
-        let before = h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len();
+        let before = h.state().project.as_ref().unwrap().slide(base + 1).layers[0].objects.len();
         h.state_mut().insert_placeholder(PlaceholderKind::Heading2);
-        assert_eq!(h.state().project.as_ref().unwrap().slides[1].layers[0].objects.len(), before + 1);
+        assert_eq!(h.state().project.as_ref().unwrap().slide(base + 1).layers[0].objects.len(), before + 1);
     }
 
     /// The Layout Builder is a tab after the slides' tabs while it is open: Scene View and the slide tabs stay, and
@@ -15585,10 +15591,13 @@ mod tests {
         a.enter_master_view();
         assert!(a.in_master_view());
         let n_layouts = a.project.as_ref().unwrap().layouts.len();
-        assert_eq!(a.project.as_ref().unwrap().slides.len(), n_layouts + 1, "master + one stand-in per layout");
+        assert_eq!(a.project.as_ref().unwrap().layout_slides.len(), n_layouts + 1, "master + one stand-in per layout");
+        assert_eq!(a.project.as_ref().unwrap().slides.len(), real_slides, "the project's own slides are not touched");
         // A logo on the master, and a new layout.
-        a.view.slide = 0;
+        a.view.slide = real_slides;
         a.insert_rect();
+        // (Each frame copies what was done into the master; the test has no frames, so it does it itself.)
+        a.project.as_mut().unwrap().sync_layouts();
         a.insert_layout(None);
         assert_eq!(a.project.as_ref().unwrap().layouts.len(), n_layouts + 1);
         // Saving/publishing sees the folded-back project even while the view is open.
@@ -15608,12 +15617,14 @@ mod tests {
         // The master shape is part of the published slide, below the content.
         let flat = a.project.as_ref().unwrap().flattened();
         assert!(flat.slides[a.view.slide].layers[0].objects[0].id.starts_with("bd-"));
-        // The whole visit is one undo step.
+        // What was done in the Layout Builder is in the one undo history, a step each: the new slide, the new layout, the logo.
         a.undo();
         assert_eq!(a.project.as_ref().unwrap().slides.len(), real_slides);
         a.undo();
-        assert!(a.project.as_ref().unwrap().master.objects.is_empty());
         assert_eq!(a.project.as_ref().unwrap().layouts.len(), n_layouts);
+        assert_eq!(a.project.as_ref().unwrap().master.objects.len(), 1, "the logo is still there");
+        a.undo();
+        assert!(a.project.as_ref().unwrap().master.objects.is_empty());
     }
 
     #[test]
@@ -15626,9 +15637,11 @@ mod tests {
         let t = a.project.as_mut().unwrap().slides[s2].layers[0].objects.iter_mut().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap();
         t.style.size = 33.0;
         a.enter_master_view();
-        let li = a.project.as_ref().unwrap().slides.iter().position(|s| s.layout.as_deref() == Some("layout-content")).unwrap();
-        let title = a.project.as_mut().unwrap().slides[li].layers[0].objects.iter_mut().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap();
+        let li = a.project.as_ref().unwrap().layout_slides.iter().position(|s| s.layout.as_deref() == Some("layout-content")).unwrap();
+        let title = a.project.as_mut().unwrap().layout_slides[li].layers[0].objects.iter_mut().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap();
         title.style.size = 99.0;
+        // The editor copies it into the layout as it goes, and on to the slides that follow it.
+        a.project.as_mut().unwrap().sync_layouts();
         a.leave_master_view();
         let size = |i: usize| a.project.as_ref().unwrap().slides[i].layers[0].objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap().style.size;
         assert_eq!(size(s1), 99.0, "follows the layout");
@@ -16766,16 +16779,16 @@ mod tests {
         a.enter_master_view();
         let mut h = harness(a);
         h.run_steps(3);
+        let base = h.state().project.as_ref().unwrap().slides.len();
         for _ in 0..4 {
-            let n = h.state().project.as_ref().unwrap().slides.len();
-            let last = n - 1;
-            h.state_mut().view.slide = last;
+            let n = h.state().project.as_ref().unwrap().layout_slides.len();
+            h.state_mut().view.slide = base + n - 1;
             h.run_steps(2);
             h.get_by_label("Layout").click();
             h.run_steps(3);
             h.get_by_label("Delete").click();
             h.run_steps(4);
-            assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n - 1);
+            assert_eq!(h.state().project.as_ref().unwrap().layout_slides.len(), n - 1);
             assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n - 2, "the layout list stays in step");
         }
         h.state_mut().leave_master_view();
@@ -16803,19 +16816,20 @@ mod tests {
         a.enter_master_view();
         let mut h = harness(a);
         h.run_steps(3);
-        let n0 = h.state().project.as_ref().unwrap().slides.len();
+        let base = h.state().project.as_ref().unwrap().slides.len();
+        let n0 = h.state().project.as_ref().unwrap().layout_slides.len();
         h.get_by_label("+ Add layout").click();
         h.run_steps(3);
-        assert_eq!(h.state().project.as_ref().unwrap().slides.len(), n0 + 1);
-        let i = h.state().view.slide;
+        assert_eq!(h.state().project.as_ref().unwrap().layout_slides.len(), n0 + 1);
+        let i = h.state().view.slide - base;
         assert_eq!(i, n0, "the new layout is selected");
         h.state_mut().rename_layout(i, "Quiz ");
         h.state_mut().rename_layout(i, "Quiz page");
         h.state_mut().move_layout(i, false);
-        assert_eq!(h.state().project.as_ref().unwrap().slides[n0 - 1].name, "Quiz page");
-        assert_eq!(h.state().view.slide, n0 - 1);
+        assert_eq!(h.state().project.as_ref().unwrap().layout_slides[n0 - 1].name, "Quiz page");
+        assert_eq!(h.state().view.slide, base + n0 - 1);
         h.state_mut().move_layout(1, false);
-        assert_eq!(h.state().view.slide, n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
+        assert_eq!(h.state().view.slide, base + n0 - 1, "the first layout cannot move up, nor the Layout Master stand-in");
         h.state_mut().leave_master_view();
         let p = h.state().project.as_ref().unwrap();
         assert!(p.layouts.iter().any(|l| l.name == "Quiz page"), "the new name is saved with the layout");
@@ -16856,7 +16870,8 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(3);
         h.state_mut().enter_master_view();
-        h.state_mut().view.slide = 2;
+        let base = h.state().project.as_ref().unwrap().slides.len();
+        h.state_mut().view.slide = base + 2;
         h.run_steps(3);
         h.state_mut().leave_master_view();
         h.run_steps(3);
@@ -16864,7 +16879,7 @@ mod tests {
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") {
             let dir = std::path::PathBuf::from(dir);
             h.state_mut().enter_master_view();
-            h.state_mut().view.slide = 2;
+            h.state_mut().view.slide = base + 2;
             h.run_steps(3);
             h.render().expect("renderer").save(dir.join("6a-master-view.png")).unwrap();
             h.state_mut().leave_master_view();
