@@ -142,8 +142,8 @@ pub fn suffix_for(kind: Kind) -> Option<&'static str> {
     }
     if cfg!(target_os = "windows") {
         return Some(match (kind, arm) {
-            (Kind::Msi, false) => "-windows.msi",
-            (Kind::Msi, true) => "-windows-arm64.msi",
+            (Kind::Msi, false) => "-x64.msi",
+            (Kind::Msi, true) => "-arm64.msi",
             (_, false) => "-windows.zip",
             (_, true) => "-windows-arm64.zip",
         });
@@ -748,6 +748,23 @@ mod tests {
             assert_eq!(detect_kind(Path::new(r"C:\Users\me\Studio\brainbend-studio.exe"), None, &pf, (false, false)), Kind::Portable);
             assert!(suffix_for(Kind::Msi).unwrap().ends_with(".msi") && suffix_for(Kind::Portable).unwrap().ends_with(".zip"));
         }
+    }
+
+    /// The downloads have no version in their names, so a link to the latest release never changes. The updater finds its file by the ending of
+    /// the name, so each name must be matched by the ending of its own kind of install and by no other.
+    #[test]
+    fn names_without_a_version_are_found_by_exactly_one_kind_of_install() {
+        let endings = ["-macos-universal.zip", "-x64.msi", "-arm64.msi", "-windows.zip", "-windows-arm64.zip", "_amd64.deb", "_arm64.deb",
+            ".x86_64.rpm", ".aarch64.rpm", "-x86_64.AppImage", "-aarch64.AppImage", "-linux.tar.gz", "-linux-aarch64.tar.gz"];
+        let names = ["BrainBend-Studio-macos-universal.zip", "BrainBend-Studio-x64.msi", "BrainBend-Studio-arm64.msi", "BrainBend-Studio-windows.zip",
+            "BrainBend-Studio-windows-arm64.zip", "brainbend-studio_amd64.deb", "brainbend-studio_arm64.deb", "brainbend-studio.x86_64.rpm", "brainbend-studio.aarch64.rpm",
+            "BrainBend-Studio-x86_64.AppImage", "BrainBend-Studio-aarch64.AppImage", "BrainBend-Studio-linux.tar.gz", "BrainBend-Studio-linux-aarch64.tar.gz"];
+        for (name, ending) in names.iter().zip(endings) {
+            let found: Vec<&&str> = endings.iter().filter(|e| name.ends_with(**e)).collect();
+            assert_eq!(found, vec![&ending], "{name} is found by {found:?}");
+        }
+        // The disk image is for first installs only: no update ending matches it.
+        assert!(!endings.iter().any(|e| "BrainBend-Studio.dmg".ends_with(e)));
     }
 
     #[test]
