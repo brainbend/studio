@@ -1,3 +1,6 @@
+// A release build on Windows is a window program: without this, Windows opens a console window with it, and closing that closes the app.
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -6,6 +9,7 @@ mod equations;
 mod dock;
 mod view;
 mod editor_windows;
+mod caption_bar;
 mod commands;
 #[cfg(target_os = "macos")]
 mod native_menu;
@@ -60,6 +64,8 @@ fn window_builder() -> egui::ViewportBuilder {
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/brainbend-icon-256.png")) { b = b.with_icon(icon); }
     if cfg!(target_os = "macos") {
         b.with_fullsize_content_view(true).with_title_shown(false).with_titlebar_shown(false)
+    } else if caption_bar::wanted() {
+        b.with_decorations(false)
     } else {
         b
     }
@@ -232,6 +238,12 @@ struct App {
     bottom_height_saved: f32,
     /// The last size written to the settings for each side or top panel (by its id), so a drag is written once.
     panel_sizes_saved: HashMap<String, f32>,
+    /// Windows and Linux: the menus, Save/Undo/Redo/Find and the buttons at the right are one bar under the system's title bar (see `window_bar`).
+    merged_bar: bool,
+    /// Windows: the app draws the window's caption bar itself (see `caption_bar`).
+    caption: bool,
+    /// The app's icon as a picture for the caption bar, made when first needed.
+    app_icon: Option<egui::TextureHandle>,
     /// Where the tabs are: groups in the side and bottom panels, and which are windows. Remembered per person.
     dock: dock::Layout,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
@@ -263,6 +275,8 @@ struct App {
     native_menu: Option<native_menu::NativeMenu>,
     /// The saved text of the open windows as last written (see `windows_json`).
     editor_windows_saved: String,
+    /// Scene View tabs that were popped out into windows of their own: (window number, where it is, whether it has been placed).
+    scene_windows: Vec<editor_windows::SceneWindow>,
     /// The window's context, kept so a command (from a menu or a key) can reach what needs it.
     ctx_copy: Option<egui::Context>,
     /// The menu bar drawn inside the window (File, Edit, View, Window, Help).
@@ -518,7 +532,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -3611,7 +3625,7 @@ impl App {
                 row_w += 16.0 + widths[si];
             }
         }
-        let view_bg = ui.interact(ui.available_rect_before_wrap(), egui::Id::new("scene-view-bg"), egui::Sense::click());
+        let view_bg = ui.interact(ui.available_rect_before_wrap(), ui.id().with("scene-view-bg"), egui::Sense::click());
         view_bg.context_menu(|ui| self.new_slide_items(ui, None));
         egui::ScrollArea::both().id_salt("scene-view").auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(8.0);
@@ -7529,6 +7543,7 @@ impl App {
         self.ctx_copy = Some(root.ctx().clone());
         #[cfg(target_os = "macos")]
         self.native_menu_frame();
+        if self.caption { self.resize_edges(root.ctx()); }
         self.frame_layouts = self.project.as_ref().map(|p| p.layout_slides.clone()).unwrap_or_default();
         // A press in the main window makes it the one the panels and the keys act on.
         if root.ctx().input(|i| i.pointer.any_pressed()) { self.focus_window = None; }
@@ -11834,6 +11849,28 @@ mod tests {
         assert_eq!(a.tabs.len(), 1, "the deleted slide's tab is gone");
     }
 
+    /// A Scene View tab can be popped out into a window that draws the scenes, and put back as a tab.
+    #[test]
+    fn a_scene_view_tab_pops_out_into_a_window_and_back() {
+        let mut a = app();
+        a.add_slide(SlideKind::Normal);
+        a.scene_tabs = Some(vec![]);
+        a.new_scene_tab();
+        a.new_scene_tab();
+        a.strip_order = vec!["scene:0".into(), "scene:1".into()];
+        a.scene_view = true;
+        let id = a.add_scene_window();
+        a.scene_tabs.as_mut().unwrap().retain(|k| k != "scene:1");
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert_eq!(h.state().scene_windows.len(), 1);
+        h.state_mut().scene_window_to_tab(id);
+        h.run_steps(3);
+        assert!(h.state().scene_windows.is_empty());
+        assert_eq!(h.state().scene_tabs.as_ref().unwrap().len(), 2, "the window's tab is back in the strip");
+        assert!(h.state().scene_view);
+    }
+
     /// The "+" makes another Scene View tab; a slide opened from a second one takes over that tab.
     #[test]
     fn a_second_scene_view_tab_turns_into_the_slide_opened_from_it() {
@@ -12466,6 +12503,53 @@ mod tests {
         assert_eq!(parse_panel_size(None, 250.0, 200.0), 250.0);
         assert_eq!(parse_panel_size(Some("12"), 250.0, 200.0), 250.0, "too small to be right");
         assert_eq!(parse_panel_size(Some("wide"), 250.0, 200.0), 250.0);
+    }
+
+    #[test]
+    fn on_windows_and_linux_one_bar_holds_the_menus_the_quick_icons_and_the_buttons() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.merged_bar = true;
+        a.file_view = false;
+        a.view.selected = None;
+        let mut h = harness(a);
+        h.run_steps(5);
+        for label in ["File", "Edit", "Window", "Try It", "Preview", "Publish"] {
+            assert!(h.query_all_by_label(label).next().is_some(), "{label} is in the bar");
+        }
+        // The menus are at the left and the buttons at the right, in one row.
+        let (x, y) = |l: &str| -> (f32, f32) {
+            use egui_kittest::kittest::NodeT;
+            let b = h.get_all_by_label(l).next().unwrap().accesskit_node().raw_bounds().unwrap();
+            (b.x0 as f32, b.y0 as f32)
+        }("File");
+        let (px, py) = {
+            use egui_kittest::kittest::NodeT;
+            let b = h.get_all_by_label("Publish").next().unwrap().accesskit_node().raw_bounds().unwrap();
+            (b.x0 as f32, b.y0 as f32)
+        };
+        assert!(px > x + 400.0 && (py - y).abs() < 12.0, "one row: File at ({x}, {y}), Publish at ({px}, {py})");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("window-bar.png")).unwrap(); }
+    }
+
+    #[test]
+    fn on_windows_the_caption_bar_has_the_quick_icons_and_the_window_buttons_above_the_menus() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut a = app();
+        a.merged_bar = true;
+        a.caption = true;
+        a.file_view = false;
+        a.view.selected = None;
+        let mut h = harness(a);
+        h.run_steps(6);
+        for label in ["Minimize", "Maximize", "Close", "File", "Publish"] { assert!(h.query_all_by_label(label).next().is_some(), "{label} is in the bars"); }
+        let top = |h: &egui_kittest::Harness<'static, App>, l: &str| h.get_all_by_label(l).next().unwrap().accesskit_node().raw_bounds().unwrap();
+        let (close, file) = (top(&h, "Close"), top(&h, "File"));
+        assert!(close.y0 < file.y0, "the window buttons are in the row above the menus");
+        assert!(close.x0 > 1200.0, "and at the right: {}", close.x0);
+        // Save, Undo, Redo and Find are in the caption row, not beside the menus.
+        assert_eq!(h.state().caption, true);
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("caption-bar.png")).unwrap(); }
     }
 
     #[test]

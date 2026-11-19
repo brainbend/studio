@@ -1,10 +1,12 @@
 #!/bin/sh
 # Builds the Linux downloads in release-files/ from an already built release binary (Linux only):
-#   BrainBend-Studio-<tag>-linux[-aarch64].tar.gz   the in-app updater downloads this one
-#   brainbend-studio_<version>_<amd64|arm64>.deb
-#   brainbend-studio-<version>.<x86_64|aarch64>.rpm
-#   BrainBend-Studio-<tag>-<x86_64|aarch64>.AppImage
-# Usage: scripts/package-linux.sh <tag>      (arch is this machine's; the binary is target/release/brainbend-studio)
+#   BrainBend-Studio-linux[-aarch64].tar.gz   the in-app updater downloads this one
+#   brainbend-studio_<amd64|arm64>.deb
+#   brainbend-studio.<x86_64|aarch64>.rpm
+#   BrainBend-Studio-<x86_64|aarch64>.AppImage
+# None of the names has a version in it, so a link to the latest release never changes; the packages and the app say which version they are.
+# The in-app updater finds its file by the ending of the name, so keep these endings.
+# Usage: scripts/package-linux.sh <tag>      (the tag is the version inside the packages; arch is this machine's; the binary is target/release/brainbend-studio)
 set -eu
 cd "$(dirname "$0")/.."
 TAG=$1
@@ -21,7 +23,7 @@ python3 scripts/make-icon.py --extras target/icons
 ICON=target/icons/brainbend-studio.png
 
 # 1. tar.gz
-tar -czf "$OUT/BrainBend-Studio-$TAG-$TARSUFFIX.tar.gz" -C target/release brainbend-studio -C ../.. $LICENSES
+tar -czf "$OUT/BrainBend-Studio-$TARSUFFIX.tar.gz" -C target/release brainbend-studio -C ../.. $LICENSES
 
 # The files every package installs, laid out as under /.
 ROOT=$(mktemp -d)
@@ -49,7 +51,7 @@ Description: Author interactive lessons
  BrainBend Studio is a desktop app for building interactive lessons
  and publishing them for the web and learning management systems.
 CTL
-dpkg-deb --root-owner-group --build "$DEBROOT" "$OUT/brainbend-studio_${VERSION}_$DEB.deb"
+dpkg-deb --root-owner-group --build "$DEBROOT" "$OUT/brainbend-studio_$DEB.deb"
 
 # 3. rpm (the version may not hold a hyphen)
 RPMVER=$(printf '%s' "$VERSION" | tr '-' '~')
@@ -75,7 +77,8 @@ cp -a $ROOT/. %{buildroot}/
 /usr/share/doc/brainbend-studio
 SPEC
 rpmbuild -bb --define "_topdir $TOP" --define "_build_id_links none" --define "debug_package %{nil}" "$TOP/studio.spec"
-cp "$TOP"/RPMS/*/*.rpm "$OUT/"
+# No version in the file name (the package itself has it), so a link to the latest release never changes.
+for f in "$TOP"/RPMS/*/*.rpm; do cp "$f" "$OUT/brainbend-studio.$(basename "$(dirname "$f")").rpm"; done
 
 # 4. AppImage
 APPDIR=$(mktemp -d)/BrainBend.AppDir
@@ -89,5 +92,5 @@ if [ ! -x "$TOOL" ]; then
   curl -fsSL -o "$TOOL" "https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-$ARCH.AppImage"
   chmod +x "$TOOL"
 fi
-ARCH=$ARCH "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT/BrainBend-Studio-$TAG-$ARCH.AppImage"
+ARCH=$ARCH "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT/BrainBend-Studio-$ARCH.AppImage"
 ls -la "$OUT"

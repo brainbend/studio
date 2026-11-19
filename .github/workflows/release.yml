@@ -96,9 +96,9 @@ jobs:
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
           ./scripts/package-macos.sh universal
           mkdir -p release-files
-          cp dist/brainbend-studio-*-macos-universal.dmg "release-files/BrainBend-Studio-${{ needs.check.outputs.tag }}-macos-universal.dmg"
+          cp dist/brainbend-studio-*-macos-universal.dmg "release-files/BrainBend-Studio.dmg"
           # The in-app updater downloads this zip; the DMG is for first installs.
-          ditto -c -k --keepParent "dist/BrainBend Studio.app" "release-files/BrainBend-Studio-${{ needs.check.outputs.tag }}-macos-universal.zip"
+          ditto -c -k --keepParent "dist/BrainBend Studio.app" "release-files/BrainBend-Studio-macos-universal.zip"
       - name: Package (Windows)
         if: startsWith(matrix.name, 'windows')
         shell: pwsh

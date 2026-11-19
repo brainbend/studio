@@ -221,6 +221,7 @@ impl App {
         for k in present { if !order.contains(&k) { if k.starts_with("scene:") && first_run { order.insert(0, k); } else { order.push(k); } } }
         let first_slide = order.iter().find_map(|k| k.strip_prefix("s:").map(String::from));
         let mut close_scene: Option<String> = None;
+        let mut pop_scene = false;
         let mut open_scene = false;
         let mut scene_pick: Option<String> = None;
         self.strip_order = order.clone();
@@ -241,6 +242,7 @@ impl App {
                         let closable = order.len() > 1 && (!shown || !self.tabs.is_empty() || scene_keys.len() > 1);
                         let (r, closed) = tab_chip(ui, Some(ribbon::STACK), "SCENE VIEW", shown, closable, 160.0);
                         if closed { close_scene = Some(key.clone()); } else if r.clicked() { go_story = true; scene_pick = Some(key.clone()); }
+                        r.context_menu(|ui| { if ui.button("Open in new window").clicked() { close_scene = Some(key.clone()); pop_scene = true; ui.close(); } });
                         slide_chips.push(r);
                         chip_keys.push(key.clone());
                         continue;
@@ -329,6 +331,7 @@ impl App {
                     None => if let Some(n) = self.scene_tabs.as_ref().and_then(|t| t.first().cloned()) { self.scene_active = n; }
                 }
             }
+            if pop_scene { self.add_scene_window(); }
         }
         // Leaving the 360° editing mode, by any other tab or by its own ×, ends it first.
         if pano_open && (go_story || go_slide.is_some() || close_pano || open_builder || close_builder || close.is_some() || close_others.is_some() || close_all) { self.close_pano_edit(); }

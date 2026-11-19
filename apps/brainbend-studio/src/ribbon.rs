@@ -542,6 +542,11 @@ fn pill(ui: &mut egui::Ui, id: &str, p: Pill) -> egui::Response {
     resp
 }
 
+/// The corners and lift of the theme toggle and the buttons beside it: hanging from the window's top edge, or ordinary rounded buttons.
+fn tab_shape(hang: bool) -> (egui::CornerRadius, f32) {
+    if hang { (egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, 3.0) } else { (egui::CornerRadius::same(6), 0.0) }
+}
+
 fn title_icon(ui: &mut egui::Ui, icon: char, tip: &str) -> egui::Response {
     ui.add(egui::Button::new(icon_text(icon, 17.0).color(tint(icon))).min_size(egui::vec2(24.0, 24.0))).on_hover_text(tip)
 }
@@ -1214,8 +1219,8 @@ impl App {
         // The harness draws a first frame before fonts exist; the icon font is needed from here on.
         if !ctx.fonts(|f| f.families().contains(&icons())) { return; }
         self.sync_color_events(ctx);
-        self.title_bar(root, ctx);
-        self.menu_bar(root);
+        if self.caption { self.caption_bar(root, ctx); }
+        if self.merged_bar { self.window_bar(root, ctx); } else { self.title_bar(root, ctx); self.menu_bar(root); }
         self.run_format_painter(ctx);
         // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
@@ -1227,28 +1232,28 @@ impl App {
 
 
 
-    fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
+    fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool, hang: bool) {
         if master { return; }
         ui.spacing_mut().item_spacing.x = 6.0;
         // The same hanging tabs as the theme toggle. The row runs right to left, so Publish comes first and ends up furthest right;
         // it is the main action, so it is the one in the main-action color.
         let ink = text_col(ui);
-        let hanging = egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 };
+        let (hanging, lift) = tab_shape(hang);
         let publishing = self.file_view && self.file_page == backstage::FilePage::Publish;
         let (base, on) = (primary(ui), on_primary(ui));
         let fill = if publishing { shade(base, 0.2) } else { base };
-        let publish = pill(ui, "publish", Pill { icon: Some((EXPORT, on)), label: "Publish", caret: false, fill: Some(fill), ink: on, outline: false, bold: true, radius: hanging, lift: 3.0, min_w: 60.0 })
+        let publish = pill(ui, "publish", Pill { icon: Some((EXPORT, on)), label: "Publish", caret: false, fill: Some(fill), ink: on, outline: false, bold: true, radius: hanging, lift, min_w: 60.0 })
             .on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
         publish.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Publish"));
         if publish.clicked() { self.open_file_page(backstage::FilePage::Publish); }
-        let preview = pill(ui, "preview", Pill { icon: Some((PLAY, ink)), label: "Preview", caret: true, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+        let preview = pill(ui, "preview", Pill { icon: Some((PLAY, ink)), label: "Preview", caret: true, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: hanging, lift, min_w: 60.0 })
             .on_hover_text("Play the lesson in your browser");
         preview.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Preview"));
         egui::Popup::from_toggle_button_response(&preview).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| { ui.set_min_width(190.0); self.preview_items(ui); });
         if self.can_try() {
             let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops.";
             let lit = if self.try_mode { ACCENT } else { ink.gamma_multiply(0.14) };
-            let try_it = pill(ui, "try-it", Pill { icon: Some((CLICK, if self.try_mode { egui::Color32::WHITE } else { ink })), label: "Try It", caret: false, fill: Some(lit), ink: if self.try_mode { egui::Color32::WHITE } else { ink }, outline: !self.try_mode, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+            let try_it = pill(ui, "try-it", Pill { icon: Some((CLICK, if self.try_mode { egui::Color32::WHITE } else { ink })), label: "Try It", caret: false, fill: Some(lit), ink: if self.try_mode { egui::Color32::WHITE } else { ink }, outline: !self.try_mode, bold: false, radius: hanging, lift, min_w: 60.0 })
                 .on_hover_text(tip);
             try_it.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.try_mode, "Try It"));
             if try_it.clicked() { self.try_mode = !self.try_mode; }
@@ -1468,45 +1473,61 @@ impl App {
                 ui.set_min_height(24.0);
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_space(if cfg!(target_os = "macos") { 76.0 } else { 4.0 });
-                if has { ui.scope(|ui| {
-                    if title_icon(ui, SAVE, "Save (⌘S)").clicked() { self.save(false); }
-                    if ui.add_enabled(!self.undo.is_empty(), egui::Button::new(icon_text(UNDO, 17.0)).min_size(egui::vec2(24.0, 24.0))).on_hover_text("Undo (⌘Z)").clicked() { self.undo(); }
-                    if ui.add_enabled(!self.redo.is_empty(), egui::Button::new(icon_text(REDO, 17.0)).min_size(egui::vec2(24.0, 24.0))).on_hover_text("Redo (⇧⌘Z)").clicked() { self.redo(); }
-                    if title_icon(ui, SEARCH, "Find and replace text in the whole project (⌘F)").clicked() { self.find.get_or_insert_with(Default::default).focus = true; }
-                }); }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(10.0);
-                    // Publish, Preview and Try It live here.
-                    if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
-                        let master = self.in_master_view();
-                        self.tab_actions(ui, master);
-                        ui.add_space(6.0);
-                    }
-                    let dark = ctx.theme() == egui::Theme::Dark;
-                    // The moon is black so it shows on the light theme; the sun keeps its yellow.
-                    let ink = text_col(ui);
-                    let toggle = pill(ui, "theme", Pill { icon: Some((if dark { SUN } else { MOON }, if dark { tint(SUN) } else { egui::Color32::BLACK })), label: "", caret: false, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 34.0 })
-                        .on_hover_text(if dark { "Switch to light mode" } else { "Switch to dark mode" });
-                    if toggle.clicked() {
-                        ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
-                    }
-                    // A newer release is out: a red button to the left of the theme toggle opens the update window.
-                    if let Some(r) = self.updater.available().cloned() {
-                        ui.add_space(4.0);
-                        let white = egui::Color32::WHITE;
-                        let (label, fill) = match &self.updater.state {
-                            update::State::Downloading { .. } => ("Updating…", egui::Color32::from_rgb(200, 36, 36)),
-                            update::State::Ready { .. } => ("Restart to update", egui::Color32::from_rgb(30, 140, 70)),
-                            _ => ("Update available", egui::Color32::from_rgb(200, 36, 36)),
-                        };
-                        let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label, caret: false, fill: Some(fill), ink: white, outline: false, bold: true, radius: egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, lift: 3.0, min_w: 60.0 })
-                            .on_hover_text(format!("Version {} is available. Click to update.", r.version));
-                        alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-                        if alert.clicked() { self.updater.dialog_open = true; }
-                    }
-                });
+                if has { self.quick_icons(ui, false); }
+                self.bar_actions(ui, ctx, true, 10.0);
             });
         });
+    }
+
+    /// The row's right end: the theme toggle, then Try It, Preview and Publish at its far right (and the update button to the left of the toggle).
+    /// `hang` is for a bar with nothing above it, where they hang from the window's top edge; in a bar below a title bar of the system's they are ordinary buttons.
+    /// `gap` is the room left at the right end. Returns the room the buttons took.
+    pub(crate) fn bar_actions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, hang: bool, gap: f32) -> egui::Rect {
+        let shape = tab_shape(hang);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(gap);
+            // Publish, Preview and Try It live here.
+            if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+                let master = self.in_master_view();
+                self.tab_actions(ui, master, hang);
+                ui.add_space(6.0);
+            }
+            let dark = ctx.theme() == egui::Theme::Dark;
+            // The moon is black so it shows on the light theme; the sun keeps its yellow.
+            let ink = text_col(ui);
+            let toggle = pill(ui, "theme", Pill { icon: Some((if dark { SUN } else { MOON }, if dark { tint(SUN) } else { egui::Color32::BLACK })), label: "", caret: false, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: shape.0, lift: shape.1, min_w: 34.0 })
+                .on_hover_text(if dark { "Switch to light mode" } else { "Switch to dark mode" });
+            if toggle.clicked() {
+                ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+            }
+            // A newer release is out: a red button to the left of the theme toggle opens the update window.
+            if let Some(r) = self.updater.available().cloned() {
+                ui.add_space(4.0);
+                let white = egui::Color32::WHITE;
+                let (label, fill) = match &self.updater.state {
+                    update::State::Downloading { .. } => ("Updating…", egui::Color32::from_rgb(200, 36, 36)),
+                    update::State::Ready { .. } => ("Restart to update", egui::Color32::from_rgb(30, 140, 70)),
+                    _ => ("Update available", egui::Color32::from_rgb(200, 36, 36)),
+                };
+                let alert = pill(ui, "update", Pill { icon: Some((WARNING_CIRCLE, white)), label, caret: false, fill: Some(fill), ink: white, outline: false, bold: true, radius: shape.0, lift: shape.1, min_w: 60.0 })
+                    .on_hover_text(format!("Version {} is available. Click to update.", r.version));
+                alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+                if alert.clicked() { self.updater.dialog_open = true; }
+            }
+        }).response.rect
+    }
+
+    /// Save, Undo, Redo and Find. `neutral` draws them in the text color, to sit with the menus, instead of in their own colors.
+    pub(crate) fn quick_icons(&mut self, ui: &mut egui::Ui, neutral: bool) {
+        let icon = |ui: &mut egui::Ui, enabled: bool, c: char, tip: &str| {
+            let color = if neutral { text_col(ui) } else { tint(c) };
+            ui.add_enabled(enabled, egui::Button::new(icon_text(c, 17.0).color(color)).min_size(egui::vec2(24.0, 24.0))).on_hover_text(tip)
+        };
+        let (cmd, shift) = if cfg!(target_os = "macos") { ("⌘", "⇧⌘") } else { ("Ctrl+", "Ctrl+Shift+") };
+        if icon(ui, true, SAVE, &format!("Save ({cmd}S)")).clicked() { self.save(false); }
+        if icon(ui, !self.undo.is_empty(), UNDO, &format!("Undo ({cmd}Z)")).clicked() { self.undo(); }
+        if icon(ui, !self.redo.is_empty(), REDO, &format!("Redo ({shift}Z)")).clicked() { self.redo(); }
+        if icon(ui, true, SEARCH, &format!("Find and replace text in the whole project ({cmd}F)")).clicked() { self.find.get_or_insert_with(Default::default).focus = true; }
     }
 
 
