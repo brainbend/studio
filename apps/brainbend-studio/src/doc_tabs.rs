@@ -196,6 +196,7 @@ impl App {
         let mut close_all = false;
         let mut pop_out: Option<usize> = None;
         let mut pop_out_pano = false;
+        let mut pop_out_layouts = false;
         let mut chip_keys: Vec<String> = vec![];
         let mut chip_tear: Option<usize> = None;
         let mut moved_tab: Option<(usize, usize)> = None;
@@ -250,6 +251,7 @@ impl App {
                         let (r, closed) = tab_chip(ui, Some(ribbon::LAYOUT), "LAYOUT BUILDER", master, true, 176.0);
                         if closed { close_builder = true; }
                         else if r.clicked() && !master { open_builder = true; }
+                        r.context_menu(|ui| { if ui.button("Open in new window").clicked() { pop_out_layouts = true; ui.close(); } });
                         slide_chips.push(r);
                         chip_keys.push(key.clone());
                         continue;
@@ -301,6 +303,12 @@ impl App {
         if let Some((from, to)) = moved_tab { self.move_strip(from, to); }
         if let Some(k) = pop_out { self.pop_out_slide_tab(k); }
         else if pop_out_pano { self.pop_out_pano_tab(); }
+        else if pop_out_layouts { self.pop_out_layout_tab(); return; }
+        else if chip_tear.and_then(|n| chip_keys.get(n)).is_some_and(|key| key == "layout") {
+            root.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-drag", "strip"))));
+            self.begin_layout_window_tear(&root.ctx().clone());
+            return;
+        }
         else if chip_tear.and_then(|n| chip_keys.get(n)).is_some_and(|key| key == "pano") {
             root.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(("tab-drag", "strip"))));
             self.begin_pano_window_tear(&root.ctx().clone());

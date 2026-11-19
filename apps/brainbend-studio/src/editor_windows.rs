@@ -17,6 +17,8 @@ pub(crate) struct EditorWindow {
     pub(crate) pano: Option<PanoWindow>,
     /// Where the window is and how big: x, y, width, height. Known once it has been on screen, or from a saved layout.
     pub(crate) rect: Option<[f32; 4]>,
+    /// Set for the Layout Builder: the window works on the master and the layouts (its slide is the one of them that is chosen).
+    pub(crate) layouts: bool,
     /// Whether the window has been put where `rect` says (a window restored from a saved layout is, the first time it is drawn).
     pub(crate) placed: bool,
 }
@@ -48,7 +50,7 @@ impl App {
     fn add_editor_window(&mut self, tab: SlideTab) -> u32 {
         self.editor_window_next += 1;
         let id = self.editor_window_next;
-        self.editor_windows.push(EditorWindow { id, tab, pano: None, rect: None, placed: true });
+        self.editor_windows.push(EditorWindow { id, tab, pano: None, layouts: false, rect: None, placed: true });
         self.focus_window = Some(id);
         id
     }
@@ -64,6 +66,7 @@ impl App {
     /// Put a window's tab back in the strip, showing.
     pub(crate) fn window_to_tab(&mut self, id: u32) {
         if self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some()) { return self.pano_window_to_tab(id); }
+        if self.editor_windows.iter().any(|w| w.id == id && w.layouts) { return self.layout_window_to_tab(id); }
         let Some(n) = self.editor_windows.iter().position(|w| w.id == id) else { return };
         let w = self.editor_windows.remove(n);
         if self.focus_window == Some(id) { self.focus_window = None; }
@@ -88,11 +91,13 @@ impl App {
         }
         self.editor_windows.retain(|w| w.id != id);
         if self.focus_window == Some(id) { self.focus_window = None; }
+        // The master and layouts stay open as slides only while the Layout Builder or a window of it needs them.
+        if !self.layouts_wanted() { if let Some(p) = self.project.as_mut() { if p.close_layouts() { self.dirty = true; } } }
     }
 
     fn window_slide(&self, id: u32) -> Option<usize> {
         let w = self.editor_windows.iter().find(|w| w.id == id)?;
-        self.project.as_ref()?.slides.iter().position(|s| s.id == w.tab.slide_id)
+        self.project.as_ref()?.slide_index_of(&w.tab.slide_id)
     }
 
     /// Run `f` with window `id`'s view as the current one, then put the main window's back. What `f` did to the view stays in the window; if it
@@ -100,17 +105,31 @@ impl App {
     pub(crate) fn with_window_view<R>(&mut self, id: u32, f: impl FnOnce(&mut App) -> R) -> Option<R> {
         let slide = self.window_slide(id)?;
         let at = self.editor_windows.iter().position(|w| w.id == id)?;
-        let mut other = self.editor_windows[at].tab.view.clone();
-        other.slide = slide;
-        std::mem::swap(&mut self.view, &mut other);
+        let mut window_view = self.editor_windows[at].tab.view.clone();
+        window_view.slide = slide;
+        // The main window's view is kept aside while the window's is the current one (`with_main_view` reaches it).
+        let main = std::mem::replace(&mut self.view, window_view);
+        let outer = self.stashed_main.replace(main);
         let r = f(self);
-        std::mem::swap(&mut self.view, &mut other);
-        let new_slide = self.project.as_ref().and_then(|p| p.slide_get(other.slide.min(p.slides.len().saturating_sub(1)))).map(|s| s.id.clone());
+        let main = self.stashed_main.take().unwrap_or_default();
+        self.stashed_main = outer;
+        let other = std::mem::replace(&mut self.view, main);
+        let new_slide = self.project.as_ref().and_then(|p| p.slide_get(other.slide.min(p.slide_count().saturating_sub(1)))).map(|s| s.id.clone());
         if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) {
             w.tab.view = other;
             if let Some(s) = new_slide { w.tab.slide_id = s; }
         }
         Some(r)
+    }
+
+    /// Run `f` with the main window's own view as the current one, while an editor window's is. The Slide List uses it to keep showing the main
+    /// window's slides while a window of the layouts is the active editor (the window has its own list of layouts).
+    pub(crate) fn with_main_view(&mut self, f: impl FnOnce(&mut App)) {
+        let Some(mut main) = self.stashed_main.take() else { return f(self) };
+        std::mem::swap(&mut self.view, &mut main);
+        f(self);
+        std::mem::swap(&mut self.view, &mut main);
+        self.stashed_main = Some(main);
     }
 
     /// What the Properties panel says while an editor window is the one it acts on: the window's slide, so it is clear where a change goes.
@@ -131,7 +150,10 @@ impl App {
     /// Draw every editor window: its tab, its insert bar and its canvas.
     pub(crate) fn editor_windows_ui(&mut self, ctx: &egui::Context) {
         if self.file_view || self.project.is_none() { return; }
-        // A window whose slide has been deleted goes with it.
+        // A window of the layouts whose layout has gone (deleted, or undone) goes to the master; a slide's window whose slide has been deleted goes with it.
+        for w in self.editor_windows.iter_mut().filter(|w| w.layouts) {
+            if self.project.as_ref().is_some_and(|p| p.layouts_open() && p.slide_index_of(&w.tab.slide_id).is_none()) { w.tab.slide_id = brainbend_doc::master::MASTER_STAND_IN.to_string(); }
+        }
         let gone: Vec<u32> = self.editor_windows.iter().map(|w| w.id).filter(|id| self.window_slide(*id).is_none()).collect();
         for id in gone { self.close_editor_window(id); }
         let ids: Vec<u32> = self.editor_windows.iter().map(|w| w.id).collect();
@@ -139,7 +161,8 @@ impl App {
             let Some(idx) = self.window_slide(id) else { continue };
             let pano_name = self.editor_windows.iter().find(|w| w.id == id).and_then(|w| w.pano.as_ref()).and_then(|p| self.project.as_ref().and_then(|pr| pr.slide(idx).layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == p.obj_id).map(|o| o.name.clone())));
             let name = pano_name.clone().unwrap_or_else(|| self.project.as_ref().map(|p| p.slide(idx).name.clone()).unwrap_or_default());
-            let title = if pano_name.is_some() { name } else { format!("{} {}", self.slide_number(idx), name) };
+            let is_layouts = self.editor_windows.iter().any(|w| w.id == id && w.layouts);
+            let title = if pano_name.is_some() || is_layouts { name } else { format!("{} {}", self.slide_number(idx), name) };
             let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
             // A window brought back from a saved layout opens where it was and as big as it was.
             let saved = self.editor_windows.iter_mut().find(|w| w.id == id).and_then(|w| { if w.placed { None } else { w.placed = true; w.rect } });
@@ -165,6 +188,10 @@ impl App {
                 if !is_pano && ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) { self.focus_window = Some(id); }
                 let ctx = ui.ctx().clone();
                 if is_pano { if !self.pano_window_ui(ui, &ctx, id) { closed_here = true; } return; }
+                // The layouts' window has the list of them at its left, then the same bar and canvas as a slide's window.
+                if is_layouts {
+                    egui::Panel::left(format!("layouts-list-{id}")).default_size(210.0).show(ui, |ui| { self.with_window_view(id, |a| a.master_panel(ui, &ctx)); });
+                }
                 self.with_window_view(id, |a| {
                     a.window_keys(&ctx);
                     a.insert_bar_in(ui);
@@ -248,7 +275,7 @@ impl App {
         let undo_len = self.undo.len();
         self.editor_window_next += 1;
         let id = self.editor_window_next;
-        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(tab.slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: tab.obj_id, edit, undo_len }), rect: None, placed: true });
+        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(tab.slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: tab.obj_id, edit, undo_len }), layouts: false, rect: None, placed: true });
         Some(id)
     }
 
@@ -314,7 +341,7 @@ impl App {
         use serde_json::json;
         let list: Vec<serde_json::Value> = self.editor_windows.iter().map(|w| {
             let mut o = json!({ "slide": w.tab.slide_id, "zoom": w.tab.view.zoom, "pan": [w.tab.view.pan.x, w.tab.view.pan.y], "layer": w.tab.view.layer });
-            if let Some(p) = &w.pano { o["kind"] = "pano".into(); o["obj"] = p.obj_id.clone().into(); } else { o["kind"] = "slide".into(); }
+            if let Some(p) = &w.pano { o["kind"] = "pano".into(); o["obj"] = p.obj_id.clone().into(); } else if w.layouts { o["kind"] = "layouts".into(); } else { o["kind"] = "slide".into(); }
             if let Some(r) = w.rect { o["rect"] = json!(r); }
             o
         }).collect();
@@ -348,6 +375,17 @@ impl App {
         let Ok(serde_json::Value::Array(list)) = serde_json::from_str::<serde_json::Value>(text) else { return };
         for o in list {
             let Some(slide_id) = o.get("slide").and_then(|s| s.as_str()).map(str::to_string) else { continue };
+            let is_layouts = o.get("kind").and_then(|k| k.as_str()) == Some("layouts");
+            // The layouts' window opens the master and layouts as slides; its slide is the layout it was on, or the master if that has gone.
+            if is_layouts {
+                if let Some(p) = self.project.as_mut() { p.open_layouts(); }
+                let slide_id = if self.project.as_ref().is_some_and(|p| p.slide_index_of(&slide_id).is_some()) { slide_id } else { brainbend_doc::master::MASTER_STAND_IN.to_string() };
+                self.editor_window_next += 1;
+                let id = self.editor_window_next;
+                let rect = o.get("rect").and_then(|r| r.as_array()).filter(|r| r.len() == 4).map(|r| { let v: Vec<f32> = r.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect(); [v[0], v[1], v[2], v[3]] }).filter(|r| r[0] > -3000.0 && r[0] < 8000.0 && r[1] > -500.0 && r[1] < 5000.0 && r[2] >= 200.0 && r[3] >= 150.0);
+                self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(slide_id, crate::view::View::default(), self.bottom_tab), pano: None, layouts: true, rect, placed: rect.is_none() });
+                continue;
+            }
             if !self.project.as_ref().is_some_and(|p| p.slides.iter().any(|s| s.id == slide_id)) { continue; }
             let num = |k: &str, d: f32| o.get(k).and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(d);
             let rect = o.get("rect").and_then(|r| r.as_array()).filter(|r| r.len() == 4).map(|r| { let v: Vec<f32> = r.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect(); [v[0], v[1], v[2], v[3]] });
@@ -363,7 +401,7 @@ impl App {
                 self.editor_window_next += 1;
                 let id = self.editor_window_next;
                 let undo_len = self.undo.len();
-                self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: obj, edit: Some(edit), undo_len }), rect, placed: rect.is_none() });
+                self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(slide_id, crate::view::View::default(), self.bottom_tab), pano: Some(PanoWindow { obj_id: obj, edit: Some(edit), undo_len }), layouts: false, rect, placed: rect.is_none() });
                 id
             } else {
                 let Some(idx) = self.project.as_ref().and_then(|p| p.slides.iter().position(|s| s.id == slide_id)) else { continue };
@@ -382,5 +420,59 @@ impl App {
         }
         // The main window is the one the panels act on to begin with.
         self.focus_window = None;
+    }
+}
+
+impl App {
+    /// Whether the master and the layouts have to stay open as slides: the Layout Builder is open, or a window of it is.
+    pub(crate) fn layouts_wanted(&self) -> bool { self.master_stash.is_some() || self.editor_windows.iter().any(|w| w.layouts) }
+
+    /// Whether the view being worked on (the main window's, or the one swapped in for a window) is a layout or the master: its slide comes
+    /// after the project's own.
+    pub(crate) fn on_layout(&self) -> bool { self.project.as_ref().is_some_and(|p| p.layouts_open() && self.view.slide >= p.slides.len()) }
+
+    /// Pop the Layout Builder out of the main window into a window of its own, on the layout it is showing (or the master).
+    pub(crate) fn pop_out_layout_tab(&mut self) -> Option<u32> {
+        let p = self.project.as_mut()?;
+        p.open_layouts();
+        let in_builder = self.master_stash.is_some();
+        let (slide_id, view) = match p.slide_get(self.view.slide).filter(|_| in_builder && self.view.slide >= p.slides.len()) {
+            Some(s) => (s.id.clone(), self.view.clone()),
+            None => (brainbend_doc::master::MASTER_STAND_IN.to_string(), crate::view::View::default()),
+        };
+        self.editor_window_next += 1;
+        let id = self.editor_window_next;
+        self.editor_windows.push(EditorWindow { id, tab: SlideTab::new(slide_id, view, self.bottom_tab), pano: None, layouts: true, rect: None, placed: true });
+        self.layout_tab = false;
+        // The builder leaves the main window (the window keeps the master and layouts open).
+        self.leave_master_view();
+        self.focus_window = Some(id);
+        Some(id)
+    }
+
+    /// Put the Layout Builder back in the main window, on the layout the window was showing.
+    pub(crate) fn layout_window_to_tab(&mut self, id: u32) {
+        let Some(n) = self.editor_windows.iter().position(|w| w.id == id) else { return };
+        let w = self.editor_windows.remove(n);
+        if self.focus_window == Some(id) { self.focus_window = None; }
+        self.enter_master_view();
+        if let Some(i) = self.project.as_ref().and_then(|p| p.slide_index_of(&w.tab.slide_id)) {
+            self.view.slide = i;
+            self.view.layer = 0;
+            self.view.selected = None;
+            self.reset_visibility();
+        }
+        // Another window of the layouts may still need them; if none does and the builder is closed again, close_editor_window's rule applies.
+    }
+
+    /// The Layout Builder's tab was pulled out of the strip: it is a window under the pointer now.
+    pub(crate) fn begin_layout_window_tear(&mut self, ctx: &egui::Context) {
+        let (local, inner) = ctx.input_for(egui::ViewportId::ROOT, |i| (i.pointer.latest_pos(), i.viewport().inner_rect));
+        let grab = egui::vec2(if cfg!(target_os = "macos") { 76.0 + 50.0 } else { 58.0 }, 16.0);
+        let Some(id) = self.pop_out_layout_tab() else { return };
+        if let (Some(p), Some(inner)) = (local, inner) {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new(("pop-out-start", Self::editor_key(id))), inner.min + p.to_vec2() - grab));
+        }
+        self.tear = Some((TearTarget::Window(id), grab));
     }
 }

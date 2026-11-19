@@ -238,6 +238,8 @@ struct App {
     focus_window: Option<u32>,
     /// The stand-in slides of the master and layouts as they were when this frame began (empty while they are closed), for the undo step of an edit made in it.
     frame_layouts: Vec<Slide>,
+    /// The main window's view while an editor window's is the current one (see `with_window_view`).
+    stashed_main: Option<view::View>,
     /// The saved text of the open windows as last written (see `windows_json`).
     editor_windows_saved: String,
     /// The window's context, kept so a command (from a menu or a key) can reach what needs it.
@@ -315,6 +317,8 @@ struct App {
     table_opts: brainbend_doc::tables::StyleOptions,
     /// Set while the Layout Builder view is open.
     master_stash: Option<master_view::MasterStash>,
+    /// The layout whose name is being typed in the layouts' list (0 is the master; the layouts follow).
+    layout_rename: Option<usize>,
     /// The Layout Builder's tab is in the tab strip (it stays after another tab is chosen, until its × is pressed).
     layout_tab: bool,
 }
@@ -502,8 +506,8 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
-            last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_tab: false,
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(test)), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", ribbon_tab: ribbon::OBJECTS_TAB, dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], show_ribbon: prefs::get_bool("show_ribbon").unwrap_or(cfg!(test)), ribbon_pinned: prefs::get_bool("ribbon_pinned").unwrap_or(cfg!(test)), ribbon_open: false, ribbon_hover: prefs::get_bool("ribbon_hover").unwrap_or(false), ribbon_left_at: None, video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
+            last_autosave: std::time::Instant::now(), recovery_offer: false, pending_delete: None, master_stash: None, layout_rename: None, layout_tab: false,
         }
     }
 }
@@ -1112,8 +1116,13 @@ impl App {
 
     /// The slide list: the scene to show, its slides as thumbnails, and the buttons to add and arrange them. The body of the Slides tab.
     fn slides_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        // A window of the layouts has its list of them; the main window's Slide List stays its own while that window is the active editor.
+        if self.on_layout() && !self.in_master_view() && self.stashed_main.is_some() {
+            self.with_main_view(|a| a.slides_body(ui, ctx));
+            return;
+        }
         ui.add_space(6.0);
-        if self.in_master_view() {
+        if self.in_master_view() || self.on_layout() {
             self.master_panel(ui, ctx);
             return;
         }
@@ -1539,7 +1548,7 @@ impl App {
                 let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
                 let mut gen = || { ctr += 1; format!("ch-{t0:x}-{ctr}") };
                 let layer_idx = self.view.layer;
-                let in_layout = self.in_master_view();
+                let in_layout = self.in_master_view() || self.on_layout();
                 let proj = self.project.as_mut().unwrap();
                 let before = proj.slides.clone();
                 let mut changed = false;
@@ -12964,6 +12973,72 @@ mod tests {
         assert!(h.state().project.as_ref().unwrap().slide(n).layers[0].objects.iter().any(|o| o.id == "logo"));
         h.run_steps(2);
         assert_eq!(objects_in_master(h.state()), before + 1);
+    }
+
+    #[test]
+    fn the_layout_builder_pops_out_into_a_window_and_the_main_window_edits_slides_meanwhile() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.file_view = false;
+        a.view.selected = None;
+        let slides = a.project.as_ref().unwrap().slides.len();
+        let n_layouts = a.project.as_ref().unwrap().layouts.len();
+        a.enter_master_view();
+        // Choose a layout, then pop the builder out.
+        a.view.slide = slides + 1;
+        let chosen = a.project.as_ref().unwrap().slide(slides + 1).id.clone();
+        let id = a.pop_out_layout_tab().expect("a window");
+        assert!(!a.in_master_view(), "the main window has left the Layout Builder");
+        assert!(a.project.as_ref().unwrap().layouts_open(), "the window keeps the master and layouts open");
+        assert!(a.editor_windows.iter().any(|w| w.id == id && w.layouts && w.tab.slide_id == chosen), "on the layout that was chosen");
+        assert_eq!(a.view.slide, 0.min(slides.saturating_sub(1)).max(a.view.slide), "the main window is back on a slide");
+        assert!(a.view.slide < slides, "a slide of the project");
+        let mut h = harness(a);
+        h.run_steps(5);
+        // The window has the list of layouts, with its own buttons.
+        // The window lists the layouts; the main window's Slide List is still its slides.
+        assert_eq!(h.query_all_by_label("+ Add layout").count(), 1, "the layouts are listed in the window only");
+        assert!(h.query_all_by_label_contains("+ Add slide").count() >= 1, "and the main window lists its slides");
+        h.get_by_label("+ Add layout").click();
+        h.run_steps(4);
+        assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n_layouts + 1, "a layout added in the window is a layout of the project");
+        // The main window is not in the builder and edits its slide.
+        assert!(!h.state().in_master_view());
+        h.state_mut().insert_rect();
+        h.run_steps(2);
+        assert!(h.state().project.as_ref().unwrap().slide(0).layers[0].objects.len() >= 1, "the main window added a shape to its slide");
+        assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n_layouts + 1);
+        // The windows are remembered like the others.
+        let text = h.state().windows_json();
+        assert!(text.contains("\"kind\":\"layouts\""), "{text}");
+        // Put it back: the builder is in the main window again, on the layout the window was showing.
+        let shown = h.state().editor_windows.iter().find(|w| w.id == id).unwrap().tab.slide_id.clone();
+        h.state_mut().window_to_tab(id);
+        h.run_steps(3);
+        assert!(h.state().in_master_view() && h.state().editor_windows.is_empty());
+        let at = h.state().view.slide;
+        assert_eq!(h.state().project.as_ref().unwrap().slide(at).id, shown);
+        // Closing the last of them closes the master and layouts as slides, and keeps what was done.
+        h.state_mut().leave_master_view();
+        assert!(!h.state().project.as_ref().unwrap().layouts_open());
+        assert_eq!(h.state().project.as_ref().unwrap().layouts.len(), n_layouts + 1);
+        // A window closed by itself does the same.
+        let id = { h.state_mut().enter_master_view(); h.state_mut().pop_out_layout_tab().unwrap() };
+        h.state_mut().close_editor_window(id);
+        assert!(!h.state().project.as_ref().unwrap().layouts_open(), "nothing needs them any more");
+    }
+
+    #[test]
+    fn a_layouts_window_that_was_remembered_comes_back_on_the_master_and_layouts() {
+        let mut a = app();
+        a.enter_master_view();
+        let id = a.pop_out_layout_tab().unwrap();
+        let text = a.windows_json();
+        a.close_editor_window(id);
+        assert!(!a.project.as_ref().unwrap().layouts_open());
+        a.restore_windows_from(&text);
+        assert!(a.editor_windows.iter().any(|w| w.layouts), "the layouts' window is back");
+        assert!(a.project.as_ref().unwrap().layouts_open(), "with the master and layouts open");
     }
 
     #[test]

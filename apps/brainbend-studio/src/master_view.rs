@@ -11,8 +11,6 @@ pub(super) use brainbend_doc::master::LAYOUT_SCENE as MASTER_SCENE;
 pub(super) struct MasterStash {
     /// The slide that was showing when it opened, to go back to.
     slide: usize,
-    /// The layout whose name is being edited in the left panel (0 is the master; layouts follow).
-    rename: Option<usize>,
 }
 
 impl App {
@@ -29,7 +27,7 @@ impl App {
         let Some(p) = self.project.as_mut() else { return };
         p.open_layouts();
         let base = p.slides.len();
-        self.master_stash = Some(MasterStash { slide: self.view.slide, rename: None });
+        self.master_stash = Some(MasterStash { slide: self.view.slide });
         self.layout_tab = true;
         self.view.slide = base;
         self.view.layer = 0;
@@ -44,7 +42,10 @@ impl App {
     pub(super) fn leave_master_view(&mut self) {
         let Some(stash) = self.master_stash.take() else { return };
         if let Some(p) = self.project.as_mut() {
-            if p.close_layouts() { self.dirty = true; }
+            // A window of the layouts keeps them open; otherwise what is in them is copied back and they are closed.
+            let wanted = self.editor_windows.iter().any(|w| w.layouts);
+            let changed = if wanted { p.sync_layouts() } else { p.close_layouts() };
+            if changed { self.dirty = true; }
         }
         self.view.slide = stash.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
         self.view.layer = 0;
@@ -57,11 +58,12 @@ impl App {
     /// After Undo or Redo the master's and layouts' slides are as they were in the step that came back: while the Layout Builder is closed they are not
     /// wanted, and while it is open they are opened again if the step is from before it opened.
     pub(super) fn settle_layouts(&mut self) {
-        let open = self.master_stash.is_some();
+        let open = self.layouts_wanted();
+        let in_builder = self.master_stash.is_some();
         let Some(p) = self.project.as_mut() else { return };
         if open {
             p.open_layouts();
-            self.view.slide = self.view.slide.min(p.slide_count().saturating_sub(1)).max(p.slides.len());
+            if in_builder { self.view.slide = self.view.slide.min(p.slide_count().saturating_sub(1)).max(p.slides.len()); }
         } else {
             p.layout_slides.clear();
         }
@@ -76,7 +78,7 @@ impl App {
     }
 
     pub(super) fn insert_layout(&mut self, copy_of: Option<usize>) {
-        if !self.in_master_view() { return; }
+        if !self.in_master_view() && !self.on_layout() { return; }
         self.snapshot();
         let id = self.new_id("layout");
         let (oid, tid) = (self.new_id("obj"), self.new_id("obj"));
@@ -114,7 +116,7 @@ impl App {
     }
 
     pub(super) fn delete_layout(&mut self, i: usize) {
-        if !self.in_master_view() || i == 0 { return; }
+        if (!self.in_master_view() && !self.on_layout()) || i == 0 { return; }
         let Some(p) = self.project.as_ref() else { return };
         if i >= p.layout_slides.len() { return; }
         self.snapshot();
@@ -140,7 +142,7 @@ impl App {
 
     /// Swap layout `i` with its neighbour (never the "Layout Master" stand-in at the top).
     pub(super) fn move_layout(&mut self, i: usize, down: bool) {
-        if !self.in_master_view() { return; }
+        if !self.in_master_view() && !self.on_layout() { return; }
         let Some(p) = self.project.as_ref() else { return };
         let j = if down { i + 1 } else { i.wrapping_sub(1) };
         if i == 0 || j == 0 || i >= p.layout_slides.len() || j >= p.layout_slides.len() { return; }
@@ -174,9 +176,9 @@ impl App {
         let mut action: Option<(u8, usize)> = None;
         let list_h = (ui.available_height() - 44.0).max(80.0);
         // Right-clicking anywhere in the list adds a layout; the thumbnails take their own clicks.
-        let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), egui::Id::new("layouts-bg"), egui::Sense::click());
+        let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), ui.id().with("layouts-bg"), egui::Sense::click());
         list_bg.context_menu(|ui| { if ui.button("New layout").clicked() { action = Some((0, 0)); ui.close(); } });
-        let renaming = self.master_stash.as_ref().and_then(|s| s.rename);
+        let renaming = self.layout_rename;
         let mut rename_to: Option<(usize, String)> = None;
         let mut stop_rename = false;
         let mut start_rename = None;
@@ -232,20 +234,20 @@ impl App {
             self.reset_visibility();
         }
         if let Some((i, text)) = rename_to {
-            if self.master_stash.as_ref().is_some_and(|s| s.rename == Some(i)) {
+            if self.layout_rename == Some(i) {
                 // One undo step for the whole rename: the snapshot is taken when it starts.
                 self.rename_layout(i, &text);
             }
         }
         if stop_rename {
-            if let Some(i) = self.master_stash.as_mut().and_then(|s| s.rename.take()) {
+            if let Some(i) = self.layout_rename.take() {
                 let t = self.project.as_ref().and_then(|p| p.layout_slides.get(i)).map(|s| s.name.trim().to_string());
                 if let Some(t) = t { self.rename_layout(i, &t); }
             }
         }
         if let Some(i) = start_rename {
             self.snapshot();
-            if let Some(s) = self.master_stash.as_mut() { s.rename = Some(i); }
+            self.layout_rename = Some(i);
         }
         match action {
             Some((0, _)) => self.insert_layout(None),

@@ -5,7 +5,6 @@
 //! slide the author adds later follows the same design. Like every tool they run on the app's own thread, after an undo
 //! snapshot; the theme, palette, master and layouts are all part of that snapshot.
 use super::*;
-use crate::master_view::MASTER_SCENE;
 use crate::mcp_tools::*;
 use brainbend_doc::master::{placeholder_object, Background, PlaceholderKind, SlideLayout, THEME_COLOR_NAMES};
 use serde_json::{json, Value};
@@ -126,7 +125,7 @@ if they say yes, call this again with approved set to true. Otherwise build with
                 "placeholders": l.objects.iter().filter(|o| o.placeholder.is_some()).map(describe_object).collect::<Vec<_>>(),
                 "shapes": l.objects.iter().filter(|o| o.placeholder.is_none()).map(describe_object).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
-            "slides": p.slides.iter().enumerate().filter(|(_, s)| s.scene != MASTER_SCENE).map(|(i, s)| json!({ "number": i + 1, "layout": layout_of(s) })).collect::<Vec<_>>(),
+            "slides": p.slides.iter().enumerate().map(|(i, s)| json!({ "number": i + 1, "layout": layout_of(s) })).collect::<Vec<_>>(),
             "note": "Objects keep the colors they were made with, so changing the theme does not recolor slides that already exist.",
         }))
     }
