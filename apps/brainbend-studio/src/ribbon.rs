@@ -1197,7 +1197,7 @@ impl App {
         let sel = self.format_targets();
         if sel.is_empty() { return; }
         let slides_before = self.project.as_ref().unwrap().slides.clone();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slide_mut(self.view.slide).layers;
         for (li, oi) in sel {
             if let Some(t) = layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                 apply_diff(before, after, t);
@@ -1479,7 +1479,7 @@ impl App {
     pub(super) fn background_handles(&mut self, ui: &mut egui::Ui, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide_idx: usize) {
         if !Self::background_bar_open(ui.ctx()) || slide_idx != self.view.slide { return; }
         let Some(proj) = self.project.as_ref() else { return };
-        let Some(sl) = proj.slides.get(slide_idx) else { return };
+        let Some(sl) = proj.slide_get(slide_idx) else { return };
         let (w, h) = (sl.width, sl.height);
         let Some(Background::Gradient { angle, stops, kind, geom }) = sl.background.clone() else { return };
         let (Some(first), Some(last)) = (stops.first().map(|s| s.1), stops.last().map(|s| s.1)) else { return };
@@ -1526,7 +1526,7 @@ impl App {
             if r.drag_started() { self.snapshot(); }
             let Some(ptr) = r.interact_pointer_pos().filter(|_| r.dragged()) else { continue };
             let p = ((ptr.x - origin.x) / scale, (ptr.y - origin.y) / scale);
-            let Some(Background::Gradient { angle, geom, .. }) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)).and_then(|s| s.background.as_mut()) else { continue };
+            let Some(Background::Gradient { angle, geom, .. }) = self.project.as_mut().and_then(|p| p.slide_get_mut(slide_idx)).and_then(|s| s.background.as_mut()) else { continue };
             if geom.line.is_none() && matches!(kind, Linear | Reflected) { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(*angle, w, h)); }
             match name {
                 "start" => { let (_, b) = geom.line_px(*angle, w, h); *angle = geom.set_line_px(p, b, w, h); }
@@ -1808,7 +1808,7 @@ impl App {
         });
         // Rows and columns, merging and choosing cells: two menus rather than a row of word buttons.
         let mut op = None;
-        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slides[self.view.slide].layers[self.view.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
+        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slide(self.view.slide).layers[self.view.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
         let mut merge = false;
         let mut split = false;
         let mut choose: Option<((u16, u16), (u16, u16))> = None;
@@ -1937,7 +1937,7 @@ impl App {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
                 let id = obj.id.clone();
-                if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.view.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
+                if let Some(o) = self.project.as_mut().and_then(|p| p.slide_get_mut(self.view.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
                 self.dirty = true;
             }
         }
@@ -2172,7 +2172,7 @@ impl App {
         let targets = self.format_targets();
         let Some(p) = self.project.as_mut() else { return };
         for (li, oi) in targets {
-            if let Some(o) = p.slides[self.view.slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+            if let Some(o) = p.slide_mut(self.view.slide).layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                 if o.rich.is_some() { o.format_range(0, usize::MAX, &brainbend_doc::richtext::Attr::Clear); }
             }
         }
@@ -2525,7 +2525,7 @@ impl App {
         let Some((li, oi)) = self.view.selected else { return };
         let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slide_mut(self.view.slide).layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             let n = o.text.chars().count();
             o.format_range(a.min(n), b.min(n), &Attr::Link(url));
             let (t, r) = (o.text.clone(), o.rich.clone());
@@ -2671,14 +2671,14 @@ impl App {
             ui.horizontal(|ui| {
                 if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
                 big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
-                    let current = proj.slides[slide_idx].layout.clone();
+                    let current = proj.slide(slide_idx).layout.clone();
                     for l in proj.layouts.clone() {
                         if ui.selectable_label(current.as_deref() == Some(l.id.as_str()), l.name.as_str()).clicked() { layout_pick = Some(Some(l.id.clone())); ui.close(); }
                     }
                     ui.separator();
                     if ui.selectable_label(current.is_none(), "No layout").clicked() { layout_pick = Some(None); ui.close(); }
                 });
-                let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
+                let cur = (proj.slide(0).width as i32, proj.slide(0).height as i32);
                 big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
                     for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
                         if ui.selectable_label(cur == (w, h), label).clicked() {
@@ -2718,7 +2718,7 @@ impl App {
     pub(super) fn format_selection(&mut self, attr: Attr) {
         let (Some((a, b)), Some((li, oi))) = (self.view.text_sel, self.view.selected) else { return };
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.view.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slide_mut(self.view.slide).layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             o.format_range(a, b, &attr);
             let (t, r) = (o.text.clone(), o.rich.clone());
             for st in o.states.iter_mut() { st.text = t.clone(); st.rich = r.clone(); }
@@ -2735,7 +2735,7 @@ impl App {
         let slide = self.view.slide;
         let Some(p) = self.project.as_mut() else { return };
         for (li, oi) in targets {
-            let Some(o) = p.slides[slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { continue };
+            let Some(o) = p.slide_mut(slide).layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { continue };
             let n = o.text.chars().count();
             match part {
                 Some((a, b)) if primary == Some((li, oi)) => f(o, a.min(n), b.min(n), false),
@@ -2755,7 +2755,7 @@ impl App {
         }
         let Some((li, oi)) = self.view.selected else { return };
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.view.slide];
+        let slide = &mut self.project.as_mut().unwrap().slide_mut(self.view.slide);
         let (sw, sh) = (slide.width, slide.height);
         if let Some(o) = slide.layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
             let (pos, len, span) = if axis == 0 { (&mut o.x, o.w, sw) } else { (&mut o.y, o.h, sh) };

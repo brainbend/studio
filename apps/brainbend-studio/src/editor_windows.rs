@@ -55,7 +55,7 @@ impl App {
 
     /// Open a slide in a window of its own, with a view of its own.
     pub(crate) fn open_slide_window(&mut self, slide_idx: usize) -> Option<u32> {
-        let slide_id = self.project.as_ref()?.slides.get(slide_idx)?.id.clone();
+        let slide_id = self.project.as_ref()?.slide_get(slide_idx)?.id.clone();
         let id = self.add_editor_window(SlideTab::new(slide_id, crate::view::View::default(), self.bottom_tab));
         self.with_window_view(id, |a| a.reset_visibility());
         Some(id)
@@ -105,7 +105,7 @@ impl App {
         std::mem::swap(&mut self.view, &mut other);
         let r = f(self);
         std::mem::swap(&mut self.view, &mut other);
-        let new_slide = self.project.as_ref().and_then(|p| p.slides.get(other.slide.min(p.slides.len().saturating_sub(1)))).map(|s| s.id.clone());
+        let new_slide = self.project.as_ref().and_then(|p| p.slide_get(other.slide.min(p.slides.len().saturating_sub(1)))).map(|s| s.id.clone());
         if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) {
             w.tab.view = other;
             if let Some(s) = new_slide { w.tab.slide_id = s; }
@@ -117,7 +117,7 @@ impl App {
     /// Nothing while the main window is the active one.
     pub(crate) fn active_window_note(&self) -> Option<String> {
         let i = self.window_slide(self.focus_window?)?;
-        Some(format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name))
+        Some(format!("{} {}", self.slide_number(i), self.project.as_ref()?.slide(i).name))
     }
 
     /// Run `f` for the view the panels act on: the editor window that was clicked last, or the main window's.
@@ -137,8 +137,8 @@ impl App {
         let ids: Vec<u32> = self.editor_windows.iter().map(|w| w.id).collect();
         for id in ids {
             let Some(idx) = self.window_slide(id) else { continue };
-            let pano_name = self.editor_windows.iter().find(|w| w.id == id).and_then(|w| w.pano.as_ref()).and_then(|p| self.project.as_ref().and_then(|pr| pr.slides[idx].layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == p.obj_id).map(|o| o.name.clone())));
-            let name = pano_name.clone().unwrap_or_else(|| self.project.as_ref().map(|p| p.slides[idx].name.clone()).unwrap_or_default());
+            let pano_name = self.editor_windows.iter().find(|w| w.id == id).and_then(|w| w.pano.as_ref()).and_then(|p| self.project.as_ref().and_then(|pr| pr.slide(idx).layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == p.obj_id).map(|o| o.name.clone())));
+            let name = pano_name.clone().unwrap_or_else(|| self.project.as_ref().map(|p| p.slide(idx).name.clone()).unwrap_or_default());
             let title = if pano_name.is_some() { name } else { format!("{} {}", self.slide_number(idx), name) };
             let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
             // A window brought back from a saved layout opens where it was and as big as it was.
@@ -372,7 +372,7 @@ impl App {
                     a.view.zoom = num("zoom", 1.0).clamp(0.1, 8.0);
                     let pan = o.get("pan").and_then(|p| p.as_array()).filter(|p| p.len() == 2).map(|p| egui::vec2(p[0].as_f64().unwrap_or(0.0) as f32, p[1].as_f64().unwrap_or(0.0) as f32)).unwrap_or(egui::Vec2::ZERO);
                     a.view.pan = pan;
-                    let layers = a.project.as_ref().map(|p| p.slides[a.view.slide].layers.len()).unwrap_or(1);
+                    let layers = a.project.as_ref().map(|p| p.slide(a.view.slide).layers.len()).unwrap_or(1);
                     a.view.layer = (num("layer", 0.0) as usize).min(layers.saturating_sub(1));
                 });
                 if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) { w.rect = rect; w.placed = rect.is_none(); }

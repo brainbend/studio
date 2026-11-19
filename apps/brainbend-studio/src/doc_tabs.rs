@@ -24,7 +24,7 @@ impl App {
     /// The slide's number, written scene.position, e.g. "1.5".
     pub(crate) fn slide_number(&self, i: usize) -> String {
         let Some(p) = &self.project else { return String::new() };
-        let Some(s) = p.slides.get(i) else { return String::new() };
+        let Some(s) = p.slide_get(i) else { return String::new() };
         let si = p.scenes.iter().position(|c| c.id == s.scene).unwrap_or(0);
         let n = p.scene_slides(si).iter().position(|&x| x == i).map(|k| k + 1).unwrap_or(i + 1);
         format!("{}.{}", si + 1, n)
@@ -32,7 +32,7 @@ impl App {
 
     fn tab_for(&self, slide_idx: usize) -> SlideTab {
         SlideTab {
-            slide_id: self.project.as_ref().map(|p| p.slides[slide_idx].id.clone()).unwrap_or_default(),
+            slide_id: self.project.as_ref().map(|p| p.slide(slide_idx).id.clone()).unwrap_or_default(),
             view: self.view.clone(),
             bottom_tab: self.bottom_tab,
         }
@@ -59,7 +59,7 @@ impl App {
         if self.active_tab.is_some_and(|k| self.tabs[k].slide_id == cur) { return; }
         if let Some(k) = self.tabs.iter().position(|t| t.slide_id == cur) {
             let t = self.tabs[k].clone();
-            let slide = &self.project.as_ref().unwrap().slides[cur_idx];
+            let slide = &self.project.as_ref().unwrap().slide(cur_idx);
             let layers = slide.layers.len();
             // The tab's view comes back, for the slide as it is now: a layer or an object that has gone is dropped.
             let mut v = t.view;
@@ -87,7 +87,7 @@ impl App {
     pub(super) fn save_active_tab(&mut self) {
         if self.in_master_view() || self.scene_view { return; }
         let (Some(k), Some(p)) = (self.active_tab, self.project.as_ref()) else { return };
-        let cur = p.slides[self.view.slide.min(p.slides.len() - 1)].id.clone();
+        let cur = p.slide(self.view.slide.min(p.slides.len() - 1)).id.clone();
         if self.tabs.get(k).is_some_and(|t| t.slide_id == cur) {
             let t = self.tab_for(self.view.slide.min(p.slides.len() - 1));
             self.tabs[k] = t;
@@ -211,7 +211,7 @@ impl App {
         } else {
             self.tabs.iter().filter_map(|t| {
                 let i = self.project.as_ref()?.slides.iter().position(|s| s.id == t.slide_id)?;
-                Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name)))
+                Some((t.slide_id.clone(), format!("{} {}", self.slide_number(i), self.project.as_ref()?.slide(i).name)))
             }).collect()
         };
         // The strip's order: what was kept, then whatever is new. The tabs of the Layout Builder and of a 360° image can be

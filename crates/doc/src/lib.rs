@@ -2079,6 +2079,13 @@ const MAX_PACKAGE_ENTRY: u64 = 512 * 1024 * 1024;
 const MAX_PACKAGE_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
 
 impl Project {
+    /// The slide the editor works on at `i`. Today these are the slides of the project; later the master and the layouts will be reachable by
+    /// the same numbers (see #75), so the editor reads and writes slides through these and not through `slides` directly.
+    pub fn slide(&self, i: usize) -> &Slide { &self.slides[i] }
+    pub fn slide_mut(&mut self, i: usize) -> &mut Slide { &mut self.slides[i] }
+    pub fn slide_get(&self, i: usize) -> Option<&Slide> { self.slides.get(i) }
+    pub fn slide_get_mut(&mut self, i: usize) -> Option<&mut Slide> { self.slides.get_mut(i) }
+
     /// The most recent colors kept.
     pub const RECENT_COLORS: usize = 10;
     /// The most colors a palette holds.

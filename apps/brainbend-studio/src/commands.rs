@@ -308,7 +308,7 @@ impl App {
     /// Every slide of the scene being shown (or every slide, in the Scene View).
     fn select_all_slides(&mut self) {
         let Some(p) = &self.project else { return };
-        let scene = p.slides.get(self.view.slide).map(|s| s.scene.clone());
+        let scene = p.slide_get(self.view.slide).map(|s| s.scene.clone());
         let all = self.scene_view;
         self.slide_multi = p.slides.iter().enumerate().filter(|(i, s)| *i != self.view.slide && (all || Some(&s.scene) == scene.as_ref())).map(|(_, s)| s.id.clone()).collect();
     }
@@ -316,8 +316,8 @@ impl App {
     /// Every object on the layer being worked on.
     fn select_all_objects(&mut self) {
         let Some(p) = &self.project else { return };
-        let li = self.view.layer.min(p.slides[self.view.slide].layers.len().saturating_sub(1));
-        let objects = &p.slides[self.view.slide].layers[li].objects;
+        let li = self.view.layer.min(p.slide(self.view.slide).layers.len().saturating_sub(1));
+        let objects = &p.slide(self.view.slide).layers[li].objects;
         let Some(first) = objects.iter().position(|o| !o.hidden || self.view.show_hidden) else { return };
         let ids: Vec<String> = objects.iter().enumerate().filter(|(k, o)| *k != first && (!o.hidden || self.view.show_hidden)).map(|(_, o)| o.id.clone()).collect();
         self.view.selected = Some((li, first));

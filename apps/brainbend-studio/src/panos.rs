@@ -265,7 +265,7 @@ impl App {
 
     /// A 360° image object for the asset `key` (a picture `w` by `h`).
     pub(super) fn add_pano(&mut self, key: String, name: &str, w: f32, h: f32) {
-        let (sw, sh) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
+        let (sw, sh) = self.project.as_ref().and_then(|p| p.slide_get(self.view.slide)).map(|s| (s.width, s.height)).unwrap_or((1920.0, 1080.0));
         let vw = (sw * 0.66).min(1280.0).round();
         let mut o = blank_object(self.new_id("obj"), "360° image", Kind::Pano(Pano::new()), 0.0, 0.0, vw, (vw * 9.0 / 16.0).min(sh * 0.8).round());
         o.asset = Some(key);
@@ -281,10 +281,10 @@ impl App {
     /// Open the editing mode for the 360° image at (layer, object) of the current slide.
     pub(super) fn open_pano_dialog(&mut self, (li, oi): (usize, usize)) {
         if self.pano.edit.is_some() { return; }
-        let Some(o) = self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
+        let Some(o) = self.project.as_ref().and_then(|p| p.slide_get(self.view.slide)).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (Kind::Pano(p), Some(key)) = (&o.kind, o.asset.clone()) else { return };
         let view = (p.yaw, p.pitch, p.fov);
-        let tab = self.project.as_ref().map(|pr| Tab { slide_id: pr.slides[self.view.slide].id.clone(), obj_id: o.id.clone() });
+        let tab = self.project.as_ref().map(|pr| Tab { slide_id: pr.slide(self.view.slide).id.clone(), obj_id: o.id.clone() });
         self.snapshot();
         self.pano.edit = Some(Edit { target: (li, oi), slide: self.view.slide, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false });
         self.pano.tab = tab;
@@ -297,7 +297,7 @@ impl App {
     /// left alone (its slide, its tabs and its own editing mode). One undo step is taken for the visit, as when the mode opens in the main window.
     pub(super) fn new_pano_session(&mut self, slide_id: &str, obj_id: &str) -> Option<Edit> {
         let (si, li, oi) = self.pano_position(slide_id, obj_id)?;
-        let o = &self.project.as_ref()?.slides[si].layers[li].objects[oi];
+        let o = &self.project.as_ref()?.slide(si).layers[li].objects[oi];
         let (Kind::Pano(p), Some(key)) = (&o.kind, o.asset.clone()) else { return None };
         let view = (p.yaw, p.pitch, p.fov);
         self.snapshot();
@@ -308,7 +308,7 @@ impl App {
     pub(super) fn pano_position(&self, slide_id: &str, obj_id: &str) -> Option<(usize, usize, usize)> {
         let p = self.project.as_ref()?;
         let si = p.slides.iter().position(|s| s.id == slide_id)?;
-        p.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, li, oi)))
+        p.slide(si).layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, li, oi)))
     }
 
     /// Open the editing mode again from its tab. The tab goes if the picture is no longer there.
@@ -318,7 +318,7 @@ impl App {
         self.leave_master_view();
         let found = self.project.as_ref().and_then(|p| {
             let si = p.slides.iter().position(|s| s.id == t.slide_id)?;
-            p.slides[si].layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == t.obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, (li, oi))))
+            p.slide(si).layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == t.obj_id && matches!(o.kind, Kind::Pano(_))).map(|oi| (si, (li, oi))))
         });
         let Some((si, at)) = found else { self.pano.tab = None; return };
         self.view.slide = si;
@@ -343,7 +343,7 @@ impl App {
     /// The 360° image being edited.
     fn edited_object(&mut self) -> Option<&mut Object> {
         let (slide, (li, oi)) = { let e = self.pano.edit.as_ref()?; (e.slide, e.target) };
-        self.project.as_mut()?.slides.get_mut(slide)?.layers.get_mut(li)?.objects.get_mut(oi)
+        self.project.as_mut()?.slide_get_mut(slide)?.layers.get_mut(li)?.objects.get_mut(oi)
     }
 
     /// The settings of the 360° image being edited (a copy).
@@ -418,7 +418,7 @@ impl App {
                 p.pins.remove(i);
                 *select = None;
                 // Triggers that watched it go with it.
-                if let Some(s) = self.project.as_mut().and_then(|pr| pr.slides.get_mut(slide)) {
+                if let Some(s) = self.project.as_mut().and_then(|pr| pr.slide_get_mut(slide)) {
                     s.triggers.retain(|t| !matches!(&t.event, Event::PanoPin(o, q) if o == obj && *q == pin));
                 }
             }
@@ -479,7 +479,7 @@ impl App {
         if let Some(i) = remove {
             let pin = pano.pins.remove(i).id;
             select = None;
-            if let Some(s) = self.project.as_mut().and_then(|pr| pr.slides.get_mut(e.slide)) {
+            if let Some(s) = self.project.as_mut().and_then(|pr| pr.slide_get_mut(e.slide)) {
                 s.triggers.retain(|t| !matches!(&t.event, Event::PanoPin(o, q) if *o == obj_id && *q == pin));
             }
             e.changed = true;
@@ -564,7 +564,7 @@ impl App {
                         let vars = proj.variables.clone();
                         let slide_list: Vec<(String, String)> = proj.slides.iter().map(|s| (s.id.clone(), s.name.clone())).collect();
                         let new_event = select.and_then(|i| pano.pins.get(i)).map(|it| Event::PanoPin(obj_id.clone(), it.id.clone()));
-                        if let Some(s) = proj.slides.get_mut(e.slide) {
+                        if let Some(s) = proj.slide_get_mut(e.slide) {
                             trig_changed = triggers_ui(ui, s, &slide_list, &vars, &Owner::Object(obj_id.clone()), new_event, &mut gen);
                         }
                     }

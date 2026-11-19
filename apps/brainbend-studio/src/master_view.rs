@@ -21,7 +21,7 @@ pub(super) struct MasterStash {
 
 /// Turn a project in master-view form back into a real one.
 fn merge(p: &mut Project, entry: &Snap) {
-    let master = Master { background: p.slides[0].background.clone(), objects: p.slides[0].layers[0].objects.clone() };
+    let master = Master { background: p.slide(0).background.clone(), objects: p.slide(0).layers[0].objects.clone() };
     let layouts: Vec<SlideLayout> = p.slides[1..]
         .iter()
         .filter_map(|s| {
@@ -60,7 +60,7 @@ impl App {
         self.close_pano_edit();
         let Some(p) = self.project.as_mut() else { return };
         let entry = Snap::of(p);
-        let (w, h) = (p.slides[0].width, p.slides[0].height);
+        let (w, h) = (p.slide(0).width, p.slide(0).height);
         let stand_in = |id: String, name: &str, bg: &Option<Background>, objects: &[Object], layout: Option<String>| {
             let mut s = Slide::new(&id, name, w, h);
             s.background = bg.clone();
@@ -141,8 +141,8 @@ impl App {
     pub(super) fn sync_master(&mut self) {
         if self.master_stash.is_none() { return; }
         let Some(p) = self.project.as_mut() else { return };
-        p.master.background = p.slides[0].background.clone();
-        p.master.objects = p.slides[0].layers[0].objects.clone();
+        p.master.background = p.slide(0).background.clone();
+        p.master.objects = p.slide(0).layers[0].objects.clone();
     }
 
     pub(super) fn insert_layout(&mut self, copy_of: Option<usize>) {
@@ -151,10 +151,10 @@ impl App {
         let id = self.new_id("layout");
         let (oid, tid) = (self.new_id("obj"), self.new_id("obj"));
         let p = self.project.as_mut().unwrap();
-        let (w, h) = (p.slides[0].width, p.slides[0].height);
+        let (w, h) = (p.slide(0).width, p.slide(0).height);
         let mut s = match copy_of {
             Some(i) if i > 0 => {
-                let mut s = p.slides[i].clone();
+                let mut s = p.slide(i).clone();
                 s.name = format!("{} copy", s.name);
                 for (n, o) in s.layers[0].objects.iter_mut().enumerate() { o.id = format!("{id}-{n}"); }
                 s
@@ -170,7 +170,7 @@ impl App {
         s.id = format!("m:{id}");
         s.layout = Some(id.clone());
         s.scene = MASTER_SCENE.into();
-        let show_master = copy_of.and_then(|i| p.slides[i].layout.clone()).and_then(|l| p.layout(&l).map(|l| l.show_master)).unwrap_or(true);
+        let show_master = copy_of.and_then(|i| p.slide(i).layout.clone()).and_then(|l| p.layout(&l).map(|l| l.show_master)).unwrap_or(true);
         let mut meta = SlideLayout::new(&id, &s.name);
         meta.show_master = show_master;
         p.layouts.push(meta);
@@ -200,7 +200,7 @@ impl App {
     pub(super) fn insert_placeholder(&mut self, kind: PlaceholderKind) {
         let id = self.new_id("obj");
         let Some(p) = self.project.as_ref() else { return };
-        let (w, h) = (p.slides[self.view.slide].width, p.slides[self.view.slide].height);
+        let (w, h) = (p.slide(self.view.slide).width, p.slide(self.view.slide).height);
         let m = w * 0.06;
         let mut o = brainbend_doc::master::placeholder_object(&id, kind, &p.theme, m, h * 0.3, w - 2.0 * m, h * 0.3);
         o.name = format!("{} placeholder", kind.label());
@@ -224,8 +224,8 @@ impl App {
         // Not trimmed here: a space typed at the end must stay while the name is being typed.
         if name.trim().is_empty() || i == 0 { return; }
         let Some(p) = self.project.as_mut() else { return };
-        if i >= p.slides.len() || p.slides[i].name == name { return; }
-        p.slides[i].name = name.to_string();
+        if i >= p.slides.len() || p.slide(i).name == name { return; }
+        p.slide_mut(i).name = name.to_string();
         self.dirty = true;
     }
 
@@ -252,7 +252,7 @@ impl App {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new("Layouts").weak().size(12.0));
                 }
-                let name = self.project.as_ref().unwrap().slides[i].name.clone();
+                let name = self.project.as_ref().unwrap().slide(i).name.clone();
                 let sel = i == self.view.slide;
                 let thumb = self.slide_thumbnail(ui, ctx, i, tw, sel);
                 if thumb.clicked() || thumb.secondary_clicked() { pick = Some(i); }
@@ -305,7 +305,7 @@ impl App {
         }
         if stop_rename {
             if let Some(i) = self.master_stash.as_mut().and_then(|s| s.rename.take()) {
-                let t = self.project.as_ref().and_then(|p| p.slides.get(i)).map(|s| s.name.trim().to_string());
+                let t = self.project.as_ref().and_then(|p| p.slide_get(i)).map(|s| s.name.trim().to_string());
                 if let Some(t) = t { self.rename_layout(i, &t); }
             }
         }
