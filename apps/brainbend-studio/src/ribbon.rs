@@ -2541,8 +2541,6 @@ impl App {
         for (id, name) in layouts {
             if menu_item(ui, FRAME, &name).clicked() { self.add_slide_with_layout(SlideKind::Normal, Some(id)); ui.close(); }
         }
-        ui.separator();
-        if menu_item(ui, FILE_PLUS, "No layout").clicked() { self.add_slide_with_layout(SlideKind::Normal, None); ui.close(); }
         if menu_item(ui, CHECK, "Results slide").clicked() { self.add_slide(SlideKind::Results); }
     }
 
@@ -2559,8 +2557,6 @@ impl App {
                 for (id, name) in &layouts {
                     if menu_item(ui, FRAME, name).clicked() { pick = Some(Pick::Layout(Some(id.clone()))); ui.close(); }
                 }
-                ui.separator();
-                if menu_item(ui, FILE_PLUS, "No layout").clicked() { pick = Some(Pick::Layout(None)); ui.close(); }
             });
         }
         ui.menu_button(menu_job(ui, RADIO, "Graded question"), |ui| {
@@ -2675,8 +2671,6 @@ impl App {
                     for l in proj.layouts.clone() {
                         if ui.selectable_label(current.as_deref() == Some(l.id.as_str()), l.name.as_str()).clicked() { layout_pick = Some(Some(l.id.clone())); ui.close(); }
                     }
-                    ui.separator();
-                    if ui.selectable_label(current.is_none(), "No layout").clicked() { layout_pick = Some(None); ui.close(); }
                 });
                 let cur = (proj.slide(0).width as i32, proj.slide(0).height as i32);
                 big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
