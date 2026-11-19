@@ -109,6 +109,13 @@ impl App {
         Some(r)
     }
 
+    /// What the Properties panel says while an editor window is the one it acts on: the window's slide, so it is clear where a change goes.
+    /// Nothing while the main window is the active one.
+    pub(crate) fn active_window_note(&self) -> Option<String> {
+        let i = self.window_slide(self.focus_window?)?;
+        Some(format!("{} {}", self.slide_number(i), self.project.as_ref()?.slides[i].name))
+    }
+
     /// Run `f` for the view the panels act on: the editor window that was clicked last, or the main window's.
     pub(crate) fn with_focused_view(&mut self, f: impl FnOnce(&mut App)) {
         match self.focus_window.filter(|id| self.window_slide(*id).is_some()) {
@@ -131,14 +138,18 @@ impl App {
             let title = if pano_name.is_some() { name } else { format!("{} {}", self.slide_number(idx), name) };
             let (mut open, mut closed_here, mut dropped, mut pop_in) = (true, false, None::<egui::Pos2>, false);
             crate::os_window_inner(ctx, &Self::editor_key(id), &title, [1100.0, 760.0], &mut open, false, |ui| {
+                // A window's tab is blue while it is the one the panels act on, and gray while another editor is.
+                let is_pano = self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some());
+                let dim = !is_pano && self.focus_window != Some(id);
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-tab-dim"), dim));
                 let (tab, closed) = doc_tabs::slide_window_tab(ui, &title, if cfg!(target_os = "macos") { 76.0 } else { 0.0 });
+                ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("doc-tab-dim")));
                 if closed { closed_here = true; }
                 // At the right end of the tab row: a button that puts the tab back in the main window's strip.
                 let at = egui::pos2(ui.max_rect().right() - 18.0, tab.rect.center().y);
                 if pop_in_button(ui, at).clicked() { pop_in = true; }
                 dropped = crate::drag_window(ui.ctx(), &tab, "editor-drag-pos");
                 // A press in the window makes it the one the panels and the keys act on.
-                let is_pano = self.editor_windows.iter().any(|w| w.id == id && w.pano.is_some());
                 if !is_pano && ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) { self.focus_window = Some(id); }
                 let ctx = ui.ctx().clone();
                 if is_pano { if !self.pano_window_ui(ui, &ctx, id) { closed_here = true; } return; }

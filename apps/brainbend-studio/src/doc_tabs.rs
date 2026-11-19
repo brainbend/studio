@@ -237,6 +237,8 @@ impl App {
         let dark = root.visuals().dark_mode;
         let band = if dark { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
         let line = root.visuals().selection.bg_fill;
+        // The tab showing in the main window is gray while an editor window is the one the panels act on.
+        root.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-tab-dim"), self.focus_window.is_some_and(|f| self.editor_windows.iter().any(|w| w.id == f && w.pano.is_none()))));
         let strip_panel = egui::Panel::top("doc-tabs").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 })).show_separator_line(false).show(root, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row = ui.horizontal(|ui| {
@@ -303,6 +305,7 @@ impl App {
             ui.painter().rect_filled(full, 0.0, line);
             open_under_active_tab(ui, full);
         });
+        root.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("doc-tab-dim")));
         // Where the strip is, so a slide's window carried over it can be put back.
         root.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-strip-rect"), strip_panel.response.rect));
         if let Some((from, to)) = moved_tab { self.move_strip(from, to); }
@@ -527,7 +530,8 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
     let text = ui.visuals().text_color();
     // Panel tabs are a blue block with white text; document tabs are lifted off the band, with the theme's own text.
     let blue = active && !doc;
-    let ink = if blue { egui::Color32::WHITE } else if active { ui.visuals().strong_text_color() } else { text.gamma_multiply(0.7) };
+    let dimmed: bool = doc && active && ui.ctx().data(|d| d.get_temp(egui::Id::new("doc-tab-dim"))).unwrap_or(false);
+    let ink = if blue { egui::Color32::WHITE } else if dimmed { text.gamma_multiply(0.75) } else if active { ui.visuals().strong_text_color() } else { text.gamma_multiply(0.7) };
     // Round the top corners only, like the ribbon tabs above; the bottom edge stays square on the line under the strip.
     let top_round = egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 };
     if blue {
@@ -537,7 +541,9 @@ fn tab_chip_ex(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool,
         // strip, so it joins what is below it. (The line under the strip is left out beneath it: see `open_under_active_tab`.)
         let fill = if dark { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
         ui.painter().rect_filled(rect, top_round, fill);
-        let blue = ui.visuals().selection.bg_fill;
+        // Blue while its editor is the one the panels act on; gray while another editor is (see `doc-tab-dim`).
+        let dim: bool = ui.ctx().data(|d| d.get_temp(egui::Id::new("doc-tab-dim"))).unwrap_or(false);
+        let blue = if dim { text.gamma_multiply(0.4) } else { ui.visuals().selection.bg_fill };
         ui.painter().add(egui::Shape::line(open_bottom_outline(rect.shrink(0.75), 4.0), egui::Stroke::new(1.5, blue)));
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("doc-tab-active"), Some((rect, fill))));
     } else if ui.rect_contains_pointer(rect) {

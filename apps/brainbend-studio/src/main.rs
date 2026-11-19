@@ -1519,6 +1519,7 @@ impl App {
                 // With no object chosen, the panel is about the layer picked in the list below, or the slide when that is the base layer.
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(if layer_idx > 0 { "LAYER" } else { "SLIDE" }).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                    if let Some(n) = self.active_window_note() { ui.add(egui::Label::new(egui::RichText::new(format!("· {n}")).weak().size(12.0)).truncate()); }
                     if layer_idx > 0 {
                         let name = self.project.as_ref().and_then(|p| p.slides.get(slide_idx)).and_then(|s| s.layers.get(layer_idx)).map(|l| l.name.clone()).unwrap_or_default();
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add(egui::Label::new(egui::RichText::new(name).weak()).truncate()); });
@@ -1749,6 +1750,7 @@ impl App {
             let num_vars: Vec<(String, String)> = self.project.as_ref().unwrap().variables.iter().filter(|v| !v.built_in && matches!(v.initial, Value::Num(_))).map(|v| (v.id.clone(), v.name.clone())).collect();
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 0u8));
             let kind_title = self.format_title();
+            let editor_note = self.active_window_note();
             let can_paste = self.style_clip.is_some();
             let proj = self.project.as_mut().unwrap();
             // Slides are small (assets live on the project), so a per-frame copy is cheap.
@@ -1765,6 +1767,7 @@ impl App {
             ui.horizontal(|ui| {
                 let title = kind_title.map(str::to_string).unwrap_or_else(|| kind_name(&obj.kind).to_uppercase());
                 ui.label(egui::RichText::new(title).strong().size(12.5).color(egui::Color32::from_rgb(70, 150, 230)));
+                if let Some(n) = editor_note.as_ref() { ui.add(egui::Label::new(egui::RichText::new(format!("· {n}")).weak().size(12.0)).truncate()); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ribbon::format_panel::expand_buttons(ui);
                     let (copy, paste) = ribbon::format_panel::style_buttons(ui, can_paste);
@@ -12817,6 +12820,35 @@ mod tests {
         let id = a.pop_out_pano_tab().unwrap();
         a.close_editor_window(id);
         assert_eq!(a.undo.len(), before - 1, "the visit's undo step goes when nothing was changed");
+    }
+
+    #[test]
+    fn the_active_editor_is_marked_by_its_tab_and_by_the_properties_heading() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.add_slide(SlideKind::Normal);
+        a.view.slide = 0;
+        a.view.selected = None;
+        a.new_tab_request = true;
+        a.sync_tabs();
+        let id = a.open_slide_window(1).unwrap();
+        a.focus_window = None;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().active_window_note().is_none(), "the main window is the active editor: the heading says nothing about a window");
+        assert!(h.query_all_by_label_contains("· 1.2").next().is_none());
+        // A press in the window makes it the active editor: the panels say whose slide they are about.
+        h.state_mut().focus_window = Some(id);
+        h.run_steps(3);
+        assert_eq!(h.state().active_window_note().as_deref(), Some("1.2 Slide 2"));
+        assert!(h.query_all_by_label_contains("· 1.2 Slide 2").next().is_some(), "the Properties heading names the window's slide");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("active-window.png")).unwrap(); }
+        // A press in the main window gives the panels back to it.
+        click_at(&mut h, egui::pos2(700.0, 120.0));
+        h.run_steps(3);
+        assert!(h.state().focus_window.is_none(), "a press in the main window makes it the active editor again");
+        h.run_steps(3);
+        assert!(h.query_all_by_label_contains("· 1.2 Slide 2").next().is_none(), "the note goes with the focus");
     }
 
     #[test]
