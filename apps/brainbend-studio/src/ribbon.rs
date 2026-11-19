@@ -1219,6 +1219,7 @@ impl App {
         // The harness draws a first frame before fonts exist; the icon font is needed from here on.
         if !ctx.fonts(|f| f.families().contains(&icons())) { return; }
         self.sync_color_events(ctx);
+        if self.caption { self.caption_bar(root, ctx); }
         if self.merged_bar { self.window_bar(root, ctx); } else { self.title_bar(root, ctx); self.menu_bar(root); }
         self.run_format_painter(ctx);
         // The Quick Styles are built from the theme's colors.
@@ -1473,17 +1474,18 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_space(if cfg!(target_os = "macos") { 76.0 } else { 4.0 });
                 if has { self.quick_icons(ui, false); }
-                self.bar_actions(ui, ctx, true);
+                self.bar_actions(ui, ctx, true, 10.0);
             });
         });
     }
 
     /// The row's right end: the theme toggle, then Try It, Preview and Publish at its far right (and the update button to the left of the toggle).
     /// `hang` is for a bar with nothing above it, where they hang from the window's top edge; in a bar below a title bar of the system's they are ordinary buttons.
-    pub(crate) fn bar_actions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, hang: bool) {
+    /// `gap` is the room left at the right end. Returns the room the buttons took.
+    pub(crate) fn bar_actions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, hang: bool, gap: f32) -> egui::Rect {
         let shape = tab_shape(hang);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(if hang { 10.0 } else { 6.0 });
+            ui.add_space(gap);
             // Publish, Preview and Try It live here.
             if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
                 let master = self.in_master_view();
@@ -1512,7 +1514,7 @@ impl App {
                 alert.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
                 if alert.clicked() { self.updater.dialog_open = true; }
             }
-        });
+        }).response.rect
     }
 
     /// Save, Undo, Redo and Find. `neutral` draws them in the text color, to sit with the menus, instead of in their own colors.

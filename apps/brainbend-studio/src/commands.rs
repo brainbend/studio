@@ -301,13 +301,15 @@ impl App {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.set_min_height(28.0);
                 self.menu_buttons(ui, &mut run);
-                if self.project.is_some() {
+                // With a caption bar of its own the icons are up there beside the app's icon.
+                if self.project.is_some() && !self.caption {
                     ui.add_space(6.0);
                     ui.separator();
                     ui.add_space(2.0);
                     self.quick_icons(ui, true);
                 }
-                self.bar_actions(ui, ctx, false);
+                // (With a caption bar of its own they are up there, beside the window's buttons.)
+                if !self.caption { self.bar_actions(ui, ctx, false, 6.0); }
             });
             if let Some(c) = run { self.run_cmd(c); }
         });
