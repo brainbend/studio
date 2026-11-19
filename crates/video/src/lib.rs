@@ -70,9 +70,19 @@ fn install_dir(c: &Component) -> Option<PathBuf> {
     Some(home_dir()?.join(".brainbend-studio").join("components").join(format!("ffmpeg-{}", c.version)))
 }
 
+/// A command for `program` that does not open a console window when it starts. The app has no console of its own on Windows, so a program
+/// that is run from it would otherwise show one for as long as it runs.
+pub fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); }
+    c
+}
+
 /// Whether `program` starts and says its version.
 fn runs(program: &Path) -> bool {
-    Command::new(program).arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    quiet_command(program).arg("-version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
 /// Where else ffmpeg might live: on the PATH, or where Homebrew and the common installers put it (an app started from
@@ -103,7 +113,7 @@ pub fn needs_download() -> Option<Component> {
 
 /// A command that runs ffmpeg quietly with no input, or `None` without an ffmpeg.
 pub fn command() -> Option<Command> {
-    let mut c = Command::new(ffmpeg()?);
+    let mut c = quiet_command(ffmpeg()?);
     c.args(["-nostdin", "-hide_banner", "-loglevel", "error"]).stdin(Stdio::null());
     Some(c)
 }

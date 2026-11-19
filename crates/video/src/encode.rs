@@ -6,7 +6,7 @@
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::Duration;
@@ -152,7 +152,7 @@ fn parse_clock(s: &str) -> Option<u64> {
 /// there or cannot read the file.
 pub fn probe(path: &Path) -> Option<MediaInfo> {
     // The details are printed at the normal log level; ffmpeg then complains it has no output file, which is fine.
-    let out = Command::new(crate::ffmpeg()?).args(["-nostdin", "-hide_banner", "-i"]).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output().ok()?;
+    let out = crate::quiet_command(crate::ffmpeg()?).args(["-nostdin", "-hide_banner", "-i"]).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output().ok()?;
     parse_probe(&String::from_utf8_lossy(&out.stderr))
 }
 
@@ -169,7 +169,7 @@ pub fn run(job: &Job, progress: &mut dyn FnMut(u64), cancel: &AtomicBool) -> Res
         std::fs::write(list_path(job, k), concat_list(pictures)).map_err(|e| format!("could not prepare the video: {e}"))?;
     }
     let part = job.output.with_extension("mp4.part");
-    let mut child = Command::new(program)
+    let mut child = crate::quiet_command(program)
         .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
         .args(args(job, &part))
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
@@ -214,6 +214,7 @@ pub fn run(job: &Job, progress: &mut dyn FnMut(u64), cancel: &AtomicBool) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     fn job(sounds: Vec<(PathBuf, Clip)>) -> Job {
         Job {

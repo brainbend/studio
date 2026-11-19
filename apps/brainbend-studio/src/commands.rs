@@ -286,38 +286,64 @@ impl App {
             let mut run: Option<Cmd> = None;
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.set_min_height(26.0);
-                ui.spacing_mut().item_spacing.x = 2.0;
-                ui.spacing_mut().button_padding = egui::vec2(9.0, 3.0);
-                ui.add_space(4.0);
-                for (name, items) in menus() {
-                    ui.menu_button(name, |ui| {
-                        ui.set_min_width(210.0);
-                        for item in items {
-                            match item {
-                                Item::Gap => { ui.separator(); }
-                                Item::Gallery => { if self.project.is_some() && !self.try_mode { self.insert_menu(ui); } else { ui.weak("Open a project to add objects"); } }
-                                Item::Sub(name, cmds) => {
-                                    ui.menu_button(name, |ui| {
-                                        for c in cmds {
-                                            let mut button = egui::Button::new(c.label());
-                                            if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
-                                            if ui.add_enabled(self.cmd_enabled(c), button).clicked() { run = Some(c); ui.close(); }
-                                        }
-                                    });
-                                }
-                                Item::Do(c) => {
-                                    let mut button = egui::Button::new(c.label());
-                                    if let Some(sc) = c.shortcut() { button = button.shortcut_text(sc); }
-                                    if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
-                                    if ui.add_enabled(self.cmd_enabled(c), button).clicked() { run = Some(c); ui.close(); }
-                                }
-                            }
-                        }
-                    });
-                }
+                self.menu_buttons(ui, &mut run);
             });
             if let Some(c) = run { self.run_cmd(c); }
         });
+    }
+
+    /// The one bar of Windows and Linux, below the system's own title bar: the menus, then Save, Undo, Redo and Find, and at the right the theme
+    /// toggle, Try It, Preview and Publish as ordinary buttons. (On a Mac the title bar and the menus of the system take these places.)
+    pub(crate) fn window_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
+        let bg = root.visuals().panel_fill;
+        egui::Panel::top("menubar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 4))).show_separator_line(false).show(root, |ui| {
+            let mut run: Option<Cmd> = None;
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.set_min_height(28.0);
+                self.menu_buttons(ui, &mut run);
+                if self.project.is_some() {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(2.0);
+                    self.quick_icons(ui, true);
+                }
+                self.bar_actions(ui, ctx, false);
+            });
+            if let Some(c) = run { self.run_cmd(c); }
+        });
+    }
+
+    /// The menus as buttons that open their lists; a command that is chosen is left in `run`.
+    fn menu_buttons(&mut self, ui: &mut egui::Ui, run: &mut Option<Cmd>) {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().button_padding = egui::vec2(9.0, 3.0);
+        ui.add_space(4.0);
+        for (name, items) in menus() {
+            ui.menu_button(name, |ui| {
+                ui.set_min_width(210.0);
+                for item in items {
+                    match item {
+                        Item::Gap => { ui.separator(); }
+                        Item::Gallery => { if self.project.is_some() && !self.try_mode { self.insert_menu(ui); } else { ui.weak("Open a project to add objects"); } }
+                        Item::Sub(name, cmds) => {
+                            ui.menu_button(name, |ui| {
+                                for c in cmds {
+                                    let mut button = egui::Button::new(c.label());
+                                    if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
+                                    if ui.add_enabled(self.cmd_enabled(c), button).clicked() { *run = Some(c); ui.close(); }
+                                }
+                            });
+                        }
+                        Item::Do(c) => {
+                            let mut button = egui::Button::new(c.label());
+                            if let Some(sc) = c.shortcut() { button = button.shortcut_text(sc); }
+                            if let Some(on) = self.cmd_checked(c) { button = button.selected(on); }
+                            if ui.add_enabled(self.cmd_enabled(c), button).clicked() { *run = Some(c); ui.close(); }
+                        }
+                    }
+                }
+            });
+        }
     }
 
     /// Every slide of the scene being shown (or every slide, in the Scene View).

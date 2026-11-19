@@ -1,3 +1,6 @@
+// A release build on Windows is a window program: without this, Windows opens a console window with it, and closing that closes the app.
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -232,6 +235,8 @@ struct App {
     bottom_height_saved: f32,
     /// The last size written to the settings for each side or top panel (by its id), so a drag is written once.
     panel_sizes_saved: HashMap<String, f32>,
+    /// Windows and Linux: the menus, Save/Undo/Redo/Find and the buttons at the right are one bar under the system's title bar (see `window_bar`).
+    merged_bar: bool,
     /// Where the tabs are: groups in the side and bottom panels, and which are windows. Remembered per person.
     dock: dock::Layout,
     /// The Scene View tabs, as their keys in the strip ("scene:0", ...). None until the strip is first drawn, which makes the first one.
@@ -518,7 +523,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(),
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(),
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -12466,6 +12471,33 @@ mod tests {
         assert_eq!(parse_panel_size(None, 250.0, 200.0), 250.0);
         assert_eq!(parse_panel_size(Some("12"), 250.0, 200.0), 250.0, "too small to be right");
         assert_eq!(parse_panel_size(Some("wide"), 250.0, 200.0), 250.0);
+    }
+
+    #[test]
+    fn on_windows_and_linux_one_bar_holds_the_menus_the_quick_icons_and_the_buttons() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.merged_bar = true;
+        a.file_view = false;
+        a.view.selected = None;
+        let mut h = harness(a);
+        h.run_steps(5);
+        for label in ["File", "Edit", "Window", "Try It", "Preview", "Publish"] {
+            assert!(h.query_all_by_label(label).next().is_some(), "{label} is in the bar");
+        }
+        // The menus are at the left and the buttons at the right, in one row.
+        let (x, y) = |l: &str| -> (f32, f32) {
+            use egui_kittest::kittest::NodeT;
+            let b = h.get_all_by_label(l).next().unwrap().accesskit_node().raw_bounds().unwrap();
+            (b.x0 as f32, b.y0 as f32)
+        }("File");
+        let (px, py) = {
+            use egui_kittest::kittest::NodeT;
+            let b = h.get_all_by_label("Publish").next().unwrap().accesskit_node().raw_bounds().unwrap();
+            (b.x0 as f32, b.y0 as f32)
+        };
+        assert!(px > x + 400.0 && (py - y).abs() < 12.0, "one row: File at ({x}, {y}), Publish at ({px}, {py})");
+        if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("window-bar.png")).unwrap(); }
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! The frame comes from the `ffmpeg` that ships with the app (or, failing that, one installed on the machine); without
 //! either a video simply has no still, as before.
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use brainbend_doc::{Asset, Kind, Project};
 use brainbend_video::ffmpeg;
 
@@ -19,7 +19,7 @@ pub fn video_still_from_file(path: &Path) -> Option<Vec<u8>> {
     let result = (|| {
         for seek in [seek.as_str()] {
             let _ = std::fs::remove_file(&output);
-            let ok = Command::new(&ffmpeg)
+            let ok = brainbend_video::quiet_command(&ffmpeg)
                 .args(["-nostdin", "-loglevel", "error", "-y", "-ss", seek, "-i"]).arg(path)
                 .args(["-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4"]).arg(&output)
                 .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
@@ -57,7 +57,7 @@ pub fn video_still_at(bytes: &[u8], secs: f64) -> Option<Vec<u8>> {
         std::fs::write(&input, bytes).ok()?;
         for seek in [seek.as_str()] {
             let _ = std::fs::remove_file(&output);
-            let ok = Command::new(&ffmpeg)
+            let ok = brainbend_video::quiet_command(&ffmpeg)
                 .args(["-nostdin", "-loglevel", "error", "-y", "-ss", seek, "-i"]).arg(&input)
                 .args(["-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "4"]).arg(&output)
                 .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
@@ -106,6 +106,7 @@ pub fn add_stills(project: &mut Project) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     /// A one-second test clip, made with ffmpeg itself; the tests are skipped where ffmpeg is not installed.
     fn clip() -> Option<Vec<u8>> {
