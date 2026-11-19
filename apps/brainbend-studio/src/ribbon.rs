@@ -23,10 +23,7 @@ pub const JUSTIFY: char = '\u{e482}';
 pub const FUNCTION: char = '\u{ebe4}';
 pub const PIN: char = '\u{e316}';
 pub const THUMBTACK: char = '\u{e3e2}';
-pub const MENU: char = '\u{e2f0}';
 pub const GEAR: char = '\u{e270}';
-pub const PLUS: char = '\u{e3d4}';
-pub const BOLT: char = '\u{e2de}';
 pub const GAUGE: char = '\u{e628}';
 pub const HASH: char = '\u{e2a2}';
 pub const STAR: char = '\u{e46a}';
@@ -36,7 +33,6 @@ pub const PANORAMA: char = '\u{eaa2}';
 pub const STRIKE: char = '\u{e5c2}';
 pub const INDENT_OUT: char = '\u{e062}';
 pub const INDENT_IN: char = '\u{e064}';
-pub const SPELL: char = '\u{e182}';
 pub const ALIGN_L: char = '\u{e484}';
 pub const ALIGN_C: char = '\u{e480}';
 pub const ALIGN_R: char = '\u{e486}';
@@ -84,9 +80,6 @@ pub const MAGNIFY: char = '\u{e30c}';
 pub const ACCESS: char = '\u{e4e8}';
 pub const MOON: char = '\u{e330}';
 pub const BOOK_OPEN: char = '\u{e0e6}';
-pub const BUG: char = '\u{e5f4}';
-pub const DISCORD: char = '\u{e61a}';
-pub const REFRESH: char = '\u{e094}';
 pub const WARNING_CIRCLE: char = '\u{e4e2}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const ARROW_DOWN: char = '\u{e03e}';
@@ -407,16 +400,6 @@ fn grow_job(ui: &egui::Ui, up: bool) -> egui::text::LayoutJob {
     job
 }
 
-/// An icon followed by a short label, for small buttons that have both.
-fn caret_job_plain(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
-    let col = text_col(ui);
-    let mut job = egui::text::LayoutJob::default();
-    job.append(&icon.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: tint(icon), ..Default::default() });
-    job.append("  ", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    job.append(text, 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    job
-}
-
 /// An icon and a word in the menu's own color, for a row of a dropdown.
 fn menu_job(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
     let col = text_col(ui);
@@ -498,11 +481,6 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 
 /// The tabs, left to right. Everything about the chosen slide or
 /// object is in the Properties panel; the ribbon is for adding things and for the project as a whole.
-pub const TABS: [&str; 5] = ["File", "Project", "Slides", "Objects", "Help"];
-pub const PROJECT_TAB: usize = 1;
-pub const SLIDES_TAB: usize = 2;
-pub const OBJECTS_TAB: usize = 3;
-pub const HELP_TAB: usize = 4;
 pub(crate) const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
@@ -1136,12 +1114,10 @@ fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
 /// What the Studio Settings controls change: copies of the settings, applied by `App::apply_settings` after the controls are drawn.
 pub(crate) struct SettingsDraft {
     one: bool,
-    hover: bool,
     each_tab: bool,
     preset: Option<crate::dock::Preset>,
     menu_bar: bool,
     insert_bar: bool,
-    ribbon: bool,
     panels: crate::prefs::Panels,
 }
 
@@ -1149,9 +1125,7 @@ pub(crate) struct SettingsDraft {
 pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
         ui.label(egui::RichText::new("Windows and panels").strong());
         ui.checkbox(&mut d.one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
-        ui.checkbox(&mut d.hover, "Open the ribbon when the pointer rests on a tab").on_hover_text("Otherwise a tab opens the ribbon when you click it. The pin at the right of the tabs keeps the ribbon open.");
         ui.checkbox(&mut d.each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
-        ui.checkbox(&mut d.ribbon, "Show the ribbon").on_hover_text("The tabs of File, Project, Slides, Objects and Help. Everything on it is also in the menus and the insert bar");
     ui.checkbox(&mut d.insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
         ui.checkbox(&mut d.menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
         ui.add_space(10.0);
@@ -1230,7 +1204,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Everything above the canvas: title bar, tab strip and the ribbon card.
+    /// Everything above the canvas: the title bar, the menu bar and the tab strip.
     pub(super) fn chrome(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         // The harness draws a first frame before fonts exist; the icon font is needed from here on.
         if !ctx.fonts(|f| f.families().contains(&icons())) { return; }
@@ -1242,163 +1216,11 @@ impl App {
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
-        // Without the ribbon the tab strip and the card are gone; Try It, Preview and Publish move up into the title bar.
-        if !self.ribbon_visible() { self.doc_tabs(root); return; }
-        let bg = root.visuals().panel_fill;
-        let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-        // The ribbon is for adding things and for the project as a whole. It stays closed until a tab is clicked (or rested
-        // on, if that is chosen), and closes again after; the pin keeps it open.
-        let pinned = self.ribbon_pinned;
-        let shown = pinned || self.ribbon_open;
-        let mut clicked_tab: Option<usize> = None;
-        let mut hovered_tab: Option<usize> = None;
-        let strip = egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let master = self.in_master_view() || self.pano.edit.is_some();
-                // The Layout Builder and the 360° editing mode offer File, Project and Objects: what goes on a layout or a picture
-                // is added from the same tab.
-                let order: Vec<usize> = if master { vec![0, PROJECT_TAB, OBJECTS_TAB] } else { (0..TABS.len()).collect() };
-                if !order.contains(&self.ribbon_tab) { self.ribbon_tab = OBJECTS_TAB; }
-                for i in order {
-                    let name = TABS[i];
-                    let sel = shown && self.ribbon_tab == i && i != 0;
-                    let font = egui::FontId::proportional(14.0);
-                    let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
-                    // Each tab has a small icon before its name (the Layout Builder tab has none).
-                    let tab_icon = match i { 0 => Some(MENU), PROJECT_TAB => Some(GEAR), SLIDES_TAB | OBJECTS_TAB => Some(PLUS), HELP_TAB => Some(QUESTION), _ => None };
-                    let lead = if tab_icon.is_some() { 20.0 } else { 0.0 };
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0 + lead, 26.0), egui::Sense::click());
-                    let text_x = rect.center().x + lead / 2.0;
-                    let icon_x = rect.left() + 11.0 + 7.0;
-                    if sel {
-                        // Cut from the ribbon: the card's own color, reaching down to meet the card, with a blue line under the label.
-                        let blue = ui.visuals().selection.bg_fill;
-                        let over = ui.painter().with_clip_rect(ui.clip_rect().expand2(egui::vec2(0.0, 4.0)));
-                        let joined = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.bottom() + 2.0));
-                        over.rect_filled(joined, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, card);
-                        if let Some(ic) = tab_icon { over.text(egui::pos2(icon_x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, ic, egui::FontId::new(14.0, icons()), ui.visuals().strong_text_color()); }
-                        let label = over.text(egui::pos2(text_x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, name, font, ui.visuals().strong_text_color());
-                        // The line glides from the tab it was under to this one.
-                        let ctx = ui.ctx().clone();
-                        let left = ctx.animate_value_with_time(egui::Id::new("tab-line-left"), if tab_icon.is_some() { icon_x - 7.0 } else { label.left() }, 0.18);
-                        let right = ctx.animate_value_with_time(egui::Id::new("tab-line-right"), label.right(), 0.18);
-                        over.rect_filled(egui::Rect::from_min_max(egui::pos2(left, label.bottom() + 2.0), egui::pos2(right, label.bottom() + 4.5)), 1.0, blue);
-                    } else {
-                        if resp.hovered() { ui.painter().rect_filled(rect, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, ui.visuals().text_color().gamma_multiply(0.10)); }
-                        if let Some(ic) = tab_icon { ui.painter().text(egui::pos2(icon_x, rect.center().y), egui::Align2::CENTER_CENTER, ic, egui::FontId::new(14.0, icons()), ui.visuals().text_color()); }
-                        ui.painter().text(egui::pos2(text_x, rect.center().y), egui::Align2::CENTER_CENTER, name, font, ui.visuals().text_color());
-                    }
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-                    if resp.clicked() {
-                        if i == 0 { self.leave_master_view(); self.close_pano_edit(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { clicked_tab = Some(i); }
-                    } else if self.ribbon_hover && i != 0 && resp.hovered() && !ui.input(|i| i.pointer.any_down()) {
-                        hovered_tab = Some(i);
-                    }
-                }
-                // Try It, Preview and Publish are always in reach, and the pin that keeps the ribbon open.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.tab_actions(ui, master));
-            });
-        });
-        if let Some(i) = clicked_tab {
-            if pinned { self.ribbon_tab = i; }
-            else if self.ribbon_open && self.ribbon_tab == i { self.ribbon_open = false; }
-            else { self.ribbon_tab = i; self.ribbon_open = true; }
-            ctx.request_repaint();
-        } else if let Some(i) = hovered_tab {
-            if !pinned && !(self.ribbon_open && self.ribbon_tab == i) { self.ribbon_tab = i; self.ribbon_open = true; ctx.request_repaint(); }
-        }
-        let strip_rect = strip.response.rect;
-        if pinned {
-            egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 6 })).show_separator_line(false).show(root, |ui| {
-                self.ribbon_card(ui, ctx, card);
-            });
-        } else if self.ribbon_open {
-            // Over the slide, so nothing below it moves.
-            let width = (root.max_rect().width() - 16.0).max(200.0);
-            let area = egui::Area::new(egui::Id::new("ribbon-overlay")).order(egui::Order::Foreground).fixed_pos(egui::pos2(8.0, strip_rect.bottom())).show(ctx, |ui| {
-                egui::Frame::new().corner_radius(RIBBON_RADIUS as u8).shadow(egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(90) }).show(ui, |ui| {
-                    ui.set_width(width);
-                    self.ribbon_card(ui, ctx, card);
-                });
-            });
-            let rects = [strip_rect, area.response.rect];
-            let (pressed, pos, escape) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.key_pressed(egui::Key::Escape)));
-            let popup = egui::Popup::is_any_open(ctx);
-            let inside = pos.is_some_and(|p| rects.iter().any(|r| r.expand(2.0).contains(p)));
-            if (pressed && !inside && !popup) || (escape && !popup) { self.ribbon_open = false; self.ribbon_left_at = None; }
-            // Choosing something in the ribbon closes it (unless it is pinned) so what the choice opened is not hidden by it.
-            // A choice that opens a drop-down waits: the ribbon closes when the drop-down does.
-            let flag = egui::Id::new("ribbon-popup-seen");
-            let picked = ctx.interaction_snapshot(|s| s.clicked).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == area.response.layer_id);
-            let waiting: bool = ctx.data(|d| d.get_temp(flag)).unwrap_or(false);
-            if popup { ctx.data_mut(|d| d.insert_temp(flag, true)); }
-            else if picked || waiting { ctx.data_mut(|d| d.remove_temp::<bool>(flag)); self.ribbon_open = false; self.ribbon_left_at = None; ctx.request_repaint(); }
-            // Opened by resting on a tab: it also closes when the pointer has gone away from it.
-            if self.ribbon_hover {
-                if inside || popup || ctx.input(|i| i.pointer.any_down()) { self.ribbon_left_at = None; }
-                else {
-                    let now = ctx.input(|i| i.time);
-                    let since = *self.ribbon_left_at.get_or_insert(now);
-                    if now - since > 0.4 { self.ribbon_open = false; self.ribbon_left_at = None; }
-                    else { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
-                }
-            }
-        } else {
-            ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("ribbon-popup-seen")));
-        }
         if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
         self.doc_tabs(root);
     }
 
-    /// The ribbon's card: the chosen tab's groups, scrolling sideways when they are wider than the window.
-    fn ribbon_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, card: egui::Color32) {
-        egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
-            flat(ui);
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
-            let normal = self.project.is_some();
-            let full = ui.available_rect_before_wrap();
-            let h = BIG_H + CAP_H + 8.0;
-            // The pin that keeps the ribbon open sits in the card bottom right corner.
-            let pin_w = 28.0;
-            let left = egui::Rect::from_min_size(full.min, egui::vec2((full.width() - pin_w).max(80.0), h));
-            {
-                let at = egui::Rect::from_min_size(egui::pos2(full.right() - 24.0, full.top() + h - 24.0), egui::vec2(22.0, 22.0));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                    let tip = if self.ribbon_pinned { "The ribbon stays open under the tabs. Click to let it close again" } else { "Keep the ribbon open under the tabs" };
-                    if icon_button(ui, THUMBTACK, self.ribbon_pinned, tip).clicked() {
-                        self.ribbon_pinned = !self.ribbon_pinned;
-                        self.ribbon_open = false;
-                        crate::prefs::set_bool("ribbon_pinned", self.ribbon_pinned);
-                    }
-                });
-            }
-            ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
-                egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        ui.set_min_height(BIG_H);
-                        ui.spacing_mut().item_spacing.x = 3.0;
-                        ui.add_enabled_ui(!self.try_mode, |ui| {
-                            match self.ribbon_tab {
-                                OBJECTS_TAB if self.pano.edit.is_some() => self.pano_insert_group(ui),
-                                OBJECTS_TAB => self.insert_tab(ui, normal),
-                                SLIDES_TAB => self.slides_tab(ui, ctx),
-                                PROJECT_TAB => { self.design_tab(ui, ctx); self.review_tab(ui, ctx); self.course_group(ui, ctx); self.studio_group(ui); }
-                                HELP_TAB => self.help_tab(ui),
-                                _ => self.design_tab(ui, ctx),
-                            }
-                        });
-                    });
-                });
-            });
-            ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
-        });
-    }
 
-    /// The right end of the tab strip, right to left: Publish, Preview and Try It. (The Layout Builder shows
-    /// neither: those are for the finished lesson, and its ribbon cannot be closed.)
-    /// Whether the ribbon is on screen: when it is switched on, and always while a 360° image is edited (what goes on the picture is added from it).
-    pub(crate) fn ribbon_visible(&self) -> bool { self.show_ribbon || self.pano.edit.is_some() }
 
     fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
         if master { return; }
@@ -1426,20 +1248,6 @@ impl App {
         }
     }
 
-    /// What the Objects tab offers while a 360° image is being edited: the things that go on the picture. Everything about
-    /// the chosen one is in the Properties panel.
-    fn pano_insert_group(&mut self, ui: &mut egui::Ui) {
-        use panos::Cmd;
-        let drawing = self.pano.edit.as_ref().is_some_and(|e| matches!(e.tool, panos::Tool::Draw(_)));
-        let mut cmd: Option<Cmd> = None;
-        group(ui, "360° Image", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, PIN, "Marker", "A round button on the picture").clicked() { cmd = Some(Cmd::AddMarker); }
-                if big_toggle(ui, NODES, "Hotspot", "Draw a shaded area on the picture, corner by corner", drawing).clicked() { cmd = Some(Cmd::StartHotspot); }
-            });
-        });
-        if let Some(c) = cmd { self.pano_cmd(c); }
-    }
 
     /// Take what the color menus left for the app: a color to add to the palette, a color that was just used, a request to edit
     /// the palette. (The menus have no access to the project, so they leave notes.)
@@ -1669,8 +1477,8 @@ impl App {
                     if toggle.clicked() {
                         ctx.set_theme(if dark { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
                     }
-                    // Without the ribbon, Publish, Preview and Try It live here.
-                    if self.project.is_some() && !self.file_view && !self.ribbon_visible() && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+                    // Publish, Preview and Try It live here.
+                    if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
                         let master = self.in_master_view();
                         ui.add_space(6.0);
                         self.tab_actions(ui, master);
@@ -1694,27 +1502,19 @@ impl App {
         });
     }
 
-    /// The app's own settings, which follow the person and not the project.
-    fn studio_group(&mut self, ui: &mut egui::Ui) {
-        group(ui, "Studio", |ui| {
-            if big_button(ui, GEAR, "Studio\nSettings", "How Studio looks and behaves for you: windows, panels and what shows").clicked() { self.open_file_page(backstage::FilePage::Settings); }
-        });
-    }
 
     /// The settings as they are now, for the controls to change; `apply_settings` puts what they changed back.
     pub(crate) fn settings_draft(&self) -> SettingsDraft {
-        SettingsDraft { one: self.one_section, hover: self.ribbon_hover, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, ribbon: self.show_ribbon, panels: self.panels }
+        SettingsDraft { one: self.one_section, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, panels: self.panels }
     }
 
     pub(crate) fn apply_settings(&mut self, d: SettingsDraft) {
-        let SettingsDraft { one, hover, each_tab, preset, menu_bar, insert_bar, ribbon, panels } = d;
+        let SettingsDraft { one, each_tab, preset, menu_bar, insert_bar, panels } = d;
         if let Some(pr) = preset { self.apply_preset(pr); }
         if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
         if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
-        if ribbon != self.show_ribbon { self.run_cmd(crate::commands::Cmd::ShowRibbon); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
-        if hover != self.ribbon_hover { self.ribbon_hover = hover; crate::prefs::set_bool("ribbon_hover", hover); }
         for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers), ("show_slides", self.panels.slides, panels.slides)] {
             if was != now { crate::prefs::set_bool(key, now); }
         }
@@ -1722,28 +1522,6 @@ impl App {
     }
 
 
-    /// Help: documentation, reporting problems, the community, and checking for a newer version.
-    fn help_tab(&mut self, ui: &mut egui::Ui) {
-        group(ui, "Help", |ui| {
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(false, |ui| { big_button(ui, BOOK_OPEN, "Docs", "Documentation is coming soon"); });
-                if big_button(ui, BUG, "Submit Issue", "Report a problem or suggest a feature on GitHub").clicked() { update::open_in_browser(ISSUES_URL); }
-            });
-        });
-        group(ui, "Community", |ui| {
-            if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
-        });
-        group(ui, "AI", |ui| {
-            if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.panels.ai = true; crate::prefs::set_bool("show_ai", true); self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
-        });
-        group(ui, "Updates", |ui| {
-            ui.horizontal(|ui| {
-                let checking = matches!(self.updater.state, update::State::Checking(_));
-                let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
-                if check.clicked() { self.updater.check_now(ui.ctx()); }
-            });
-        });
-    }
 
     /// What the Properties panel calls the selected object, or `None` when it has no such tab yet.
     pub(super) fn format_title(&self) -> Option<&'static str> {
@@ -2046,108 +1824,6 @@ impl App {
         });
     }
 
-    fn insert_tab(&mut self, ui: &mut egui::Ui, normal: bool) {
-        ui.add_enabled_ui(normal, |ui| {
-            group(ui, "Text", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, TEXTBOX, "Text Box", "Insert a text box").clicked() { self.insert_text(); }
-                    big_menu(ui, TABLE, "Table", "Insert a table", |ui| {
-                        ui.set_min_width(0.0);
-                        if let Some((r, c)) = table_picker(ui) { self.insert_table(r, c); ui.close(); }
-                    });
-                    big_menu(ui, HASH, "Slide Number", "Insert a number that follows the slide", |ui| {
-                        if menu_item(ui, HASH, "Slide number").clicked() { self.insert_slide_number(false); ui.close(); }
-                        if menu_item(ui, HASH, "Slide number of total").clicked() { self.insert_slide_number(true); ui.close(); }
-                    });
-                    big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder: an empty box that asks for text", |ui| {
-                        for k in PlaceholderKind::CHOICES {
-                            if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
-                        }
-                    });
-                    self.symbol_button(ui);
-                    // Hyperlink links the chosen text (or all of the object's text). With no text to link it makes a text box
-                    // holding the link instead.
-                    {
-                        let has_text = self.selected_object().is_some_and(|o| !o.text.is_empty());
-                        let can = self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)));
-                        let link_btn = ui.add_enabled_ui(can, |ui| big_widget(ui, LINK, "Hyperlink", false, false).on_hover_text("Hyperlink: link the selected text (or all of the object's text) to a web address, or make a text box holding a link")).inner
-                            .on_disabled_hover_text("Hyperlink: this object has no text; select a text box or shape, or click an empty part of the slide");
-                        let link_id = egui::Id::new("text_link_url");
-                        let shown_id = egui::Id::new("text_link_shown");
-                        if link_btn.clicked() {
-                            let cur = self.selected_object().and_then(|o| {
-                                let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
-                                o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
-                            }).unwrap_or_default();
-                            ui.data_mut(|d| { d.insert_temp(link_id, cur); d.insert_temp(shown_id, String::new()); });
-                        }
-                        egui::Popup::from_toggle_button_response(&link_btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                            ui.set_min_width(260.0);
-                            let mut url: String = ui.data_mut(|d| d.get_temp(link_id)).unwrap_or_default();
-                            let mut shown: String = ui.data_mut(|d| d.get_temp(shown_id)).unwrap_or_default();
-                            if !has_text {
-                                ui.label("Text to show");
-                                ui.add(egui::TextEdit::singleline(&mut shown).desired_width(240.0).hint_text("Same as the address"));
-                            }
-                            ui.label("Web address (https:// or mailto:)");
-                            ui.add(egui::TextEdit::singleline(&mut url).desired_width(240.0).hint_text("https://example.com"));
-                            ui.data_mut(|d| { d.insert_temp(link_id, url.clone()); d.insert_temp(shown_id, shown.clone()); });
-                            let ok = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
-                            ui.horizontal(|ui| {
-                                let apply = ui.add_enabled(ok, egui::Button::new(if has_text { "Apply" } else { "Insert" })).clicked();
-                                let remove = has_text && ui.button("Remove link").clicked();
-                                if apply || remove {
-                                    if has_text { self.link_selected(apply.then(|| url.trim().to_string())); }
-                                    else { self.insert_link_text(shown.trim(), url.trim()); }
-                                    ui.close();
-                                }
-                            });
-                        });
-                    }
-                });
-            });
-            group(ui, "Media", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
-                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
-                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
-                    });
-                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
-                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
-                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
-                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
-                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolor").clicked() { self.open_equation_dialog(None); }
-                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolor and resize", |ui| self.icon_gallery(ui));
-                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
-                });
-            });
-            group(ui, "Interactive Objects", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, CLICK, "Button", "Insert a button with hover and click looks").clicked() { self.insert_button(); }
-                    if big_button(ui, SLIDERS, "Slider", "Insert a slider the learner drags to set a number").clicked() { self.insert_slider(); }
-                    big_menu(ui, CLICK, "Hotspot", "Insert an invisible area the learner clicks", |ui| {
-                        if menu_item(ui, RECT, "Rectangle").clicked() { self.insert_hotspot(false); ui.close(); }
-                        if menu_item(ui, CIRCLE, "Oval").clicked() { self.insert_hotspot(true); ui.close(); }
-                        if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
-                            self.view.draw_outline = Some(vec![]);
-                            self.view.draw_slide = self.view.slide;
-                            self.view.selected = None;
-                            self.view.multi.clear();
-                            self.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
-                            ui.close();
-                        }
-                    });
-                    big_menu(ui, GAUGE, "Dial", "Insert a dial the learner turns to set a number", |ui| self.dial_menu(ui));
-                    big_menu(ui, CHECK, "Input", "Insert something the learner ticks, picks or types", |ui| self.input_menu(ui));
-                    big_menu(ui, PIN, "Marker", "Insert a round button with an icon or a number in it", |ui| self.marker_gallery(ui));
-                });
-            });
-        });
-        if !normal {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Question and results slides are laid out by the player.").weak());
-        }
-    }
 
     /// Format Painter: once an object has been copied, the next different object that is selected gets its look.
     fn run_format_painter(&mut self, ctx: &egui::Context) {
@@ -2218,16 +1894,6 @@ impl App {
     /// Whether the selection can hold a symbol or a link: with nothing selected they start a new text box; only a picture-like object has no text.
     fn can_take_text(&self) -> bool {
         self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)))
-    }
-
-    /// The Symbol button of the Text group: a grid of common symbols; clicking one puts it into the selected text.
-    fn symbol_button(&mut self, ui: &mut egui::Ui) {
-        let can = self.can_take_text();
-        let resp = ui.add_enabled_ui(can, |ui| big_widget(ui, SIGMA, "Symbol", true, false).on_hover_text("Symbol: put a symbol into the selected text, or into a new text box")).inner
-            .on_disabled_hover_text("Symbol: this object has no text; select a text box or shape, or click an empty part of the slide");
-        let mut pick: Option<String> = None;
-        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| { pick = App::symbol_grid(ui); });
-        if let Some(s) = pick { self.insert_symbol(&s); }
     }
 
     /// The Hyperlink form as a menu shows it: the address (and, with no text to link, the words to show) and Apply or Insert.
@@ -2310,6 +1976,17 @@ impl App {
             // Wrapped onto two rows, the bar is as wide as it can be; otherwise it is as wide as the buttons (without the padding in front).
             let width = if wrapped || right <= left { avail } else { right - left };
             if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
+    }
+
+    /// The names of the things that are added by one click (the ones with no choices to make), in the order `insert_leaf_act` takes.
+    pub(crate) fn insert_leaf_labels() -> Vec<&'static str> {
+        insert_sections().into_iter().flat_map(|(_, entries)| entries).filter_map(|e| match e { InsertEntry::Leaf(l) => Some(l.1), InsertEntry::Sub(_) => None }).collect()
+    }
+
+    /// Add the thing at place `n` of `insert_leaf_labels`.
+    pub(crate) fn insert_leaf_act(&mut self, n: usize) {
+        let act = insert_sections().into_iter().flat_map(|(_, entries)| entries).filter_map(|e| match e { InsertEntry::Leaf(l) => Some(l.3), InsertEntry::Sub(_) => None }).nth(n);
+        if let Some(act) = act { act(self); }
     }
 
     /// Everything that can be added to a slide, as a menu with a search box on top: the gallery behind the + button and the Insert menu.
@@ -2533,16 +2210,6 @@ impl App {
         }
     }
 
-    /// The New Slide choices.
-    fn new_slide_menu(&mut self, ui: &mut egui::Ui) {
-        if menu_item(ui, FILE_PLUS, "Same layout").clicked() { self.add_slide(SlideKind::Normal); ui.close(); }
-        ui.label(egui::RichText::new("Layouts").weak().size(12.0));
-        let layouts: Vec<(String, String)> = self.project.as_ref().map(|p| p.layouts.iter().map(|l| (l.id.clone(), l.name.clone())).collect()).unwrap_or_default();
-        for (id, name) in layouts {
-            if menu_item(ui, FRAME, &name).clicked() { self.add_slide_with_layout(SlideKind::Normal, Some(id)); ui.close(); }
-        }
-        if menu_item(ui, CHECK, "Results slide").clicked() { self.add_slide(SlideKind::Results); }
-    }
 
     /// The menu that adds a slide, in the slide list and its right-click menu: the choices of the Add Slides tab, with their icons.
     /// `scene` is the scene the slide goes at the end of (`None`: after the slide that is showing).
@@ -2583,130 +2250,9 @@ impl App {
         }
     }
 
-    fn slides_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        group(ui, "New", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, FILE_PLUS, "New Scene", "Add a scene after the current one").clicked() { self.add_scene(); }
-                big_menu(ui, FILE_PLUS, "New Slide", "Add a slide after this one", |ui| self.new_slide_menu(ui));
-            });
-        });
-        let (graded, survey) = (GRADED_QUESTIONS, SURVEY_QUESTIONS);
-        fn grid(ui: &mut egui::Ui, items: &[(char, &str, &str, fn() -> Question)]) -> Option<fn() -> Question> {
-            let mut picked = None;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
-                for column in items.chunks(3) {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.spacing_mut().button_padding.y = 1.0;
-                        ui.spacing_mut().interact_size.y = 20.0;
-                        let w = column.iter().map(|c| c.1.len() as f32 * 7.0 + 36.0).fold(0.0, f32::max);
-                        for (icon, label, tip, make) in column {
-                            if ui.add(egui::Button::new(caret_job_plain(ui, *icon, label)).frame(false).min_size(egui::vec2(w, 20.0))).on_hover_text(*tip).clicked() { picked = Some(*make); }
-                        }
-                    });
-                }
-            });
-            picked
-        }
-        group(ui, "Graded Questions", |ui| {
-            if let Some(make) = grid(ui, &graded) { self.add_slide(SlideKind::Question(make())); }
-        });
-        group(ui, "Survey Questions", |ui| {
-            if let Some(make) = grid(ui, &survey) { self.add_slide(SlideKind::Question(make())); }
-        });
-        group(ui, "Results", |ui| {
-            if big_button(ui, CHECK, "Results", "Add a quiz results slide").clicked() { self.add_slide(SlideKind::Results); }
-        });
-    }
 
-    /// Variables and the pass mark: how the course as a whole behaves.
-    fn course_group(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        if self.project.is_none() { return; }
-        group(ui, "Course", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, SLIDERS, "Variables", "The project's variables, which triggers read and change").clicked() { self.variables_open = true; }
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.label("Pass mark");
-                    if let Some(proj) = self.project.as_mut() {
-                        let before = Snap::of(proj);
-                        let mut changed = false;
-                        framed(ui, |ui| { changed = ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed(); });
-                        if changed { self.commit_project_edit(_ctx, before); }
-                    }
-                });
-            });
-        });
-    }
 
-    /// What an author checks once the project is built: the player's settings, the accessibility report, spelling and focus order.
-    fn review_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        if self.project.is_none() { return; }
-        group(ui, "Player", |ui| {
-            if big_button(ui, PLAY, "Player\nSettings", "Colors, font, sidebar, title, logo and controls of the published player").clicked() { self.open_file_page(backstage::FilePage::Player); }
-        });
-                group(ui, "Check", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
-                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
-                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
-            });
-        });
-    }
 
-    fn design_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let slide_idx = self.view.slide;
-        let Some(proj) = self.project.as_mut() else { return };
-        let before = Snap::of(proj);
-        let mut changed = false;
-        let mut open_master = false;
-        let mut layout_pick: Option<Option<String>> = None;
-        let mut open_theme_colors = false;
-        group(ui, "Master", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
-                big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
-                    let current = proj.slide(slide_idx).layout.clone();
-                    for l in proj.layouts.clone() {
-                        if ui.selectable_label(current.as_deref() == Some(l.id.as_str()), l.name.as_str()).clicked() { layout_pick = Some(Some(l.id.clone())); ui.close(); }
-                    }
-                });
-                let cur = (proj.slide(0).width as i32, proj.slide(0).height as i32);
-                big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
-                    for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
-                        if ui.selectable_label(cur == (w, h), label).clicked() {
-                            for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
-                            changed = true;
-                        }
-                    }
-                });
-            });
-        });
-        group(ui, "Brand", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
-                // The theme's fonts, stacked: headings on top, body text below.
-                ui.vertical(|ui| {
-                    let mut next = proj.theme.clone();
-                    let mut moved = false;
-                    ui.spacing_mut().item_spacing.y = 4.0;
-                    for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
-                        ui.horizontal(|ui| {
-                            ui.add_sized([54.0, 22.0], egui::Label::new(egui::RichText::new(label).weak().size(12.0))).on_hover_text(tip);
-                            let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
-                            moved |= crate::font_store::font_menu(ui, id, font, 130.0);
-                        });
-                    }
-                    if moved { proj.set_theme(next.named()); changed = true; }
-                });
-            });
-        });
-        if changed { self.commit_project_edit(ctx, before); }
-        if open_master { self.enter_master_view(); }
-        if open_theme_colors { self.theme_colors_open = true; }
-        if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
-    }
 
     /// Format the characters selected in the in-place editor (set by the canvas while editing).
     pub(super) fn format_selection(&mut self, attr: Attr) {

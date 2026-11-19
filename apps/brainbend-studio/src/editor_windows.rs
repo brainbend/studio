@@ -308,15 +308,7 @@ impl App {
         edit.target = (li, oi);
         // The mode's code works on `App::pano.edit`: the window's session is put there while it is drawn, and taken back after.
         let saved = std::mem::replace(&mut self.pano.edit, Some(edit));
-        let mut cmd = None;
-        let band = if ui.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
-        egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Add marker").on_hover_text("A round button on the picture").clicked() { cmd = Some(crate::panos::Cmd::AddMarker); }
-                if ui.button("Draw hotspot").on_hover_text("Draw a shaded area on the picture, corner by corner").clicked() { cmd = Some(crate::panos::Cmd::StartHotspot); }
-            });
-        });
-        if let Some(c) = cmd { self.pano_cmd(c); }
+        // (The bar for what goes on the picture is part of the editing mode's own screen.)
         let alive = self.pano_edit_ui(ui, ctx);
         let back = std::mem::replace(&mut self.pano.edit, saved);
         if let Some(w) = self.editor_windows.iter_mut().find(|w| w.id == id) { if let Some(p) = w.pano.as_mut() { p.edit = back; } }

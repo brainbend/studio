@@ -38,3 +38,6 @@ resvg = "0.49.0"
 [dev-dependencies]
 tiny_http = "0.12"
 egui_kittest = { version = "0.36", features = ["snapshot", "wgpu"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = "0.21.2"

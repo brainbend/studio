@@ -289,7 +289,6 @@ impl App {
         self.pano.edit = Some(Edit { target: (li, oi), slide: self.view.slide, asset: key, view, selected: None, tool: Tool::Select, drag: None, changed: false });
         self.pano.tab = tab;
         self.scene_view = false;
-        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.leave_master_view();
     }
 
@@ -358,22 +357,6 @@ impl App {
         self.dirty = true;
     }
 
-    /// Run a command from the ribbon.
-    pub(super) fn pano_cmd(&mut self, cmd: Cmd) {
-        let Some(mut p) = self.edited_pano() else { return };
-        let Some((view, selected, slide)) = self.pano.edit.as_ref().map(|e| (e.view, e.selected, e.slide)) else { return };
-        if matches!(cmd, Cmd::StartHotspot) {
-            if let Some(e) = self.pano.edit.as_mut() { e.tool = Tool::Draw(vec![]); }
-            self.status = "Click each corner of the hotspot; double-click or press Enter to finish, Esc to cancel.".into();
-            return;
-        }
-        let obj = self.edited_object().map(|o| o.id.clone()).unwrap_or_default();
-        let mut select = selected;
-        let changed = self.pano_apply(cmd, &mut p, view, &mut select, &obj, slide);
-        if let Some(e) = self.pano.edit.as_mut() { e.selected = select; }
-        if changed { self.set_edited_pano(p); }
-    }
-
     /// Apply a command to the settings `p` of the 360° image `obj` on slide `slide`. `view` is where the picture is looking and
     /// `select` the chosen marker or hotspot. True when `p` changed.
     pub(super) fn pano_apply(&mut self, cmd: Cmd, p: &mut Pano, view: (f32, f32, f32), select: &mut Option<usize>, obj: &str, slide: usize) -> bool {
@@ -436,6 +419,17 @@ impl App {
         let (obj_id, aspect) = self.edited_object().map(|o| (o.id.clone(), o.w / o.h.max(1.0))).unwrap();
         let mut e = self.pano.edit.take().unwrap();
 
+        // At the top: what goes on the picture.
+        let mut cmd: Option<Cmd> = None;
+        let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        let drawing = matches!(e.tool, Tool::Draw(_));
+        egui::Panel::top("pano-bar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 4))).show_separator_line(false).show(root, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Add marker").on_hover_text("A round button on the picture").clicked() { cmd = Some(Cmd::AddMarker); }
+                if ui.add(egui::Button::new("Draw hotspot").selected(drawing)).on_hover_text("Draw a shaded area on the picture, corner by corner").clicked() { cmd = Some(Cmd::StartHotspot); }
+            });
+        });
+
         // Left: how the learner moves, and the list of markers and hotspots.
         let mut select = e.selected;
         let mut remove: Option<usize> = None;
@@ -487,7 +481,6 @@ impl App {
 
         // Right: everything about the chosen marker or hotspot and about the 360° image, in bars like the other Properties.
         let mut trig_changed = false;
-        let mut cmd: Option<Cmd> = None;
         egui::Panel::right("pano-triggers").default_size(326.0).show(root, |ui| {
             use ribbon::format_panel::{row, section, color_field, expand_buttons};
             ui.add_space(8.0);
@@ -573,7 +566,10 @@ impl App {
             self.id_counter = ctr;
             if let Some(c) = cmd.take() {
                 let (view, slide) = (e.view, e.slide);
-                if self.pano_apply(c, &mut pano, view, &mut select, &obj_id, slide) { e.changed = true; }
+                if matches!(c, Cmd::StartHotspot) {
+                    e.tool = Tool::Draw(vec![]);
+                    self.status = "Click each corner of the hotspot; double-click or press Enter to finish, Esc to cancel.".into();
+                } else if self.pano_apply(c, &mut pano, view, &mut select, &obj_id, slide) { e.changed = true; }
             }
         });
         if trig_changed { e.changed = true; self.dirty = true; }

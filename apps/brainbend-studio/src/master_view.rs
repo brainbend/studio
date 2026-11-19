@@ -34,7 +34,6 @@ impl App {
         self.view.selected = None;
         self.view.multi.clear();
         self.scene_view = false;
-        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
     }
 
@@ -51,7 +50,6 @@ impl App {
         self.view.layer = 0;
         self.view.selected = None;
         self.view.multi.clear();
-        self.ribbon_tab = ribbon::OBJECTS_TAB;
         self.reset_visibility();
     }
 
