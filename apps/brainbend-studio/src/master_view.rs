@@ -1,47 +1,16 @@
 //! Layout Builder view.
 //!
-//! While it is open, the project's slides are swapped for editable stand-ins: slide 0 is the
-//! master and each following slide is one layout. That lets the ordinary canvas, ribbon and
-//! property panels edit them. Closing the view (or saving, exporting, ...) writes the stand-ins
-//! back into `Project::master` / `Project::layouts` and restores the real slides.
+//! While it is open the master and the layouts are open as slides (`Project::open_layouts`): the editor's own canvas, ribbon and panels edit them
+//! in place, after the real slides in the numbering, and what is done to them is copied into the master and the layouts every frame. The
+//! project's slides are not touched, and what is done in the builder is part of the one undo history.
 use super::*;
 
-pub(super) const MASTER_SCENE: &str = "master-scene";
+pub(super) use brainbend_doc::master::LAYOUT_SCENE as MASTER_SCENE;
 
-/// What to restore when the view closes.
+/// What the Layout Builder remembers while it is open.
 pub(super) struct MasterStash {
-    /// The project exactly as it was when the view opened (also the undo step for the whole visit).
-    entry: Snap,
+    /// The slide that was showing when it opened, to go back to.
     slide: usize,
-    undo: Vec<Snap>,
-    redo: Vec<Snap>,
-    /// The layout whose name is being edited in the left panel.
-    rename: Option<usize>,
-}
-
-/// Turn a project in master-view form back into a real one.
-fn merge(p: &mut Project, entry: &Snap) {
-    let master = Master { background: p.slides[0].background.clone(), objects: p.slides[0].layers[0].objects.clone() };
-    let layouts: Vec<SlideLayout> = p.slides[1..]
-        .iter()
-        .filter_map(|s| {
-            let id = s.layout.clone()?;
-            let show_master = p.layouts.iter().find(|l| l.id == id).is_none_or(|l| l.show_master);
-            Some(SlideLayout { id, name: s.name.clone(), background: s.background.clone(), objects: s.layers[0].objects.clone(), show_master })
-        })
-        .collect();
-    p.slides = entry.slides.clone();
-    p.scenes = entry.meta.scenes.clone();
-    for s in p.slides.iter_mut() {
-        let Some(id) = s.layout.clone() else { continue };
-        match (layouts.iter().find(|l| l.id == id), entry.meta.layouts.iter().find(|l| l.id == id)) {
-            (Some(new), Some(old)) => brainbend_doc::master::propagate(old, new, s),
-            (None, _) => s.layout = None,
-            _ => {}
-        }
-    }
-    p.layouts = layouts;
-    p.master = master;
 }
 
 impl App {
@@ -49,104 +18,74 @@ impl App {
         self.master_stash.is_some()
     }
 
+    /// Where the master's slide is in the editor's numbering: the layouts' slides follow it.
+    fn layout_base(&self) -> usize { self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0) }
+
     pub(super) fn enter_master_view(&mut self) {
         if self.master_stash.is_some() { return; }
+        self.close_pano_edit();
         let Some(p) = self.project.as_mut() else { return };
-        let entry = Snap::of(p);
-        let (w, h) = (p.slides[0].width, p.slides[0].height);
-        let stand_in = |id: String, name: &str, bg: &Option<Background>, objects: &[Object], layout: Option<String>| {
-            let mut s = Slide::new(&id, name, w, h);
-            s.background = bg.clone();
-            s.layers[0].objects = objects.to_vec();
-            s.layout = layout;
-            s.scene = MASTER_SCENE.into();
-            s
-        };
-        let mut slides = vec![stand_in("m:master".into(), "Layout Master", &p.master.background, &p.master.objects, None)];
-        for l in &p.layouts {
-            slides.push(stand_in(format!("m:{}", l.id), &l.name, &l.background, &l.objects, Some(l.id.clone())));
-        }
-        // The layouts keep only their flags here; their content now lives in the stand-in slides.
-        for l in p.layouts.iter_mut() {
-            l.objects.clear();
-            l.background = None;
-        }
-        p.slides = slides;
-        p.scenes = vec![Scene { id: MASTER_SCENE.into(), name: "Master".into(), bank: None }];
-        let stash = MasterStash { entry, slide: self.slide, undo: std::mem::take(&mut self.undo), redo: std::mem::take(&mut self.redo), rename: None };
-        self.master_stash = Some(stash);
-        self.slide = 0;
-        self.layer = 0;
-        self.selected = None;
-        self.multi.clear();
+        p.open_layouts();
+        let base = p.slides.len();
+        self.master_stash = Some(MasterStash { slide: self.view.slide });
+        self.layout_tab = true;
+        self.view.slide = base;
+        self.view.layer = 0;
+        self.view.selected = None;
+        self.view.multi.clear();
         self.scene_view = false;
-        self.ribbon_tab = ribbon::MASTER_TAB;
         self.reset_visibility();
     }
 
-    /// Write the stand-ins back and return to the normal editor.
+    /// Close the Layout Builder and go back to the slide that was showing.
     pub(super) fn leave_master_view(&mut self) {
         let Some(stash) = self.master_stash.take() else { return };
         if let Some(p) = self.project.as_mut() {
-            // Only the layouts and slides can change here, so compare those and leave the media out of the copies.
-            let assets = std::mem::take(&mut p.assets);
-            let changed = {
-                let key = |p: &Project| serde_json::to_string(&(&p.slides, &p.scenes, &p.layouts, &p.master)).ok();
-                let mut real = p.clone();
-                merge(&mut real, &stash.entry);
-                let mut before = p.clone();
-                stash.entry.clone().swap_into(&mut before);
-                key(&real) != key(&before)
-            };
-            p.assets = assets;
-            merge(p, &stash.entry);
-            self.undo = stash.undo;
-            self.redo = stash.redo;
-            if changed {
-                self.undo.push(stash.entry);
-                self.redo.clear();
-                self.dirty = true;
-            }
+            // A window of the layouts keeps them open; otherwise what is in them is copied back and they are closed.
+            let wanted = self.editor_windows.iter().any(|w| w.layouts);
+            let changed = if wanted { p.sync_layouts() } else { p.close_layouts() };
+            if changed { self.dirty = true; }
         }
-        self.slide = stash.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
-        self.layer = 0;
-        self.selected = None;
-        self.multi.clear();
-        self.ribbon_tab = 1;
+        self.view.slide = stash.slide.min(self.project.as_ref().map(|p| p.slides.len()).unwrap_or(1).saturating_sub(1));
+        self.view.layer = 0;
+        self.view.selected = None;
+        self.view.multi.clear();
         self.reset_visibility();
     }
 
-    /// The project as it should be saved or published: master-view stand-ins folded back in.
-    pub(super) fn committed(&self) -> Option<Project> {
-        let p = self.project.as_ref()?;
-        match &self.master_stash {
-            None => Some(p.clone()),
-            Some(st) => {
-                let mut real = p.clone();
-                merge(&mut real, &st.entry);
-                Some(real)
-            }
+    /// After Undo or Redo the master's and layouts' slides are as they were in the step that came back: while the Layout Builder is closed they are not
+    /// wanted, and while it is open they are opened again if the step is from before it opened.
+    pub(super) fn settle_layouts(&mut self) {
+        let open = self.layouts_wanted();
+        let in_builder = self.master_stash.is_some();
+        let Some(p) = self.project.as_mut() else { return };
+        if open {
+            p.open_layouts();
+            if in_builder { self.view.slide = self.view.slide.min(p.slide_count().saturating_sub(1)).max(p.slides.len()); }
+        } else {
+            p.layout_slides.clear();
         }
     }
 
-    /// Keep `Project::master` in step with the master stand-in so layout stand-ins show its shapes.
-    pub(super) fn sync_master(&mut self) {
-        if self.master_stash.is_none() { return; }
-        let Some(p) = self.project.as_mut() else { return };
-        p.master.background = p.slides[0].background.clone();
-        p.master.objects = p.slides[0].layers[0].objects.clone();
+    /// The project as it should be saved or published: what was done to the master and layouts this frame included.
+    pub(super) fn committed(&self) -> Option<Project> {
+        let mut p = self.project.clone()?;
+        p.sync_layouts();
+        p.layout_slides.clear();
+        Some(p)
     }
 
     pub(super) fn insert_layout(&mut self, copy_of: Option<usize>) {
-        if !self.in_master_view() { return; }
+        if !self.in_master_view() && !self.on_layout() { return; }
         self.snapshot();
         let id = self.new_id("layout");
         let (oid, tid) = (self.new_id("obj"), self.new_id("obj"));
+        let base = self.layout_base();
         let p = self.project.as_mut().unwrap();
         let (w, h) = (p.slides[0].width, p.slides[0].height);
         let mut s = match copy_of {
-            Some(i) if i > 0 => {
-                let mut s = p.slides[i].clone();
+            Some(i) if i > 0 && i < p.layout_slides.len() => {
+                let mut s = p.layout_slides[i].clone();
                 s.name = format!("{} copy", s.name);
                 for (n, o) in s.layers[0].objects.iter_mut().enumerate() { o.id = format!("{id}-{n}"); }
                 s
@@ -162,29 +101,29 @@ impl App {
         s.id = format!("m:{id}");
         s.layout = Some(id.clone());
         s.scene = MASTER_SCENE.into();
-        let show_master = copy_of.and_then(|i| p.slides[i].layout.clone()).and_then(|l| p.layout(&l).map(|l| l.show_master)).unwrap_or(true);
+        let show_master = copy_of.and_then(|i| p.layout_slides.get(i)).and_then(|s| s.layout.clone()).and_then(|l| p.layout(&l).map(|l| l.show_master)).unwrap_or(true);
         let mut meta = SlideLayout::new(&id, &s.name);
         meta.show_master = show_master;
         p.layouts.push(meta);
-        p.slides.push(s);
-        self.slide = p.slides.len() - 1;
-        self.layer = 0;
-        self.selected = None;
+        p.layout_slides.push(s);
+        self.view.slide = base + p.layout_slides.len() - 1;
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
         self.dirty = true;
     }
 
     pub(super) fn delete_layout(&mut self, i: usize) {
-        if !self.in_master_view() || i == 0 { return; }
+        if (!self.in_master_view() && !self.on_layout()) || i == 0 { return; }
         let Some(p) = self.project.as_ref() else { return };
-        if i >= p.slides.len() { return; }
+        if i >= p.layout_slides.len() { return; }
         self.snapshot();
+        let base = self.layout_base();
         let p = self.project.as_mut().unwrap();
-        let gone = p.slides.remove(i);
-        if let Some(id) = gone.layout { p.layouts.retain(|l| l.id != id); }
-        self.slide = i.min(p.slides.len() - 1);
-        self.layer = 0;
-        self.selected = None;
+        p.layout_slides.remove(i);
+        self.view.slide = base + i.min(p.layout_slides.len() - 1);
+        self.view.layer = 0;
+        self.view.selected = None;
         self.reset_visibility();
         self.dirty = true;
     }
@@ -192,7 +131,7 @@ impl App {
     pub(super) fn insert_placeholder(&mut self, kind: PlaceholderKind) {
         let id = self.new_id("obj");
         let Some(p) = self.project.as_ref() else { return };
-        let (w, h) = (p.slides[self.slide].width, p.slides[self.slide].height);
+        let (w, h) = (p.slide(self.view.slide).width, p.slide(self.view.slide).height);
         let m = w * 0.06;
         let mut o = brainbend_doc::master::placeholder_object(&id, kind, &p.theme, m, h * 0.3, w - 2.0 * m, h * 0.3);
         o.name = format!("{} placeholder", kind.label());
@@ -201,13 +140,14 @@ impl App {
 
     /// Swap layout `i` with its neighbour (never the "Layout Master" stand-in at the top).
     pub(super) fn move_layout(&mut self, i: usize, down: bool) {
-        if !self.in_master_view() { return; }
+        if !self.in_master_view() && !self.on_layout() { return; }
         let Some(p) = self.project.as_ref() else { return };
         let j = if down { i + 1 } else { i.wrapping_sub(1) };
-        if i == 0 || j == 0 || i >= p.slides.len() || j >= p.slides.len() { return; }
+        if i == 0 || j == 0 || i >= p.layout_slides.len() || j >= p.layout_slides.len() { return; }
         self.snapshot();
-        self.project.as_mut().unwrap().slides.swap(i, j);
-        self.slide = j;
+        let base = self.layout_base();
+        self.project.as_mut().unwrap().layout_slides.swap(i, j);
+        self.view.slide = base + j;
         self.dirty = true;
     }
 
@@ -216,8 +156,8 @@ impl App {
         // Not trimmed here: a space typed at the end must stay while the name is being typed.
         if name.trim().is_empty() || i == 0 { return; }
         let Some(p) = self.project.as_mut() else { return };
-        if i >= p.slides.len() || p.slides[i].name == name { return; }
-        p.slides[i].name = name.to_string();
+        if i >= p.layout_slides.len() || p.layout_slides[i].name == name { return; }
+        p.layout_slides[i].name = name.to_string();
         self.dirty = true;
     }
 
@@ -226,15 +166,17 @@ impl App {
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Layout Builder").strong());
         ui.add_space(2.0);
-        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
+        // The layouts are numbered from 0 here (0 is the master); the editor numbers their slides after the project's own.
+        let base = self.layout_base();
+        let n = self.project.as_ref().map(|p| p.layout_slides.len()).unwrap_or(0);
         let tw = (ui.available_width() - 24.0).clamp(80.0, 150.0);
         let mut pick = None;
         let mut action: Option<(u8, usize)> = None;
         let list_h = (ui.available_height() - 44.0).max(80.0);
         // Right-clicking anywhere in the list adds a layout; the thumbnails take their own clicks.
-        let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), egui::Id::new("layouts-bg"), egui::Sense::click());
+        let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), ui.id().with("layouts-bg"), egui::Sense::click());
         list_bg.context_menu(|ui| { if ui.button("New layout").clicked() { action = Some((0, 0)); ui.close(); } });
-        let renaming = self.master_stash.as_ref().and_then(|s| s.rename);
+        let renaming = self.layout_rename;
         let mut rename_to: Option<(usize, String)> = None;
         let mut stop_rename = false;
         let mut start_rename = None;
@@ -244,9 +186,9 @@ impl App {
                     ui.add_space(6.0);
                     ui.label(egui::RichText::new("Layouts").weak().size(12.0));
                 }
-                let name = self.project.as_ref().unwrap().slides[i].name.clone();
-                let sel = i == self.slide;
-                let thumb = self.slide_thumbnail(ui, ctx, i, tw, sel);
+                let name = self.project.as_ref().unwrap().layout_slides[i].name.clone();
+                let sel = base + i == self.view.slide;
+                let thumb = self.slide_thumbnail(ui, ctx, base + i, tw, sel);
                 if thumb.clicked() || thumb.secondary_clicked() { pick = Some(i); }
                 if thumb.double_clicked() && i > 0 { start_rename = Some(i); }
                 thumb.context_menu(|ui| {
@@ -273,7 +215,7 @@ impl App {
         });
         ui.horizontal(|ui| {
             if ui.button("+ Add layout").clicked() { action = Some((0, 0)); }
-            let cur = self.slide;
+            let cur = self.view.slide.saturating_sub(base);
             ui.menu_button("Layout", |ui| {
                 if ui.add_enabled(cur > 0, egui::Button::new("Duplicate")).clicked() { action = Some((1, cur)); ui.close(); }
                 if ui.add_enabled(cur > 0, egui::Button::new("Rename")).clicked() { start_rename = Some(cur); ui.close(); }
@@ -284,26 +226,26 @@ impl App {
             });
         });
         if let Some(i) = pick {
-            self.slide = i;
-            self.layer = 0;
-            self.selected = None;
+            self.view.slide = base + i;
+            self.view.layer = 0;
+            self.view.selected = None;
             self.reset_visibility();
         }
         if let Some((i, text)) = rename_to {
-            if self.master_stash.as_ref().is_some_and(|s| s.rename == Some(i)) {
+            if self.layout_rename == Some(i) {
                 // One undo step for the whole rename: the snapshot is taken when it starts.
                 self.rename_layout(i, &text);
             }
         }
         if stop_rename {
-            if let Some(i) = self.master_stash.as_mut().and_then(|s| s.rename.take()) {
-                let t = self.project.as_ref().and_then(|p| p.slides.get(i)).map(|s| s.name.trim().to_string());
+            if let Some(i) = self.layout_rename.take() {
+                let t = self.project.as_ref().and_then(|p| p.layout_slides.get(i)).map(|s| s.name.trim().to_string());
                 if let Some(t) = t { self.rename_layout(i, &t); }
             }
         }
         if let Some(i) = start_rename {
             self.snapshot();
-            if let Some(s) = self.master_stash.as_mut() { s.rename = Some(i); }
+            self.layout_rename = Some(i);
         }
         match action {
             Some((0, _)) => self.insert_layout(None),

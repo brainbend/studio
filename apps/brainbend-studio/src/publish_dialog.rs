@@ -112,9 +112,15 @@ impl App {
         }
     }
 
-    pub(super) fn publish_window(&mut self, ctx: &egui::Context) {
-        if !self.publish_open { return; }
-        let Some(p) = self.project.as_ref() else { self.publish_open = false; return };
+    /// Publish as a page of the File view: the same destinations and options, drawn into the page.
+    pub(crate) fn publish_page_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let out = self.publish_ui(ui, ctx, true);
+        self.publish_finish(ctx, out);
+    }
+
+    /// The destinations, the options of the chosen one and the Publish button. Returns what was decided.
+    fn publish_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, page_mode: bool) -> PublishOutcome {
+        let Some(p) = self.project.as_ref() else { return PublishOutcome::default() };
         let is_web = p.is_web();
         let facts: Vec<(&str, String)> = {
             let mut v = vec![("Project", p.name.clone()), ("Type", p.kind.label().to_string())];
@@ -138,177 +144,187 @@ impl App {
             None => { let r = brainbend_publish_html::fonts_report(p); ctx.data_mut(|d| d.insert_temp(fonts_id, r.clone())); r }
         };
         let (mut go, mut cancel) = (false, false);
-        let modal = egui::Modal::new(egui::Id::new("publish-dialog")).show(ctx, |ui| {
-            // A fixed size: a dialog that resizes itself as its contents change moves under the pointer.
-            ui.set_width(780.0);
-            ui.set_height(620.0);
-            ui.heading("Publish");
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(4.0);
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(egui::vec2(240.0, 470.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    for pg in &pages { destination_row(ui, *pg, &mut page); }
-                });
-                ui.separator();
-                ui.allocate_ui_with_layout(egui::vec2(500.0, 470.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.set_width(500.0);
-                    egui::ScrollArea::vertical().id_salt("publish-right").auto_shrink([false, false]).show(ui, |ui| {
-                        ui.label(egui::RichText::new(page.label()).size(18.0).strong());
-                        ui.add_space(8.0);
-                        ui.label(page.blurb());
+        ui.heading("Publish");
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+        // The dialog's columns are a fixed height; on the page they take what the page has, less the row of buttons under them.
+        let col_h = if page_mode { (ui.available_height() - 255.0).clamp(300.0, 700.0) } else { 470.0 };
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(240.0, col_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for pg in &pages { destination_row(ui, *pg, &mut page); }
+            });
+            // A line of the columns' height (a separator would run to the bottom of the page).
+            let (line, _) = ui.allocate_exact_size(egui::vec2(8.0, col_h), egui::Sense::hover());
+            ui.painter().vline(line.center().x, line.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
+            ui.allocate_ui_with_layout(egui::vec2(500.0, col_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(500.0);
+                egui::ScrollArea::vertical().id_salt("publish-right").auto_shrink([false, false]).show(ui, |ui| {
+                    ui.label(egui::RichText::new(page.label()).size(18.0).strong());
+                    ui.add_space(8.0);
+                    ui.label(page.blurb());
+                    ui.add_space(12.0);
+                    if !page.available() {
+                        ui.label(egui::RichText::new("Coming soon").strong().color(primary(ui)));
+                        ui.weak("This option is not available in this version of BrainBend Studio.");
+                        return;
+                    }
+                    if page == PublishPage::OtherLms {
+                        ui.label(egui::RichText::new("Standard").strong());
+                        ui.radio_value(&mut lms, Lms::Scorm12, "SCORM 1.2 (most LMSs, Canvas)");
+                        ui.radio_value(&mut lms, Lms::Scorm2004, "SCORM 2004 4th Edition");
                         ui.add_space(12.0);
-                        if !page.available() {
-                            ui.label(egui::RichText::new("Coming soon").strong().color(primary(ui)));
-                            ui.weak("This option is not available in this version of BrainBend Studio.");
-                            return;
-                        }
-                        if page == PublishPage::OtherLms {
-                            ui.label(egui::RichText::new("Standard").strong());
-                            ui.radio_value(&mut lms, Lms::Scorm12, "SCORM 1.2 (most LMSs, Canvas)");
-                            ui.radio_value(&mut lms, Lms::Scorm2004, "SCORM 2004 4th Edition");
-                            ui.add_space(12.0);
-                        }
-                        if matches!(page, PublishPage::Pdf | PublishPage::Print | PublishPage::Word) {
-                            ui.label(egui::RichText::new("Page").strong());
-                            if page == PublishPage::Word {
-                                // Word cannot fit content to a page the way PDF can, so it offers a page that is always portrait,
-                                // with one slide and its notes, or two slides and nothing else.
-                                handout.orientation = HandoutOrientation::Portrait;
-                                handout.per_page = handout.per_page.clamp(1, 2);
-                                ui.horizontal(|ui| {
-                                    ui.label("Slides per page");
-                                    for n in [1u8, 2] { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
-                                });
-                                ui.weak("Portrait.");
-                            } else {
-                                ui.horizontal(|ui| {
-                                    for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Slides per page");
-                                    for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
-                                });
-                            }
-                            ui.add_space(8.0);
-                            if !is_web {
-                                ui.label(egui::RichText::new("Slides to include").strong());
-                                ui.radio_value(&mut range, HandoutRange::All, format!("All slides ({})", counts.0));
-                                ui.radio_value(&mut range, HandoutRange::Scene, format!("The current scene ({})", counts.1));
-                                ui.radio_value(&mut range, HandoutRange::Selected, format!("The selected slides ({})", counts.2));
-                                ui.add_space(8.0);
-                            }
-                            ui.label(egui::RichText::new("Include").strong());
-                            ui.checkbox(&mut handout.correct_answers, "Correct answers").on_hover_text("Off prints question slides as a blank worksheet");
-                            if page != PublishPage::Word {
-                                ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
-                                ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
-                                ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
-                                ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
-                            } else if handout.per_page == 2 {
-                                handout.note_lines = false; handout.slide_notes = false; handout.alt_text = false;
-                                ui.weak("Two slides to a page leave no room for notes, alt text or lines to write on.");
-                            } else {
-                                // One slide to a page: with its notes and alt text under it, or just the slide. No lines to
-                                // write on: in Word the reader can type their own notes.
-                                handout.note_lines = false;
-                                let mut with_notes = handout.slide_notes || handout.alt_text;
-                                let before = with_notes;
-                                ui.radio_value(&mut with_notes, false, "Just the slides");
-                                ui.radio_value(&mut with_notes, true, "Slide notes and alt text under each slide");
-                                if with_notes != before { handout.slide_notes = with_notes; handout.alt_text = with_notes; }
-                                if with_notes {
-                                    ui.indent("word-notes", |ui| {
-                                        ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
-                                        ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
-                                    });
-                                }
-                                ui.weak("Long notes run on to the next page. In Word the slides stay editable around the pictures.");
-                            }
-                            ui.add_space(12.0);
-                        }
-                        if page == PublishPage::Video {
-                            ui.label(egui::RichText::new("Quality").strong());
+                    }
+                    if matches!(page, PublishPage::Pdf | PublishPage::Print | PublishPage::Word) {
+                        ui.label(egui::RichText::new("Page").strong());
+                        if page == PublishPage::Word {
+                            // Word cannot fit content to a page the way PDF can, so it offers a page that is always portrait,
+                            // with one slide and its notes, or two slides and nothing else.
+                            handout.orientation = HandoutOrientation::Portrait;
+                            handout.per_page = handout.per_page.clamp(1, 2);
                             ui.horizontal(|ui| {
-                                for h in video_export::Options::HEIGHTS { ui.radio_value(&mut video.height, h, format!("{h}p")); }
-                                ui.label("at");
-                                for r in video_export::Options::RATES { ui.radio_value(&mut video.fps, r, format!("{r} frames a second")); }
+                                ui.label("Slides per page");
+                                for n in [1u8, 2] { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
                             });
-                            ui.weak("The video is as sharp as the Studio window lets each slide be drawn, so make the window large for the best result.");
-                            ui.add_space(8.0);
+                            ui.weak("Portrait.");
+                        } else {
+                            ui.horizontal(|ui| {
+                                for o in HandoutOrientation::ALL { ui.radio_value(&mut handout.orientation, o, o.label()); }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Slides per page");
+                                for n in brainbend_publish_html::HandoutOptions::PER_PAGE { ui.radio_value(&mut handout.per_page, n, if n == 1 { "1 slide".to_string() } else { format!("{n} slides") }); }
+                            });
+                        }
+                        ui.add_space(8.0);
+                        if !is_web {
                             ui.label(egui::RichText::new("Slides to include").strong());
                             ui.radio_value(&mut range, HandoutRange::All, format!("All slides ({})", counts.0));
                             ui.radio_value(&mut range, HandoutRange::Scene, format!("The current scene ({})", counts.1));
                             ui.radio_value(&mut range, HandoutRange::Selected, format!("The selected slides ({})", counts.2));
                             ui.add_space(8.0);
-                            ui.label(egui::RichText::new("Time and sound").strong());
-                            ui.horizontal(|ui| {
-                                ui.label("A slide with no timeline or sound shows for");
-                                ui.add(egui::DragValue::new(&mut video.hold_secs).range(1..=120).suffix(" s"));
-                            });
-                            ui.checkbox(&mut video.audio, "Include sound").on_hover_text("Audio and video that start by themselves, at their place on the timeline");
-                            ui.weak("Sound that waits to be clicked is left out, and so is anything a learner would choose. Question slides are shown as the lesson shows them.");
-                            ui.add_space(12.0);
                         }
-                        ui.weak(page.next_step());
-                        ui.add_space(16.0);
-                        ui.label(egui::RichText::new("Properties").strong());
-                        ui.add_space(4.0);
-                        egui::Grid::new("publish-properties").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
-                            for (k, v) in &facts { ui.label(egui::RichText::new(*k).weak()); ui.label(v); ui.end_row(); }
-                            if page == PublishPage::OtherLms {
-                                ui.label(egui::RichText::new("Format").weak());
-                                ui.label(if lms == Lms::Scorm12 { "SCORM 1.2" } else { "SCORM 2004 4th Edition" });
-                                ui.end_row();
+                        ui.label(egui::RichText::new("Include").strong());
+                        ui.checkbox(&mut handout.correct_answers, "Correct answers").on_hover_text("Off prints question slides as a blank worksheet");
+                        if page != PublishPage::Word {
+                            ui.checkbox(&mut handout.note_lines, "Space for notes").on_hover_text("Lined space beside or under each slide to write on");
+                            ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                            ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                            ui.weak("Slide sizes, borders and spacing are chosen for you to fit the page.");
+                        } else if handout.per_page == 2 {
+                            handout.note_lines = false; handout.slide_notes = false; handout.alt_text = false;
+                            ui.weak("Two slides to a page leave no room for notes, alt text or lines to write on.");
+                        } else {
+                            // One slide to a page: with its notes and alt text under it, or just the slide. No lines to
+                            // write on: in Word the reader can type their own notes.
+                            handout.note_lines = false;
+                            let mut with_notes = handout.slide_notes || handout.alt_text;
+                            let before = with_notes;
+                            ui.radio_value(&mut with_notes, false, "Just the slides");
+                            ui.radio_value(&mut with_notes, true, "Slide notes and alt text under each slide");
+                            if with_notes != before { handout.slide_notes = with_notes; handout.alt_text = with_notes; }
+                            if with_notes {
+                                ui.indent("word-notes", |ui| {
+                                    ui.checkbox(&mut handout.slide_notes, "Slide notes").on_hover_text("The notes written for each slide");
+                                    ui.checkbox(&mut handout.alt_text, "Alt text").on_hover_text("The descriptions of each slide's pictures and shapes");
+                                });
                             }
+                            ui.weak("Long notes run on to the next page. In Word the slides stay editable around the pictures.");
+                        }
+                        ui.add_space(12.0);
+                    }
+                    if page == PublishPage::Video {
+                        ui.label(egui::RichText::new("Quality").strong());
+                        ui.horizontal(|ui| {
+                            for h in video_export::Options::HEIGHTS { ui.radio_value(&mut video.height, h, format!("{h}p")); }
+                            ui.label("at");
+                            for r in video_export::Options::RATES { ui.radio_value(&mut video.fps, r, format!("{r} frames a second")); }
                         });
-                        if matches!(page, PublishPage::Web | PublishPage::OtherLms | PublishPage::Pdf | PublishPage::Print) {
-                            ui.add_space(14.0);
-                            ui.label(egui::RichText::new("Fonts").strong());
-                            ui.add_space(4.0);
-                            if !fonts.embedded.is_empty() {
-                                ui.label(format!("Included with the lesson: {}.", fonts.embedded.join(", ")));
-                            }
-                            if !fonts.fallback.is_empty() {
-                                ui.colored_label(ui.visuals().warn_fg_color, format!("Not included: {}.", fonts.fallback.join(", ")));
-                                ui.weak("These are not installed here, or their license does not allow embedding. Learners see them only if they have the font; otherwise a similar one. Choose another font, or add it from Google Fonts, to be sure.");
-                            }
+                        ui.weak("The video is as sharp as the Studio window lets each slide be drawn, so make the window large for the best result.");
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Slides to include").strong());
+                        ui.radio_value(&mut range, HandoutRange::All, format!("All slides ({})", counts.0));
+                        ui.radio_value(&mut range, HandoutRange::Scene, format!("The current scene ({})", counts.1));
+                        ui.radio_value(&mut range, HandoutRange::Selected, format!("The selected slides ({})", counts.2));
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Time and sound").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("A slide with no timeline or sound shows for");
+                            ui.add(egui::DragValue::new(&mut video.hold_secs).range(1..=120).suffix(" s"));
+                        });
+                        ui.checkbox(&mut video.audio, "Include sound").on_hover_text("Audio and video that start by themselves, at their place on the timeline");
+                        ui.weak("Sound that waits to be clicked is left out, and so is anything a learner would choose. Question slides are shown as the lesson shows them.");
+                        ui.add_space(12.0);
+                    }
+                    ui.weak(page.next_step());
+                    ui.add_space(16.0);
+                    ui.label(egui::RichText::new("Properties").strong());
+                    ui.add_space(4.0);
+                    egui::Grid::new("publish-properties").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
+                        for (k, v) in &facts { ui.label(egui::RichText::new(*k).weak()); ui.label(v); ui.end_row(); }
+                        if page == PublishPage::OtherLms {
+                            ui.label(egui::RichText::new("Format").weak());
+                            ui.label(if lms == Lms::Scorm12 { "SCORM 1.2" } else { "SCORM 2004 4th Edition" });
+                            ui.end_row();
                         }
                     });
+                    if matches!(page, PublishPage::Web | PublishPage::OtherLms | PublishPage::Pdf | PublishPage::Print) {
+                        ui.add_space(14.0);
+                        ui.label(egui::RichText::new("Fonts").strong());
+                        ui.add_space(4.0);
+                        if !fonts.embedded.is_empty() {
+                            ui.label(format!("Included with the lesson: {}.", fonts.embedded.join(", ")));
+                        }
+                        if !fonts.fallback.is_empty() {
+                            ui.colored_label(ui.visuals().warn_fg_color, format!("Not included: {}.", fonts.fallback.join(", ")));
+                            ui.weak("These are not installed here, or their license does not allow embedding. Learners see them only if they have the font; otherwise a similar one. Choose another font, or add it from Google Fonts, to be sure.");
+                        }
+                    }
                 });
             });
-            ui.add_space(6.0);
-            ui.separator();
-            ui.add_space(6.0);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let publish = egui::Button::new(egui::RichText::new("Publish").strong().color(on_primary(ui))).fill(primary(ui)).corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(120.0, 34.0));
-                let enabled = page.available();
-                if ui.add_enabled(enabled, publish).on_disabled_hover_text("Coming soon").clicked() { go = true; }
-                if ui.add(egui::Button::new("Cancel").corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(100.0, 34.0))).clicked() { cancel = true; }
-            });
+        });
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 38.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let publish = egui::Button::new(egui::RichText::new("Publish").strong().color(on_primary(ui))).fill(primary(ui)).corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(120.0, 34.0));
+            let enabled = page.available();
+            if ui.add_enabled(enabled, publish).on_disabled_hover_text("Coming soon").clicked() { go = true; }
+            if !page_mode && ui.add(egui::Button::new("Cancel").corner_radius(RIBBON_RADIUS as u8).min_size(egui::vec2(100.0, 34.0))).clicked() { cancel = true; }
         });
         self.publish_page = page;
         self.publish_lms = lms;
         self.handout = handout;
         self.handout_range = range;
         self.video_options = video;
-        if modal.should_close() || cancel || go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(fonts_id)); }
-        if modal.should_close() || cancel { self.publish_open = false; }
-        if go && page.available() {
-            self.publish_open = false;
-            match page {
-                PublishPage::Web => self.export_html(),
-                PublishPage::OtherLms => self.export_scorm(lms),
-                PublishPage::Pdf => self.export_pdf(),
-                PublishPage::Print => self.print(),
-                PublishPage::PowerPoint => self.export_pptx(),
-                PublishPage::Word => self.export_word(),
-                PublishPage::Video => self.export_video(),
-                PublishPage::Review | PublishPage::BrainBendLms => {}
-            }
+        PublishOutcome { go: go && page.available(), cancel, page, lms, fonts_id }
+    }
+
+    /// What the page decided: publish to the destination (when the button was pressed).
+    fn publish_finish(&mut self, ctx: &egui::Context, out: PublishOutcome) {
+        if out.go { ctx.data_mut(|d| d.remove_temp::<brainbend_publish_html::FontsReport>(out.fonts_id)); }
+        if out.go { self.publish_run(out.page, out.lms); }
+    }
+
+    fn publish_run(&mut self, page: PublishPage, lms: Lms) {
+        match page {
+            PublishPage::Web => self.export_html(),
+            PublishPage::OtherLms => self.export_scorm(lms),
+            PublishPage::Pdf => self.export_pdf(),
+            PublishPage::Print => self.print(),
+            PublishPage::PowerPoint => self.export_pptx(),
+            PublishPage::Word => self.export_word(),
+            PublishPage::Video => self.export_video(),
+            PublishPage::Review | PublishPage::BrainBendLms => {}
         }
     }
+}
+
+struct PublishOutcome { go: bool, cancel: bool, page: PublishPage, lms: Lms, fonts_id: egui::Id }
+
+impl Default for PublishOutcome {
+    fn default() -> Self { PublishOutcome { go: false, cancel: false, page: PublishPage::default(), lms: Lms::Scorm12, fonts_id: egui::Id::new("publish-fonts-report") } }
 }
 
 /// One destination in the list: its icon and name, with a Coming soon tag when it cannot be used yet.

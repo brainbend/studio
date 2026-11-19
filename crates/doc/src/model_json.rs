@@ -2,7 +2,7 @@
 //! before it is made, and atomic edits written as JSON Patch (RFC 6902) or JSON Merge Patch (RFC 7396).
 //!
 //! The model ignores fields it does not know, so that files from newer versions still open. An AI tool must not get that
-//! kindness: a misspelt `colour` would change nothing and look as though it had worked. So an edit is checked against a
+//! kindness: a misspelt `colr` would change nothing and look as though it had worked. So an edit is checked against a
 //! schema made from the real types, in which an unknown field is an error that names where it is.
 //!
 //! Only the project's content can be edited this way, not its assets (pictures, video and audio are added elsewhere) nor
@@ -322,8 +322,8 @@ mod tests {
     #[test]
     fn a_misspelt_or_wrong_field_is_an_error_that_says_where() {
         let mut p = project();
-        let e = patch(&mut p, &json!([{ "op": "add", "path": "/slides/0/layers/0/objects/0/colour", "value": [1, 2, 3, 255] }])).unwrap_err();
-        assert!(e.contains("/slides/0/layers/0/objects/0") && e.contains("colour"), "{e}");
+        let e = patch(&mut p, &json!([{ "op": "add", "path": "/slides/0/layers/0/objects/0/colr", "value": [1, 2, 3, 255] }])).unwrap_err();
+        assert!(e.contains("/slides/0/layers/0/objects/0") && e.contains("colr"), "{e}");
         let e = patch(&mut p, &json!([{ "op": "replace", "path": "/slides/0/layers/0/objects/0/fill", "value": "red" }])).unwrap_err();
         assert!(e.contains("/slides/0/layers/0/objects/0/fill"), "{e}");
         let e = patch(&mut p, &json!([{ "op": "replace", "path": "/slides/0/layers/0/objects/0/w", "value": "wide" }])).unwrap_err();

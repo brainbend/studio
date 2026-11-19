@@ -2053,6 +2053,11 @@ pub struct Project {
     pub master: Master,
     #[serde(default)]
     pub layouts: Vec<SlideLayout>,
+    /// The master and the layouts as editable slides, for as long as something is editing them (see `master::LAYOUT_STAND_INS`). Never saved: the master and
+    /// the layouts above are the saved form, and `sync_layouts` copies the stand-ins into them.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub layout_slides: Vec<Slide>,
     /// Import diagnostics (unsupported features, assumptions).
     pub notes: Vec<String>,
     /// Words the spell checker should accept (added by the author).
@@ -2079,6 +2084,17 @@ const MAX_PACKAGE_ENTRY: u64 = 512 * 1024 * 1024;
 const MAX_PACKAGE_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
 
 impl Project {
+    /// The slide the editor works on at `i`. Today these are the slides of the project; later the master and the layouts will be reachable by
+    /// the same numbers (see #75), so the editor reads and writes slides through these and not through `slides` directly.
+    pub fn slide(&self, i: usize) -> &Slide { let n = self.slides.len(); if i < n { &self.slides[i] } else { &self.layout_slides[i - n] } }
+    pub fn slide_mut(&mut self, i: usize) -> &mut Slide { let n = self.slides.len(); if i < n { &mut self.slides[i] } else { &mut self.layout_slides[i - n] } }
+    pub fn slide_get(&self, i: usize) -> Option<&Slide> { let n = self.slides.len(); if i < n { self.slides.get(i) } else { self.layout_slides.get(i - n) } }
+    pub fn slide_get_mut(&mut self, i: usize) -> Option<&mut Slide> { let n = self.slides.len(); if i < n { self.slides.get_mut(i) } else { self.layout_slides.get_mut(i - n) } }
+    /// How many slides can be edited: the slides, then the master and layouts while their stand-ins are open.
+    pub fn slide_count(&self) -> usize { self.slides.len() + self.layout_slides.len() }
+    /// Where the editable slide with this id is (a slide, or a stand-in).
+    pub fn slide_index_of(&self, id: &str) -> Option<usize> { self.slides.iter().chain(self.layout_slides.iter()).position(|s| s.id == id) }
+
     /// The most recent colors kept.
     pub const RECENT_COLORS: usize = 10;
     /// The most colors a palette holds.

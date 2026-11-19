@@ -160,12 +160,12 @@ impl App {
     /// Apply a gallery style to every selected object that can be a button.
     pub(super) fn apply_button_style(&mut self, def: &StyleDef) {
         let sel: Vec<(usize, usize)> = self.selection().into_iter().filter(|&(l, k)| {
-            self.project.as_ref().and_then(|p| p.slides.get(self.slide)).and_then(|s| s.layers.get(l)).and_then(|l| l.objects.get(k)).is_some_and(states_panel::supports_states)
+            self.project.as_ref().and_then(|p| p.slides.get(self.view.slide)).and_then(|s| s.layers.get(l)).and_then(|l| l.objects.get(k)).is_some_and(states_panel::supports_states)
         }).collect();
         if sel.is_empty() { return; }
         self.end_state_swap();
         self.snapshot();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slides[self.view.slide].layers;
         for (l, k) in sel { apply(&mut layers[l].objects[k], def); }
         self.dirty = true;
         self.status = format!("{} {} button style applied", def.name, def.look.label().to_lowercase());

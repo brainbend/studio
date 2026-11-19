@@ -1,11 +1,10 @@
-//! The tools that set up and use a lesson's look: its theme (colours and fonts), brand palette, master and layouts.
+//! The tools that set up and use a lesson's look: its theme (colors and fonts), brand palette, master and layouts.
 //!
-//! These are what let an AI tool leave a lesson the author can keep editing in the same style: it sets the colours and fonts
+//! These are what let an AI tool leave a lesson the author can keep editing in the same style: it sets the colors and fonts
 //! once, makes layouts with placeholders (the same thing the layout builder makes), and puts each slide on a layout, so a new
 //! slide the author adds later follows the same design. Like every tool they run on the app's own thread, after an undo
 //! snapshot; the theme, palette, master and layouts are all part of that snapshot.
 use super::*;
-use crate::master_view::MASTER_SCENE;
 use crate::mcp_tools::*;
 use brainbend_doc::master::{placeholder_object, Background, PlaceholderKind, SlideLayout, THEME_COLOR_NAMES};
 use serde_json::{json, Value};
@@ -126,12 +125,12 @@ if they say yes, call this again with approved set to true. Otherwise build with
                 "placeholders": l.objects.iter().filter(|o| o.placeholder.is_some()).map(describe_object).collect::<Vec<_>>(),
                 "shapes": l.objects.iter().filter(|o| o.placeholder.is_none()).map(describe_object).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
-            "slides": p.slides.iter().enumerate().filter(|(_, s)| s.scene != MASTER_SCENE).map(|(i, s)| json!({ "number": i + 1, "layout": layout_of(s) })).collect::<Vec<_>>(),
-            "note": "Objects keep the colours they were made with, so changing the theme does not recolour slides that already exist.",
+            "slides": p.slides.iter().enumerate().map(|(i, s)| json!({ "number": i + 1, "layout": layout_of(s) })).collect::<Vec<_>>(),
+            "note": "Objects keep the colors they were made with, so changing the theme does not recolor slides that already exist.",
         }))
     }
 
-    /// Sets the theme colours and fonts, the brand palette and the master.
+    /// Sets the theme colors and fonts, the brand palette and the master.
     pub(super) fn mcp_set_design(&mut self, a: &Value) -> Result<String, String> {
         let p = self.project.as_ref().unwrap();
         let mut theme = p.theme.clone();
@@ -257,7 +256,7 @@ if they say yes, call this again with approved set to true. Otherwise build with
         let which = text_arg(a, "layout")?.ok_or("`layout` must be a layout's name or id.")?;
         let id = find_layout(self.project.as_ref().unwrap(), &which)?;
         self.set_slide_layout(i, Some(id.clone()));
-        self.slide = i;
+        self.view.slide = i;
         self.status = format!("AI tool: changed the layout of slide {}", i + 1);
         let s = &self.project.as_ref().unwrap().slides[i];
         done(json!({ "slide": i + 1, "layout": id, "objects": s.layers[0].objects.iter().map(describe_object).collect::<Vec<_>>() }))

@@ -49,12 +49,17 @@ Connect your own AI tool and let it build lessons while you watch. Run Claude Co
 
 ## What you can add
 
-**Theme** (Theme tab)
+The ribbon is for adding things and for settings that cover the whole project. Formatting a slide or an object is done in the **Properties** panel, which shows the slide (including its background) or whatever you select. The ribbon can be pinned open or collapsed to give the slide more room.
+
+**Project** (Project tab)
 
 | Group | Options |
 |---|---|
-| Master | Layout Builder (build your own slide layouts) · Layout (change a slide's layout) · Slide Size (16:9 or 4:3) |
-| Brand | Background (color, gradient or picture) · Colors (your project's colors) · Headings and Body fonts |
+| Master | Layout Builder (build your own slide layouts, opened as a tab beside the slides) · Layout (change a slide's layout) · Slide Size (16:9 or 4:3) |
+| Brand | Colors (your project's colors) · Headings and Body fonts |
+| Course | Variables · Pass mark |
+| Player | Player Settings (colors, font, sidebar, title, logo and controls) |
+| Check | Accessibility Checker · Spelling · Focus Order |
 
 **Slides** (Slides tab)
 
@@ -64,15 +69,18 @@ Connect your own AI tool and let it build lessons while you watch. Run Claude Co
 | Graded questions | Multiple choice · Multiple response · True / False · Fill in the blank · Matching · Sequencing · Fill in the blanks · Drag the words · Mark the words · Number · Sort into groups · Find the hotspot · Label the picture · Choose from lists · Dictation |
 | Survey questions (not scored) | Rating scale · Free text |
 | Results | A quiz results slide that reports the score |
-| Course | Variables · Pass mark |
 
 **Objects** (Objects tab)
 
 | Group | Objects |
 |---|---|
-| Text | Text Box · Table · Slide Number |
+| Text | Text Box · Table · Slide Number · Placeholder (a heading or text box that asks for text, for layouts) · Hyperlink |
 | Media | Picture (including SVG) · Shape · Video · Audio · Caption (speech and thought bubbles) · 360° Image · Equation · Icons (a vector gallery you can recolor) · Web Object |
 | Interactive | Button (with Normal, Hover, Down, Visited, Disabled and Selected states) · Slider · Hotspot (rectangle, oval or freeform) · Dial (knob or needle) · Input (check box, radio button, text entry, number entry) · Marker |
+
+**Help** (Help tab): Docs · Submit Issue · BrainBend Community · Set up AI · Studio Options · Check for Updates.
+
+**Properties panel**: bars that open to the settings of what is selected, like an inspector. For a slide: Settings, Background (color, gradient or picture), Timeline and Transition, plus the question's own bar on a question slide. For an object: its settings, fill and line, text, effects, triggers and more. A 360° image opens in its own tab, with Marker and Hotspot in the Objects tab and its cards, effects, initial view and triggers in the panel.
 
 Parts can be grouped so a card made of a shape, an icon and some words works as one button for the mouse, the keyboard and screen readers.
 

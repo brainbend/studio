@@ -733,4 +733,121 @@ mod tests {
         assert!(p.referenced_assets().contains("bg"));
         assert_eq!(p.prune_unused_assets(), 0);
     }
+
+    #[test]
+    fn the_master_and_layouts_open_as_slides_that_are_edited_in_place_and_sync_back() {
+        let mut p = project();
+        // A slide that follows the layout "lay": its heading is where the layout puts it.
+        let mut lay = SlideLayout::new("lay", "L");
+        lay.objects.push(placeholder_object("lp", PlaceholderKind::Title, &p.theme, 10.0, 20.0, 400.0, 100.0));
+        p.layouts.push(lay);
+        p.apply_layout(0, "lay", &mut || "new".to_string());
+        let before = p.slides[0].layers[0].objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).map(|o| (o.x, o.y)).unwrap();
+        assert_eq!(before, (10.0, 20.0));
+        assert!(!p.layouts_open() && p.slide_count() == p.slides.len());
+        let (n, layouts) = (p.slides.len(), p.layouts.len());
+        // Open them: the master and each layout, after the slides, in the same numbering.
+        p.open_layouts();
+        assert!(p.layouts_open());
+        assert_eq!(p.slide_count(), n + 1 + layouts);
+        assert_eq!(p.slide(n).id, MASTER_STAND_IN);
+        let li = p.slide_index_of("m:lay").expect("the layout's stand-in");
+        assert_eq!(li, n + 1 + p.layouts.iter().position(|l| l.id == "lay").unwrap());
+        assert_eq!(p.slide_index_of("s1"), Some(0), "a slide is found by its number as before");
+        // Nothing has been changed, so nothing syncs.
+        assert!(!p.sync_layouts());
+        // Edit the layout's heading in place, through the same accessors a slide is edited with.
+        {
+            let o = p.slide_mut(li).layers[0].objects.iter_mut().find(|o| o.placeholder == Some(PlaceholderKind::Title)).unwrap();
+            (o.x, o.y) = (50.0, 60.0);
+        }
+        p.slide_mut(li).name = "Renamed".into();
+        p.slide_mut(n).layers[0].objects.push(Object::new("logo", "Logo", Kind::Rect, 0.0, 0.0, 50.0, 50.0));
+        assert!(p.layouts.iter().find(|l| l.id == "lay").unwrap().name == "L", "until it syncs the saved form is as it was");
+        assert!(p.sync_layouts());
+        let l = p.layouts.iter().find(|l| l.id == "lay").unwrap();
+        assert_eq!(l.name, "Renamed");
+        assert_eq!(l.objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).map(|o| (o.x, o.y)), Some((50.0, 60.0)));
+        assert!(p.master.objects.iter().any(|o| o.id == "logo"), "the master got the shape");
+        // The slide that followed the layout follows it.
+        let after = p.slides[0].layers[0].objects.iter().find(|o| o.placeholder == Some(PlaceholderKind::Title)).map(|o| (o.x, o.y)).unwrap();
+        assert_eq!(after, (50.0, 60.0));
+        assert!(!p.sync_layouts(), "synced, nothing is left to copy");
+        // A layout added or taken away as a stand-in is added or taken away.
+        let mut extra = Slide::new("m:extra", "Extra", 1920.0, 1080.0);
+        extra.layout = Some("extra".into());
+        p.layout_slides.push(extra);
+        assert!(p.sync_layouts() && p.layouts.iter().any(|l| l.id == "extra" && l.name == "Extra"));
+        let at = p.layout_slides.iter().position(|s| s.id == "m:lay").unwrap();
+        p.layout_slides.remove(at);
+        assert!(p.sync_layouts() && p.layouts.iter().all(|l| l.id != "lay"));
+        assert_eq!(p.slides[0].layout, None, "a slide that followed it no longer does");
+        // Closing copies what is left, and the stand-ins are gone; they are never saved.
+        p.slide_mut(n).name = "Master".into();
+        let json = String::from_utf8(p.to_json().unwrap()).unwrap();
+        assert!(!json.contains("m:master"), "stand-ins are not in the file");
+        assert!(!p.close_layouts());
+        assert!(!p.layouts_open() && p.slide_count() == p.slides.len());
+    }
+}
+
+/// The id of the master's stand-in slide. A layout's is `m:` and its id.
+pub const MASTER_STAND_IN: &str = "m:master";
+/// The scene the stand-ins belong to (they are not in the project's list of scenes).
+pub const LAYOUT_SCENE: &str = "master-scene";
+
+impl Project {
+    /// Whether the master and the layouts are open as editable slides.
+    pub fn layouts_open(&self) -> bool { !self.layout_slides.is_empty() }
+
+    /// Open the master and the layouts as slides the editor can work on: slide 0 of them is the master, then one per layout. Their slides come after
+    /// the project's own in the numbering (`slide`, `slide_mut`). A no-op while they are open.
+    pub fn open_layouts(&mut self) {
+        if self.layouts_open() || self.slides.is_empty() { return; }
+        let (w, h) = (self.slides[0].width, self.slides[0].height);
+        let stand_in = |id: String, name: &str, bg: &Option<Background>, objects: &[Object], layout: Option<String>| {
+            let mut s = Slide::new(&id, name, w, h);
+            s.background = bg.clone();
+            s.layers[0].objects = objects.to_vec();
+            s.layout = layout;
+            s.scene = LAYOUT_SCENE.into();
+            s
+        };
+        let mut v = vec![stand_in(MASTER_STAND_IN.into(), "Layout Master", &self.master.background, &self.master.objects, None)];
+        for l in &self.layouts { v.push(stand_in(format!("m:{}", l.id), &l.name, &l.background, &l.objects, Some(l.id.clone()))); }
+        self.layout_slides = v;
+    }
+
+    /// Copy what has been done to the stand-ins into the master and the layouts, and carry the changes over to the slides that use a layout (as
+    /// leaving the Layout Builder always did). A stand-in that has gone is a layout that was deleted; one that is new is a layout that was added.
+    /// Returns whether anything changed. Does nothing while the stand-ins are not open.
+    pub fn sync_layouts(&mut self) -> bool {
+        if !self.layouts_open() { return false; }
+        let master = Master { background: self.layout_slides[0].background.clone(), objects: self.layout_slides[0].layers[0].objects.clone() };
+        let layouts: Vec<SlideLayout> = self.layout_slides[1..].iter().filter_map(|s| {
+            let id = s.layout.clone()?;
+            let show_master = self.layouts.iter().find(|l| l.id == id).is_none_or(|l| l.show_master);
+            Some(SlideLayout { id, name: s.name.clone(), background: s.background.clone(), objects: s.layers[0].objects.clone(), show_master })
+        }).collect();
+        let key = |m: &Master, l: &[SlideLayout]| serde_json::to_string(&(m, l)).unwrap_or_default();
+        if key(&master, &layouts) == key(&self.master, &self.layouts) { return false; }
+        for s in self.slides.iter_mut() {
+            let Some(id) = s.layout.clone() else { continue };
+            match (layouts.iter().find(|l| l.id == id), self.layouts.iter().find(|l| l.id == id)) {
+                (Some(new), Some(old)) => propagate(old, new, s),
+                (None, _) => s.layout = None,
+                _ => {}
+            }
+        }
+        self.layouts = layouts;
+        self.master = master;
+        true
+    }
+
+    /// Close the stand-ins, after copying what is in them into the master and the layouts.
+    pub fn close_layouts(&mut self) -> bool {
+        let changed = self.sync_layouts();
+        self.layout_slides.clear();
+        changed
+    }
 }

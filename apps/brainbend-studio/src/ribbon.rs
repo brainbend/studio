@@ -4,6 +4,8 @@
 //! changed are then written to every selected object, so formatting works on multi-selections too.
 use super::*;
 
+pub(crate) mod format_panel;
+
 // Phosphor icon codepoints (regular weight).
 pub const UNDO: char = '\u{e024}';
 pub const REDO: char = '\u{e026}';
@@ -17,11 +19,11 @@ pub const LINK: char = '\u{e2e2}';
 pub const SIGMA: char = '\u{eab8}';
 pub const SEARCH: char = '\u{e30c}';
 pub const PAINTER: char = '\u{e590}';
-pub const CLEAR_FMT: char = '\u{e488}';
 pub const JUSTIFY: char = '\u{e482}';
 pub const FUNCTION: char = '\u{ebe4}';
 pub const PIN: char = '\u{e316}';
-pub const BOLT: char = '\u{e2de}';
+pub const THUMBTACK: char = '\u{e3e2}';
+pub const GEAR: char = '\u{e270}';
 pub const GAUGE: char = '\u{e628}';
 pub const HASH: char = '\u{e2a2}';
 pub const STAR: char = '\u{e46a}';
@@ -29,13 +31,8 @@ pub const CHAT: char = '\u{e15c}';
 pub const GLOBE: char = '\u{e288}';
 pub const PANORAMA: char = '\u{eaa2}';
 pub const STRIKE: char = '\u{e5c2}';
-pub const HIGHLIGHT: char = '\u{e3b2}';
-pub const LINE_SPACING: char = '\u{e098}';
-pub const ROTATE: char = '\u{e036}';
-pub const SPACING: char = '\u{e0a0}';
 pub const INDENT_OUT: char = '\u{e062}';
 pub const INDENT_IN: char = '\u{e064}';
-pub const SPELL: char = '\u{e182}';
 pub const ALIGN_L: char = '\u{e484}';
 pub const ALIGN_C: char = '\u{e480}';
 pub const ALIGN_R: char = '\u{e486}';
@@ -52,6 +49,7 @@ pub const ARROW_COUNTER: char = '\u{e038}';
 pub const VIDEO: char = '\u{e4da}';
 pub const SPEAKER: char = '\u{e44a}';
 pub const STACK: char = '\u{e466}';
+pub const LAYOUT: char = '\u{e6d6}';
 pub const BUCKET: char = '\u{e392}';
 pub const DROP: char = '\u{e210}';
 pub const PLAY: char = '\u{e3d0}';
@@ -59,7 +57,6 @@ pub const EXPORT: char = '\u{eaf0}';
 pub const EYE_OFF: char = '\u{e224}';
 pub const TIMER: char = '\u{e492}';
 pub const CHECK: char = '\u{e186}';
-pub const X: char = '\u{e4f6}';
 pub const QUESTION: char = '\u{e3e8}';
 pub const FRONT: char = '\u{e462}';
 pub const BACK: char = '\u{e468}';
@@ -79,14 +76,10 @@ pub const SAVE: char = '\u{e248}';
 pub const FOLDER: char = '\u{e256}';
 pub const CARET: char = '\u{e136}';
 pub const PASTE: char = '\u{e196}';
-pub const CUT: char = '\u{eae0}';
 pub const MAGNIFY: char = '\u{e30c}';
 pub const ACCESS: char = '\u{e4e8}';
 pub const MOON: char = '\u{e330}';
 pub const BOOK_OPEN: char = '\u{e0e6}';
-pub const BUG: char = '\u{e5f4}';
-pub const DISCORD: char = '\u{e61a}';
-pub const REFRESH: char = '\u{e094}';
 pub const WARNING_CIRCLE: char = '\u{e4e2}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const ARROW_DOWN: char = '\u{e03e}';
@@ -109,14 +102,12 @@ fn icon_text(c: char, size: f32) -> egui::RichText {
     egui::RichText::new(c.to_string()).family(icons()).size(size)
 }
 
-const PALETTE: [(u8, u8, u8); 18] = [
-    (255, 255, 255), (242, 242, 242), (191, 191, 191), (127, 127, 127), (64, 64, 64), (0, 0, 0),
-    (3, 83, 158), (0, 120, 215), (0, 130, 120), (60, 160, 70), (240, 180, 0), (240, 120, 30),
-    (200, 40, 40), (200, 60, 140), (110, 70, 170), (20, 30, 60), (180, 225, 230), (250, 230, 180),
-];
 
 /// Corner radius used throughout the ribbon (card, buttons, fields).
 pub const RIBBON_RADIUS: f32 = 4.0;
+
+/// The height of the title bar: the 24-point row and the margin above and below it (see `title_bar`).
+pub const TITLE_BAR_HEIGHT: f32 = 24.0 + 2.0 * 8.0;
 
 /// Make ordinary buttons flat: no background or outline until hovered, like the Office ribbon.
 pub(super) fn flat(ui: &mut egui::Ui) {
@@ -206,6 +197,7 @@ fn big_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected:
 
 /// `big_widget`, at least `min_w` wide.
 fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, min_w: f32) -> egui::Response {
+    if panel_compact(ui) { return compact_widget(ui, icon, label, caret, selected); }
     let lines = label_lines(ui, label);
     let font = egui::FontId::proportional(11.5);
     let widest = lines.iter().enumerate().map(|(i, l)| {
@@ -242,115 +234,51 @@ fn big_widget_min(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selec
     resp
 }
 
-/// A big ribbon button whose picture is drawn by `draw` (given the painter, the 30 x 20 frame it may draw in, the colour of the
-/// new slide and the colour of the old one), for a gallery of things no icon font has a glyph for.
-fn big_drawn_button(ui: &mut egui::Ui, label: &str, tip: &str, selected: bool, draw: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32, egui::Color32)) -> egui::Response {
-    let w = big_width(ui, label, false);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, BIG_H), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    if ui.is_rect_visible(rect) {
-        let vis = ui.style().interact_selectable(&resp, selected);
-        if resp.hovered() || resp.has_focus() || selected {
-            ui.painter().rect_filled(rect, RIBBON_RADIUS, if selected { vis.bg_fill } else { vis.weak_bg_fill });
-        }
-        let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
-        let frame = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 18.0), egui::vec2(30.0, 20.0));
-        let old = if selected { col.gamma_multiply(0.45) } else { text_col(ui).gamma_multiply(0.35) };
-        let new = if selected { col } else { ACCENT };
-        draw(&ui.painter().with_clip_rect(frame.expand(1.5)), frame, new, old);
-        ui.painter().rect_stroke(frame, 2.0, egui::Stroke::new(1.2, col), egui::StrokeKind::Outside);
-        ui.painter().text(egui::pos2(rect.center().x, rect.top() + 31.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(11.5), col);
-    }
-    resp.on_hover_text(tip)
+/// In the Properties panel the big ribbon buttons are one row tall: the icon, the name and a caret beside each other.
+fn panel_compact(ui: &egui::Ui) -> bool { ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("panel-compact"))).unwrap_or(false) }
+
+/// The next compact button in the Properties panel is this wide (a row's whole control, or half of it).
+fn fill_next(ui: &egui::Ui, w: f32) { ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("compact-fill"), w)); }
+
+/// A control in the Properties panel gets a row: its name on the left and the control filling the rest. On the ribbon
+/// it is just the control. `f` is given the width of the control.
+fn pr(ui: &mut egui::Ui, label: &str, f: impl FnOnce(&mut egui::Ui, f32)) {
+    if panel_mode(ui) { format_panel::row(ui, label, |ui, w| { fill_next(ui, w); f(ui, w) }); } else { f(ui, 0.0); }
 }
 
-/// What each kind of slide transition looks like in the ribbon: the old slide in grey, the new one in colour, part way through.
-fn draw_transition(kind: brainbend_doc::TransitionKind, p: &egui::Painter, f: egui::Rect, new: egui::Color32, old: egui::Color32) {
-    use brainbend_doc::TransitionKind::*;
-    let part = |x0: f32, x1: f32, y0: f32, y1: f32| egui::Rect::from_min_max(egui::pos2(f.left() + f.width() * x0, f.top() + f.height() * y0), egui::pos2(f.left() + f.width() * x1, f.top() + f.height() * y1));
-    match kind {
-        Fade => {
-            const N: usize = 10;
-            for i in 0..N {
-                let t = i as f32 / (N - 1) as f32;
-                let c = egui::Color32::from_rgba_unmultiplied(new.r(), new.g(), new.b(), (255.0 * t) as u8);
-                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, old);
-                p.rect_filled(part(i as f32 / N as f32, (i + 1) as f32 / N as f32, 0.0, 1.0), 0.0, c);
-            }
-        }
-        Push => {
-            p.rect_filled(part(-0.45, 0.5, 0.0, 1.0), 0.0, old);
-            p.rect_filled(part(0.5, 1.45, 0.0, 1.0), 0.0, new);
-            p.line_segment([part(0.5, 0.5, 0.0, 0.0).min, part(0.5, 0.5, 1.0, 1.0).min + egui::vec2(0.0, 0.0)], egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)));
-        }
-        Cover => {
-            p.rect_filled(f, 0.0, old);
-            p.rect_filled(part(0.4, 1.0, 0.0, 1.0), 0.0, new);
-            p.line_segment([part(0.4, 0.4, 0.0, 0.0).min, part(0.4, 0.4, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
-        }
-        Uncover => {
-            p.rect_filled(f, 0.0, new);
-            p.rect_filled(part(-0.4, 0.55, 0.0, 1.0), 0.0, old);
-            p.line_segment([part(0.55, 0.55, 0.0, 0.0).min, part(0.55, 0.55, 1.0, 1.0).min], egui::Stroke::new(1.5, egui::Color32::from_black_alpha(110)));
-        }
-        Wipe => {
-            p.rect_filled(f, 0.0, old);
-            p.rect_filled(part(0.0, 0.58, 0.0, 1.0), 0.0, new);
-            for k in 0..4 { let y = k as f32 / 4.0; p.rect_filled(part(0.58, 0.75, y + 0.06, y + 0.19), 0.0, new.gamma_multiply(0.55)); }
-        }
-        Split => {
-            p.rect_filled(f, 0.0, old);
-            p.rect_filled(part(0.3, 0.7, 0.0, 1.0), 0.0, new);
-            let s = egui::Stroke::new(1.3, egui::Color32::WHITE);
-            p.line_segment([part(0.3, 0.3, 0.5, 0.5).min, part(0.12, 0.12, 0.5, 0.5).min], s);
-            p.line_segment([part(0.7, 0.7, 0.5, 0.5).min, part(0.88, 0.88, 0.5, 0.5).min], s);
-        }
-        Zoom => {
-            p.rect_filled(f, 0.0, old);
-            p.rect_filled(part(0.28, 0.72, 0.18, 0.82), 1.0, new);
-            let s = egui::Stroke::new(1.0, new);
-            p.rect_stroke(part(0.12, 0.88, 0.08, 0.92), 1.0, s, egui::StrokeKind::Inside);
-        }
-        Dissolve => {
-            p.rect_filled(f, 0.0, old);
-            // Scattered squares of the new slide, in a fixed pattern.
-            for i in 0..6 { for j in 0..4 {
-                if (i * 7 + j * 5 + i * j) % 3 != 0 { p.rect_filled(part(i as f32 / 6.0, (i + 1) as f32 / 6.0, j as f32 / 4.0, (j + 1) as f32 / 4.0), 0.0, new); }
-            } }
-        }
+/// The controls of a ribbon group sit side by side; in the Properties panel they stack as rows.
+fn hwrap(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui)) { if panel_mode(ui) { ui.vertical(f); } else { ui.horizontal(f); } }
+
+fn compact_widget(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool) -> egui::Response {
+    compact_widget_in(ui, icon, label, caret, selected, true)
+}
+
+/// `compact_widget`; with `filled` off the caller draws what is behind it (Publish's tinted outline).
+fn compact_widget_in(ui: &mut egui::Ui, icon: char, label: &str, caret: bool, selected: bool, filled: bool) -> egui::Response {
+    let plain = label.replace('\n', " ");
+    let font = egui::FontId::proportional(12.0);
+    let tw = ui.fonts_mut(|f| f.layout_no_wrap(plain.clone(), font.clone(), egui::Color32::WHITE).size().x);
+    let natural = 8.0 + 18.0 + tw + if caret { 16.0 } else { 6.0 };
+    let w = ui.ctx().data_mut(|d| d.remove_temp::<f32>(egui::Id::new("compact-fill"))).map(|f| f.max(natural.min(60.0))).unwrap_or(natural);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), plain.clone()));
+    if ui.is_rect_visible(rect) {
+        let enabled = ui.is_enabled();
+        let vis = ui.style().interact_selectable(&resp, selected);
+        if filled { ui.painter().rect_filled(rect, 3.0, if selected { vis.bg_fill } else if resp.hovered() { vis.weak_bg_fill } else { ui.visuals().widgets.inactive.weak_bg_fill }); }
+        let col = if selected { vis.fg_stroke.color } else { text_col(ui) };
+        let icon_col = if !selected && enabled && ui.visuals().override_text_color.is_none() { tint(icon) } else { col };
+        ui.painter().text(egui::pos2(rect.left() + 6.0, rect.center().y), egui::Align2::LEFT_CENTER, icon, egui::FontId::new(14.0, icons()), icon_col);
+        ui.painter().text(egui::pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, &plain, font, col);
+        if caret { chevron(ui.painter(), egui::pos2(rect.right() - 9.0, rect.center().y), 2.8, col); }
     }
+    resp
 }
 
 /// `c` mixed towards black by `t` (0 to 1), still fully opaque.
 fn shade(c: egui::Color32, t: f32) -> egui::Color32 {
     let k = 1.0 - t;
     egui::Color32::from_rgb((c.r() as f32 * k).round() as u8, (c.g() as f32 * k).round() as u8, (c.b() as f32 * k).round() as u8)
-}
-
-/// The width `big_widget` gives a button, so a group of them can be sized before it is drawn.
-fn big_width(ui: &egui::Ui, label: &str, caret: bool) -> f32 {
-    let lines = label_lines(ui, label);
-    let font = egui::FontId::proportional(11.5);
-    let widest = lines.iter().enumerate().map(|(i, l)| {
-        let w = ui.fonts_mut(|f| f.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE).size().x);
-        if caret && i + 1 == lines.len() { w + 14.0 } else { w }
-    }).fold(0.0f32, f32::max);
-    (widest + 6.0).max(36.0)
-}
-
-/// A caption under a row of controls, like `group` but without the divider after it.
-fn pinned_group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
-        let body = ui.vertical(|ui| {
-            ui.set_min_height(BIG_H);
-            add(ui);
-        });
-        let w = body.response.rect.width().max(30.0);
-        ui.allocate_ui_with_layout(egui::vec2(w, CAP_H), egui::Layout::top_down(egui::Align::Center), |ui| {
-            ui.add(egui::Label::new(egui::RichText::new(caption).size(10.5).color(ui.visuals().text_color().gamma_multiply(0.55))).wrap_mode(egui::TextWrapMode::Extend));
-        });
-    });
 }
 
 /// Large flat button (icon above a short label).
@@ -378,50 +306,6 @@ fn big_menu(ui: &mut egui::Ui, icon: char, label: &str, tip: &str, content: impl
         content(ui);
     });
     resp
-}
-
-/// Text followed by a small dropdown caret (the caret glyph lives in the icon font).
-fn caret_job(ui: &egui::Ui, text: &str, icon: Option<char>) -> egui::text::LayoutJob {
-    let col = text_col(ui);
-    let mut job = egui::text::LayoutJob::default();
-    if let Some(i) = icon {
-        job.append(&i.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: col, ..Default::default() });
-        job.append("  ", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    }
-    job.append(text, 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    job.append("  ", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    job.append(&CARET.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(9.0, icons()), color: col, ..Default::default() });
-    job
-}
-
-/// An entrance or exit as one button; its panel holds the effects, how it starts and how long it takes.
-/// There is no delay to set: when the object is shown is the timeline's job.
-fn effect_menu(ui: &mut egui::Ui, icon: char, title: &str, tip: &str, effect: &mut Option<Entrance>, step: &mut u32, with_delay: bool) -> bool {
-    let mut changed = false;
-    let tip = match effect { Some(e) => format!("{title}: {}", effect_label(e.kind)), None => tip.to_string() };
-    let btn = big_widget(ui, icon, title, true, effect.is_some()).on_hover_text(tip);
-    egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-        ui.set_min_width(210.0);
-        if ui.selectable_label(effect.is_none(), "none").clicked() { *effect = None; changed = true; }
-        for k in EFFECT_KINDS {
-            if ui.selectable_label(effect.map(|e| e.kind) == Some(k), effect_label(k)).clicked() {
-                let prev = *effect;
-                *effect = Some(Entrance { kind: k, delay_ms: prev.map(|e| e.delay_ms).unwrap_or(0), duration_ms: prev.map(|e| e.duration_ms).unwrap_or(500) });
-                changed = true;
-            }
-        }
-        if let Some(en) = effect.as_mut() {
-            ui.separator();
-            changed |= click_row(ui, &format!("ck-{title}"), "Starts", step);
-            ui.horizontal(|ui| {
-                ui.label("takes");
-                changed |= ui.add(egui::DragValue::new(&mut en.duration_ms).range(50..=10000).speed(10.0).suffix(" ms")).changed();
-            });
-            if with_delay { changed |= delay_leftover(ui, &mut en.delay_ms); }
-            else { ui.weak("Leaves when its bar ends on the timeline."); }
-        }
-    });
-    changed
 }
 
 /// A delay saved by an earlier version is still honored, so it is shown (and can be cleared); nothing offers to set a new one.
@@ -519,40 +403,34 @@ fn grow_job(ui: &egui::Ui, up: bool) -> egui::text::LayoutJob {
     job
 }
 
-/// An icon followed by a short label, for small buttons that have both.
-fn caret_job_plain(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
+/// An icon and a word in the menu's own color, for a row of a dropdown.
+fn menu_job(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
     let col = text_col(ui);
     let mut job = egui::text::LayoutJob::default();
-    job.append(&icon.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: tint(icon), ..Default::default() });
-    job.append("  ", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
-    job.append(text, 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(12.5), color: col, ..Default::default() });
+    job.append(&icon.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: col, ..Default::default() });
+    job.append(&format!("   {text}"), 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(13.0), color: col, ..Default::default() });
     job
 }
 
 /// One row in a dropdown: small icon, then text.
 fn menu_item(ui: &mut egui::Ui, icon: char, text: &str) -> egui::Response {
-    let col = text_col(ui);
-    let mut job = egui::text::LayoutJob::default();
-    job.append(&icon.to_string(), 0.0, egui::text::TextFormat { font_id: egui::FontId::new(16.0, icons()), color: col, ..Default::default() });
-    job.append(&format!("   {text}"), 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(13.0), color: col, ..Default::default() });
+    let job = menu_job(ui, icon, text);
     ui.add(egui::Button::new(job).frame(false).min_size(egui::vec2(ui.available_width().min(300.0), 24.0)))
-}
-
-/// Small square icon button; `on` draws it pressed (for toggles).
-/// A compact icon button, three of which stack in the height of one large button.
-fn tiny_button(ui: &mut egui::Ui, icon: char, on: bool, tip: &str) -> egui::Response {
-    ui.scope(|ui| {
-        ui.spacing_mut().button_padding = egui::vec2(1.0, 1.0);
-        ui.spacing_mut().interact_size.y = 20.0;
-        ui.add(egui::Button::new(icon_text(icon, 14.0)).selected(on).min_size(egui::vec2(22.0, 20.0)))
-    }).inner.on_hover_text(tip)
 }
 
 fn icon_button(ui: &mut egui::Ui, icon: char, on: bool, tip: &str) -> egui::Response {
     // Small and tight: a 22px square holding a 15px glyph, with no padding of its own.
     let resp = ui.scope(|ui| {
         ui.spacing_mut().button_padding = egui::vec2(1.0, 1.0);
-        ui.add(egui::Button::new(icon_text(icon, 15.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+        if icon == THUMBTACK {
+            // The pin is painted by hand, 1px left of the box center, so its drawing looks centered.
+            let r = ui.add(egui::Button::new("").selected(on).min_size(egui::vec2(22.0, 22.0)));
+            let col = ui.style().interact_selectable(&r, on).fg_stroke.color;
+            ui.painter().text(r.rect.center() + egui::vec2(-1.0, 0.0), egui::Align2::CENTER_CENTER, icon, egui::FontId::new(15.0, icons()), col);
+            r
+        } else {
+            ui.add(egui::Button::new(icon_text(icon, 15.0)).selected(on).min_size(egui::vec2(22.0, 22.0)))
+        }
     }).inner;
     // An icon has no words of its own: the tip names it for screen readers and for tests.
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
@@ -604,17 +482,9 @@ fn caret_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-/// The tabs, left to right, in the order an author works through them. Layout Builder shows only inside its own mode.
-pub const TABS: [&str; 9] = ["File", "Home", "Theme", "Slides", "Objects", "Animations", "Layout Builder", "Review", "Help"];
-pub const HOME_TAB: usize = 1;
-pub const THEME_TAB: usize = 2;
-pub const SLIDES_TAB: usize = 3;
-pub const OBJECTS_TAB: usize = 4;
-pub const ANIMATIONS_TAB: usize = 5;
-pub const MASTER_TAB: usize = 6;
-pub const REVIEW_TAB: usize = 7;
-pub const HELP_TAB: usize = 8;
-const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
+/// The tabs, left to right. Everything about the chosen slide or
+/// object is in the Properties panel; the ribbon is for adding things and for the project as a whole.
+pub(crate) const ISSUES_URL: &str = "https://github.com/brainbend/studio/issues/new/choose";
 /// The community link goes through a redirect page on the project's own site, so a Discord invite that expires or
 /// changes is fixed there and not by shipping a new build.
 pub const COMMUNITY_URL: &str = "https://brainbend.org/discord/";
@@ -665,8 +535,10 @@ fn pill(ui: &mut egui::Ui, id: &str, p: Pill) -> egui::Response {
     let _ = p.bold;
     let left = slot.center().x - (galley.size().x + caret_w) / 2.0;
     let gw = galley.size().x;
-    painter.galley(egui::pos2(left, slot.center().y - galley.size().y / 2.0), galley, p.ink);
-    if p.caret { chevron(painter, egui::pos2(left + gw + 10.0, slot.center().y + 0.5), 3.0, p.ink); }
+    // The tab hangs from the top edge, so what shows is the frame, and the label is centered in that.
+    let mid = frame.center().y;
+    painter.galley(egui::pos2(left, mid - galley.size().y / 2.0), galley, p.ink);
+    if p.caret { chevron(painter, egui::pos2(left + gw + 10.0, mid + 0.5), 3.0, p.ink); }
     resp
 }
 
@@ -684,7 +556,15 @@ fn rows(ui: &mut egui::Ui) {
 const CAP_H: f32 = 14.0;
 
 /// A ribbon group: a fixed-height column of controls, its caption centred underneath, and a thin divider line.
+/// Whether the controls are being drawn into the Properties panel (as bars) rather than the ribbon.
+fn panel_mode(ui: &egui::Ui) -> bool { ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("panel-groups"))).unwrap_or(false) }
+
 fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
+    // In the Properties panel a group is a bar of the accordion instead of a block of the ribbon.
+    if panel_mode(ui) {
+        format_panel::section(ui, caption, caption, false, |ui| { add(ui); });
+        return;
+    }
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
         let body = ui.vertical(|ui| {
@@ -701,80 +581,6 @@ fn group(ui: &mut egui::Ui, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
     let line = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
     ui.painter().line_segment([r.center_top() + egui::vec2(0.0, 6.0), r.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, line));
     ui.add_space(1.0);
-}
-
-/// Extra width an outlined button gets, so its label does not touch the border.
-const OUTLINE_PAD: f32 = 16.0;
-
-/// For a main-action button drawn as an outline: its text and icon take the main-action color, and the button's
-/// own hover fill is left off (the outline shape paints the states).
-fn outlined_look(ui: &mut egui::Ui) {
-    let p = primary(ui);
-    let v = ui.visuals_mut();
-    v.override_text_color = Some(p);
-    for w in [&mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] { w.weak_bg_fill = egui::Color32::TRANSPARENT; w.bg_fill = egui::Color32::TRANSPARENT; }
-}
-
-/// The outline and inside of a main-action button: a border in the main-action color, with an opaque tint inside
-/// and a darker border when the pointer is over it (`hot`), and more of both while pressed (`down`).
-fn outline_shape(ui: &egui::Ui, rect: egui::Rect, hot: bool, down: bool) -> egui::Shape {
-    let p = primary(ui);
-    let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-    let mix = |t: f32| { let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8; egui::Color32::from_rgb(m(card.r(), p.r()), m(card.g(), p.g()), m(card.b(), p.b())) };
-    let (fill, line) = if down { (mix(0.30), shade(p, 0.24)) } else if hot { (mix(0.15), shade(p, 0.12)) } else { (egui::Color32::TRANSPARENT, p) };
-    egui::Shape::Vec(vec![
-        egui::Shape::rect_filled(rect, RIBBON_RADIUS, fill),
-        egui::Shape::rect_stroke(rect, RIBBON_RADIUS, egui::Stroke::new(2.0, line), egui::StrokeKind::Inside),
-    ])
-}
-
-/// How wide the leading "way out" button of a mode is, divider included.
-fn lead_width(ui: &egui::Ui, label: &str, caption: &str) -> f32 { big_width(ui, label, false).max(caption_width(ui, caption)) + 12.0 }
-
-/// How wide a group's small caption is.
-fn caption_width(ui: &egui::Ui, caption: &str) -> f32 {
-    ui.fonts_mut(|f| f.layout_no_wrap(caption.to_string(), egui::FontId::proportional(10.5), egui::Color32::WHITE).size().x)
-}
-
-/// The button that leaves a mode, at the very start of the ribbon in the main-action color (so it is never
-/// scrolled away or missed), with a divider after it. True when clicked.
-fn lead_button(ui: &mut egui::Ui, at: egui::Rect, icon: char, label: &str, caption: &str, tip: &str) -> bool {
-    let mut clicked = false;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| {
-        let cw = caption_width(ui, caption).max(big_width(ui, label, false));
-        group(ui, caption, |ui| {
-            // The group is exactly as wide as its caption or button, whichever is wider, with the button centred over it.
-            ui.allocate_ui_with_layout(egui::vec2(cw, BIG_H), egui::Layout::top_down(egui::Align::Center), |ui| {
-            let backing = ui.painter().add(egui::Shape::Noop);
-            let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, icon, label, false, false, cw).on_hover_text(tip) }).inner;
-            ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), resp.is_pointer_button_down_on()));
-            clicked = resp.clicked();
-            });
-        });
-    });
-    clicked
-}
-
-fn rgba(c: egui::Color32) -> Rgba {
-    Rgba(c.r(), c.g(), c.b(), c.a())
-}
-
-/// A small icon button with a color bar under it; opens a palette + picker. Returns true when changed.
-/// "Starts: automatically / on click #n" for one animation. Effects with the same click number play together.
-fn click_row(ui: &mut egui::Ui, id: &str, label: &str, step: &mut u32) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.label(label);
-        combo(id).width(110.0).selected_text(if *step == 0 { "automatically" } else { "on click" }).show_ui(ui, |ui| {
-            if ui.selectable_label(*step == 0, "automatically").clicked() && *step != 0 { *step = 0; changed = true; }
-            if ui.selectable_label(*step > 0, "on click").on_hover_text("Waits for the learner to click the slide, press Next, or press the space bar").clicked() && *step == 0 { *step = 1; changed = true; }
-        });
-        if *step > 0 {
-            ui.label("click");
-            changed |= ui.add(egui::DragValue::new(step).range(1..=99)).changed();
-        }
-    });
-    changed
 }
 
 pub(super) fn color_menu(ui: &mut egui::Ui, icon: char, tip: &str, cur: &mut Option<Rgba>, none_label: Option<&str>) -> bool {
@@ -1109,6 +915,7 @@ fn shape_gallery(ui: &mut egui::Ui) -> Option<&'static str> {
                     for poly in path_polygons(&cmds, inner) { ui.painter().add(egui::Shape::closed_line(poly, stroke)); }
                 }
             }
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *label));
             if resp.on_hover_text(*label).clicked() { picked = Some(*name); }
             if (i + 1) % 4 == 0 { ui.end_row(); }
         }
@@ -1126,7 +933,7 @@ fn apply_diff(a: &Object, b: &Object, t: &mut Object) {
     sfield!(font_family, size, bold, italic, underline, color, align, valign);
 }
 
-/// Fill, outline and effects (shadow, corners) for the object being edited. Shared by the selection groups on Home.
+/// Fill, outline and effects (shadow, corners) for the object being edited. Shared by the selection groups of the Properties panel.
 /// A color mixed towards white: `t` of the color, the rest white.
 fn tint_toward_white(c: Rgba, t: f32) -> Rgba {
     let m = |v: u8| (v as f32 * t + 255.0 * (1.0 - t)).round() as u8;
@@ -1186,6 +993,7 @@ fn quick_styles(ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
 }
 
 fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    if panel_mode(ui) { return; }
     let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
     let is_pic = matches!(obj.kind, Kind::Image);
     let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
@@ -1217,6 +1025,146 @@ fn drawing_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
         }
 }
 
+
+fn multiple_response() -> Question {
+    let mut q = Question::new_single();
+    q.multiple = true;
+    q.choices[1].correct = true;
+    q
+}
+// Every question type is a button of its own, laid out three to a column so they fit the ribbon.
+
+const GRADED_QUESTIONS: [(char, &str, &str, fn() -> Question); 15] = [
+    (RADIO, "Multiple choice", "One correct answer from several", Question::new_single),
+    (CHECK, "Multiple response", "Several correct answers", multiple_response),
+    (SLIDERS, "True / False", "True or false", Question::new_true_false),
+    (TEXT_T, "Fill in the blank", "Type the answer", Question::new_text_entry),
+    (SHAPES, "Matching", "Match each item to its partner", Question::new_matching),
+    (LIST_NUM, "Sequencing", "Put the items in order", Question::new_sequence),
+    (TEXTBOX, "Fill in the blanks", "Type the missing words in a passage", Question::new_fill_blanks),
+    (CLICK, "Drag the words", "Drag words into the gaps of a passage", Question::new_drag_words),
+    (PEN, "Mark the words", "Mark the right words in a passage", Question::new_mark_words),
+    (TEXT_AA, "Number", "Type a number", Question::new_numeric),
+    (STACK, "Sort into groups", "Drag each item into its group", Question::new_categorize),
+    (IMAGE, "Find the hotspot", "Click the right place on a picture", Question::new_hotspot),
+    (FRAME, "Label the picture", "Put each label on its place in a picture", Question::new_label_picture),
+    (RADIO, "Choose from lists", "Pick the right word from drop-down lists in a passage", Question::new_dropdowns),
+    (SPEAKER, "Dictation", "Type what is heard", Question::new_dictation),
+];
+const SURVEY_QUESTIONS: [(char, &str, &str, fn() -> Question); 2] = [
+    (SLIDERS, "Rating scale", "A survey question answered on a scale; not scored", Question::new_likert),
+    (TEXTBOX, "Free text", "A survey question answered in the learner's own words; not scored", Question::new_reflection),
+];
+
+/// One thing that can be added to a slide: a button that adds it, or one that opens choices first (a table size, a shape).
+type InsertLeaf = (char, &'static str, &'static str, fn(&mut App));
+type InsertSub = (char, &'static str, &'static str, fn(&mut App, &mut egui::Ui));
+enum InsertEntry { Leaf(InsertLeaf), Sub(InsertSub) }
+
+impl InsertEntry {
+    fn label(&self) -> &'static str { match self { InsertEntry::Leaf(l) => l.1, InsertEntry::Sub(s) => s.1 } }
+    fn tip(&self) -> &'static str { match self { InsertEntry::Leaf(l) => l.2, InsertEntry::Sub(s) => s.2 } }
+    fn icon(&self) -> char { match self { InsertEntry::Leaf(l) => l.0, InsertEntry::Sub(s) => s.0 } }
+}
+
+/// Everything that can be added to a slide, in three groups: the gallery and the toolbar are both drawn from this.
+fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
+    use InsertEntry::{Leaf as L, Sub as S};
+    [
+        ("Text", vec![
+            L((TEXTBOX, "Text Box", "A box to type in", |a| a.insert_text())),
+            S((TABLE, "Table", "Rows and columns", |a, ui| { ui.set_min_width(0.0); if let Some((r, c)) = table_picker(ui) { a.insert_table(r, c); ui.close(); } })),
+            S((HASH, "Slide Number", "A number that follows the slide", |a, ui| {
+                if menu_item(ui, HASH, "Slide number").clicked() { a.insert_slide_number(false); ui.close(); }
+                if menu_item(ui, HASH, "Slide number of total").clicked() { a.insert_slide_number(true); ui.close(); }
+            })),
+            S((TEXTBOX, "Placeholder", "An empty box that asks for text", |a, ui| { for k in PlaceholderKind::CHOICES { if menu_item(ui, TEXT_T, k.label()).clicked() { a.insert_placeholder(k); ui.close(); } } })),
+            S((SIGMA, "Symbol", "Greek letters, math, arrows and more", |a, ui| { if a.can_take_text() { if let Some(s) = App::symbol_grid(ui) { a.insert_symbol(&s); ui.close(); } } else { ui.weak("This object has no text"); } })),
+            S((LINK, "Hyperlink", "Link text to a web address", |a, ui| { if a.can_take_text() { a.link_form_menu(ui); } else { ui.weak("This object has no text"); } })),
+        ]),
+        ("Media", vec![
+            L((IMAGE, "Picture", "A picture from a file", |a| a.insert_image())),
+            S((SHAPES, "Shape", "Rectangles, arrows, stars and more", |a, ui| { if let Some(name) = shape_gallery(ui) { a.insert_shape(name); ui.close(); } })),
+            L((VIDEO, "Video", "A video from a file", |a| a.insert_video())),
+            L((SPEAKER, "Audio", "A sound from a file", |a| a.insert_audio())),
+            S((CHAT, "Caption", "A speech or thought bubble with text", |a, ui| a.caption_menu(ui))),
+            L((PANORAMA, "360° Image", "A panoramic picture to look around, with annotations", |a| a.insert_pano())),
+            L((FUNCTION, "Equation", "Type an equation in LaTeX", |a| a.open_equation_dialog(None))),
+            S((STAR, "Icons", "A vector icon you can recolor and resize", |a, ui| a.icon_gallery(ui))),
+            L((GLOBE, "Web Object", "A web page inside the slide", |a| a.insert_web_object())),
+        ]),
+        ("Interactive", vec![
+            L((CLICK, "Button", "A button with hover and click looks", |a| a.insert_button())),
+            L((SLIDERS, "Slider", "A slider the learner drags to set a number", |a| a.insert_slider())),
+            S((CLICK, "Hotspot", "An invisible area the learner clicks", |a, ui| {
+                if menu_item(ui, RECT, "Rectangle").clicked() { a.insert_hotspot(false); ui.close(); }
+                if menu_item(ui, CIRCLE, "Oval").clicked() { a.insert_hotspot(true); ui.close(); }
+                if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
+                    a.view.draw_outline = Some(vec![]);
+                    a.view.draw_slide = a.view.slide;
+                    a.view.selected = None;
+                    a.view.multi.clear();
+                    a.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
+                    ui.close();
+                }
+            })),
+            S((GAUGE, "Dial", "A dial the learner turns to set a number", |a, ui| a.dial_menu(ui))),
+            S((CHECK, "Input", "Check boxes, radio buttons and entry fields", |a, ui| a.input_menu(ui))),
+            S((PIN, "Marker", "A round button with an icon or a number in it", |a, ui| a.marker_gallery(ui))),
+        ]),
+    ]
+}
+
+
+/// What the Studio Settings controls change: copies of the settings, applied by `App::apply_settings` after the controls are drawn.
+pub(crate) struct SettingsDraft {
+    one: bool,
+    each_tab: bool,
+    preset: Option<crate::dock::Preset>,
+    menu_bar: bool,
+    insert_bar: bool,
+    panels: crate::prefs::Panels,
+}
+
+/// The Studio Settings controls, in the window and on the File page.
+pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
+        ui.label(egui::RichText::new("Windows and panels").strong());
+        ui.checkbox(&mut d.one, "Open one section at a time").on_hover_text("In the Properties panel, opening a section closes the one that was open. Turn it off to keep several open at once.");
+        ui.checkbox(&mut d.each_tab, "Open every slide in a new tab").on_hover_text("Otherwise a slide chosen in the slide list replaces the one in the tab. Double-click or middle-click a slide, or use its menu, to open it in a tab of its own.");
+    ui.checkbox(&mut d.insert_bar, "Show the insert bar").on_hover_text("The row above the slide with + Add and the objects you add most");
+        ui.checkbox(&mut d.menu_bar, "Show the menu bar").on_hover_text("File, Edit, View, Window and Help along the top of the window");
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("Where things are").strong());
+        ui.weak("Drag a tab to move it: onto another group, to the edge of a group for a new row or column, to the left or top edge of the slide for a panel there, or out of the app for a window. Right-click a tab for the same moves from a menu.");
+        ui.horizontal_wrapped(|ui| {
+            for pr in crate::dock::Preset::ALL {
+                if ui.button(pr.name()).on_hover_text(pr.about()).clicked() { d.preset = Some(pr); }
+            }
+        });
+        ui.weak("Standard is how the app started. Tools go back to windows of their own.");
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new("What shows").strong());
+        ui.weak("Hide what you do not use. For example, hide Properties if the AI does most of the designing.");
+        ui.add_space(2.0);
+        ui.label("Bottom panel");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.timeline, "Timeline").on_hover_text("When things appear and move");
+            ui.checkbox(&mut d.panels.notes, "Slide Notes");
+            ui.checkbox(&mut d.panels.states, "States").on_hover_text("The looks of a button or object in each state");
+        });
+        ui.label("Side panel");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.properties, "Properties").on_hover_text("The settings of the slide or object you pick");
+            ui.checkbox(&mut d.panels.triggers, "Triggers");
+            ui.checkbox(&mut d.panels.ai, "AI");
+        });
+        ui.label("Slide");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.panels.slides, "Slide List").on_hover_text("The slides of the scene, as thumbnails");
+            ui.checkbox(&mut d.panels.layers, "Slide Layers");
+        });
+}
+
 impl App {
     /// Object currently selected (primary) and whether it can carry text/shape formatting.
     fn ribbon_target(&self) -> Option<Object> {
@@ -1228,7 +1176,7 @@ impl App {
         let sel = self.format_targets();
         if sel.is_empty() { return; }
         let slides_before = self.project.as_ref().unwrap().slides.clone();
-        let layers = &mut self.project.as_mut().unwrap().slides[self.slide].layers;
+        let layers = &mut self.project.as_mut().unwrap().slide_mut(self.view.slide).layers;
         for (li, oi) in sel {
             if let Some(t) = layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
                 apply_diff(before, after, t);
@@ -1261,227 +1209,52 @@ impl App {
         self.dirty = true;
     }
 
-    /// Everything above the canvas: title bar, tab strip and the ribbon card.
+    /// Everything above the canvas: the title bar, the menu bar and the tab strip.
     pub(super) fn chrome(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         // The harness draws a first frame before fonts exist; the icon font is needed from here on.
         if !ctx.fonts(|f| f.families().contains(&icons())) { return; }
         self.sync_color_events(ctx);
         self.title_bar(root, ctx);
+        self.menu_bar(root);
         self.run_format_painter(ctx);
         // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
         if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
-        if self.pano.edit.is_some() { self.pano_chrome(root, ctx); return; }
-        let bg = root.visuals().panel_fill;
-        let card = if root.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-        egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let master = self.in_master_view();
-                // The Layout Builder has its own short tab list, with its own tab first; that tab exists only there.
-                let order: Vec<usize> = if master { vec![0, MASTER_TAB, HOME_TAB, OBJECTS_TAB, ANIMATIONS_TAB, HELP_TAB] } else { (0..TABS.len()).filter(|&i| i != MASTER_TAB).collect() };
-                for i in order {
-                    let name = TABS[i];
-                    let sel = self.ribbon_tab == i && i != 0;
-                    let font = egui::FontId::proportional(14.0);
-                    let tw = ui.fonts_mut(|f| f.layout_no_wrap(name.to_string(), font.clone(), egui::Color32::WHITE).size().x);
-                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(tw + 22.0, 26.0), egui::Sense::click());
-                    if sel {
-                        // Cut from the ribbon: the card's own color, reaching down to meet the card, with a blue line under the label.
-                        let blue = ui.visuals().selection.bg_fill;
-                        let over = ui.painter().with_clip_rect(ui.clip_rect().expand2(egui::vec2(0.0, 4.0)));
-                        let joined = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.bottom() + 2.0));
-                        over.rect_filled(joined, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, card);
-                        let label = over.text(egui::pos2(rect.center().x, rect.center().y - 1.0), egui::Align2::CENTER_CENTER, name, font, ui.visuals().strong_text_color());
-                        // The line glides from the tab it was under to this one.
-                        let ctx = ui.ctx().clone();
-                        let left = ctx.animate_value_with_time(egui::Id::new("tab-line-left"), label.left(), 0.18);
-                        let right = ctx.animate_value_with_time(egui::Id::new("tab-line-right"), label.right(), 0.18);
-                        over.rect_filled(egui::Rect::from_min_max(egui::pos2(left, label.bottom() + 2.0), egui::pos2(right, label.bottom() + 4.5)), 1.0, blue);
-                    } else {
-                        if resp.hovered() { ui.painter().rect_filled(rect, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, ui.visuals().text_color().gamma_multiply(0.10)); }
-                        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, name, font, ui.visuals().text_color());
-                    }
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-                    if resp.clicked() {
-                        if i == 0 { self.leave_master_view(); self.file_view = true; self.file_page = backstage::FilePage::Info; } else { self.ribbon_tab = i; }
-                    }
-                }
-                // What the groups on Home act on, as a tinted tag after the tabs.
-                if let Some(title) = self.format_title().filter(|_| self.ribbon_tab == HOME_TAB) {
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new(title).size(10.5).color(egui::Color32::from_rgb(70, 150, 230)).background_color(egui::Color32::from_rgba_unmultiplied(10, 110, 235, 38)));
-                }
-            });
-        });
-        egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 6 })).show_separator_line(false).show(root, |ui| {
-            egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
-                flat(ui);
-                ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
-                let normal = self.project.is_some();
-                let primary = self.ribbon_target();
-                let mut edited = primary.clone();
-                let mut edit_changed = false;
-                // The controls scroll on the left; Try It, Preview and Publish stay pinned at the right.
-                // Try It, Preview and Publish are for the finished lesson, so the Layout Builder does not show them.
-                let pin_w = if self.project.is_some() && !self.in_master_view() { self.pinned_width(ui) } else { 0.0 };
-                let full = ui.available_rect_before_wrap();
-                let h = BIG_H + CAP_H + 8.0;
-                // In the Layout Builder the way out comes first, in the main-action color, and does not scroll away.
-                let lead_w = if self.in_master_view() { lead_width(ui, "Close", "Layout Builder") } else { 0.0 };
-                if lead_w > 0.0 && lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "Layout Builder", "Return to the slides. Your changes are kept") { self.leave_master_view(); }
-                let left = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - pin_w - 8.0 - lead_w).max(80.0), h));
-                let pin = egui::Rect::from_min_size(egui::pos2((full.right() - pin_w).max(left.right()), full.top()), egui::vec2(pin_w, h));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
-                    egui::ScrollArea::horizontal().id_salt(("ribbon-scroll", self.ribbon_tab)).auto_shrink([false, true]).show(ui, |ui| {
-                        ui.horizontal_top(|ui| {
-                            ui.set_min_height(BIG_H);
-                            ui.spacing_mut().item_spacing.x = 3.0;
-                            ui.add_enabled_ui(!self.try_mode, |ui| {
-                            match self.ribbon_tab {
-                                HOME_TAB => self.home_tab(ui, normal, edited.as_mut(), &mut edit_changed),
-                                OBJECTS_TAB => self.insert_tab(ui, normal),
-                                SLIDES_TAB => self.slides_tab(ui, ctx),
-                                THEME_TAB => self.design_tab(ui, ctx),
-                                ANIMATIONS_TAB => {
-                                    // A layout has no transitions of its own: only the shapes on it animate.
-                                    if !self.in_master_view() { self.transition_groups(ui, ctx); }
-                                    self.animations_tab(ui, edited.as_mut(), &mut edit_changed);
-                                }
-                                MASTER_TAB => self.master_tab(ui, ctx),
-                                REVIEW_TAB => self.review_tab(ui, ctx),
-                                HELP_TAB => self.help_tab(ui),
-                                _ => self.design_tab(ui, ctx),
-                            }
-                            });
-                        });
-                    });
-                });
-                if pin_w > 0.0 {
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(pin).layout(egui::Layout::left_to_right(egui::Align::Min)), |ui| self.pinned_actions(ui));
-                }
-                if let (true, Some(before), Some(after)) = (edit_changed, primary.as_ref(), edited.as_ref()) {
-                    self.apply_object_edit(ctx, before, after);
-                } else if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) {
-                    self.edit_open = false;
-                }
-            });
-        });
+        if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
         self.doc_tabs(root);
     }
 
-    /// The ribbon of the 360° editing mode: one tab with everything for markers and hotspots.
-    fn pano_chrome(&mut self, root: &mut egui::Ui, _ctx: &egui::Context) {
-        let bg = root.visuals().panel_fill;
-        let mut leave = false;
-        egui::Panel::top("tabs").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 1))).show_separator_line(false).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                if ui.add(egui::Label::new(egui::RichText::new("FILE").size(14.0)).sense(egui::Sense::click())).clicked() { leave = true; self.file_view = true; self.file_page = backstage::FilePage::Info; }
-                let resp = ui.add(egui::Label::new(egui::RichText::new("360° IMAGE").size(14.0).strong()).sense(egui::Sense::click()));
-                let r = resp.rect;
-                ui.painter().line_segment([egui::pos2(r.left(), r.bottom() + 3.0), egui::pos2(r.right(), r.bottom() + 3.0)], egui::Stroke::new(2.5, primary(ui)));
-            });
-            ui.add_space(2.0);
-        });
-        egui::Panel::top("ribbon").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin { left: 8, right: 8, top: 2, bottom: 6 })).show_separator_line(false).show(root, |ui| {
-            let card = if ui.visuals().dark_mode { egui::Color32::from_gray(46) } else { egui::Color32::WHITE };
-            egui::Frame::new().fill(card).corner_radius(RIBBON_RADIUS as u8).inner_margin(egui::Margin::symmetric(6, 4)).show(ui, |ui| {
-                flat(ui);
-                // Close leads the ribbon and stays put; the groups scroll beside it.
-                let full = ui.available_rect_before_wrap();
-                let h = BIG_H + CAP_H + 8.0;
-                let lead_w = lead_width(ui, "Close", "360° Image");
-                if lead_button(ui, egui::Rect::from_min_size(full.min, egui::vec2(lead_w, h)), X, "Close", "360° Image", "Go back to the slide. Your changes are kept") { self.pano_cmd(panos::Cmd::Close); }
-                let rest = egui::Rect::from_min_size(full.min + egui::vec2(lead_w, 0.0), egui::vec2((full.width() - lead_w).max(80.0), h));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(rest), |ui| {
-                    egui::ScrollArea::horizontal().id_salt("pano-ribbon-scroll").auto_shrink([false, true]).show(ui, |ui| {
-                        ui.horizontal_top(|ui| { ui.set_min_height(BIG_H); self.pano_ribbon(ui); });
-                    });
-                });
-                ui.allocate_rect(egui::Rect::from_min_size(full.min, egui::vec2(full.width(), h)), egui::Sense::hover());
-            });
-        });
-        self.pano_tabs(root);
-        if leave { self.close_pano_edit(); }
+
+
+    fn tab_actions(&mut self, ui: &mut egui::Ui, master: bool) {
+        if master { return; }
+        ui.spacing_mut().item_spacing.x = 6.0;
+        // The same hanging tabs as the theme toggle. The row runs right to left, so Publish comes first and ends up furthest right;
+        // it is the main action, so it is the one in the main-action color.
+        let ink = text_col(ui);
+        let hanging = egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 };
+        let publishing = self.file_view && self.file_page == backstage::FilePage::Publish;
+        let (base, on) = (primary(ui), on_primary(ui));
+        let fill = if publishing { shade(base, 0.2) } else { base };
+        let publish = pill(ui, "publish", Pill { icon: Some((EXPORT, on)), label: "Publish", caret: false, fill: Some(fill), ink: on, outline: false, bold: true, radius: hanging, lift: 3.0, min_w: 60.0 })
+            .on_hover_text("Publish the project: to the web, an LMS, PDF, Word, PowerPoint or video");
+        publish.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Publish"));
+        if publish.clicked() { self.open_file_page(backstage::FilePage::Publish); }
+        let preview = pill(ui, "preview", Pill { icon: Some((PLAY, ink)), label: "Preview", caret: true, fill: Some(ink.gamma_multiply(0.14)), ink, outline: true, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+            .on_hover_text("Play the lesson in your browser");
+        preview.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Preview"));
+        egui::Popup::from_toggle_button_response(&preview).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| { ui.set_min_width(190.0); self.preview_items(ui); });
+        if self.can_try() {
+            let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops.";
+            let lit = if self.try_mode { ACCENT } else { ink.gamma_multiply(0.14) };
+            let try_it = pill(ui, "try-it", Pill { icon: Some((CLICK, if self.try_mode { egui::Color32::WHITE } else { ink })), label: "Try It", caret: false, fill: Some(lit), ink: if self.try_mode { egui::Color32::WHITE } else { ink }, outline: !self.try_mode, bold: false, radius: hanging, lift: 3.0, min_w: 60.0 })
+                .on_hover_text(tip);
+            try_it.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, self.try_mode, "Try It"));
+            if try_it.clicked() { self.try_mode = !self.try_mode; }
+        }
     }
 
-    fn pano_ribbon(&mut self, ui: &mut egui::Ui) {
-        use panos::Cmd;
-        let Some(p) = self.edited_pano() else { return };
-        let sel = self.pano.edit.as_ref().and_then(|e| e.selected).and_then(|i| p.pins.get(i).cloned());
-        let drawing = self.pano.edit.as_ref().is_some_and(|e| matches!(e.tool, panos::Tool::Draw(_)));
-        let mut cmd: Option<Cmd> = None;
-        let mut set = p.clone();
-        group(ui, "Insert", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, PIN, "Marker", "A round button on the picture").clicked() { cmd = Some(Cmd::AddMarker); }
-                if big_toggle(ui, NODES, "Hotspot", "Draw a shaded area on the picture, corner by corner", drawing).clicked() { cmd = Some(Cmd::StartHotspot); }
-            });
-        });
-        group(ui, "Selected", |ui| {
-            ui.horizontal(|ui| {
-                let is_marker = sel.as_ref().is_some_and(|s| s.kind == panos::PinKind::Marker);
-                ui.add_enabled_ui(is_marker, |ui| {
-                    big_menu(ui, SHAPES, "Icon", "The picture on the marker", |ui| {
-                        ui.set_min_width(250.0);
-                        egui::Grid::new("pano-icons").spacing([4.0, 4.0]).show(ui, |ui| {
-                            for (k, name) in panos::MARKER_ICONS.iter().enumerate() {
-                                let Some(icon) = crate::icons::all().iter().find(|i| i.names.contains(name)) else { continue };
-                                let on = sel.as_ref().is_some_and(|s| s.icon == *name);
-                                let (rect, resp) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
-                                if on || resp.hovered() { ui.painter().rect_filled(rect, 4.0, ui.visuals().selection.bg_fill.gamma_multiply(if on { 0.5 } else { 0.25 })); }
-                                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon.ch.to_string(), egui::FontId::new(22.0, icons()), text_col(ui));
-                                if resp.on_hover_text(icon.title()).clicked() { cmd = Some(Cmd::SetIcon(Some(icon))); }
-                                if (k + 1) % 6 == 0 { ui.end_row(); }
-                            }
-                        });
-                        ui.separator();
-                        if ui.button("No icon").clicked() { cmd = Some(Cmd::SetIcon(None)); }
-                    });
-                });
-                ui.add_enabled_ui(sel.is_some(), |ui| {
-                    ui.vertical(|ui| {
-                        rows(ui);
-                        let mut c = sel.as_ref().map(|s| s.color());
-                        if color_menu(ui, BUCKET, "The color of the selected marker or hotspot", &mut c, None) { cmd = Some(Cmd::SetColor(c)); }
-                        ui.label(egui::RichText::new("Color").size(11.5));
-                    });
-                    if big_button(ui, BOLT, "Trigger", "Run something when the learner presses the selected marker or hotspot").clicked() { cmd = Some(Cmd::AddTrigger); }
-                    if big_button(ui, ARROW_COUNTER, "Switch\nType", "Turn a marker into a hotspot, or the other way round").clicked() { cmd = Some(Cmd::SwitchType); }
-                    if big_button(ui, TRASH, "Delete", "Remove the selected marker or hotspot").clicked() { cmd = Some(Cmd::Delete); }
-                });
-            });
-        });
-        group(ui, "Cards", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, if set.dark { MOON } else { SUN }, "Theme", "Dark or light cards", |ui| {
-                    if ui.selectable_label(!set.dark, "Light").clicked() { set.dark = false; }
-                    if ui.selectable_label(set.dark, "Dark").clicked() { set.dark = true; }
-                });
-                big_menu(ui, SQUARE_BORDER, "Corners", "Square or rounded cards", |ui| {
-                    if ui.selectable_label(!set.rounded, "Square").clicked() { set.rounded = false; }
-                    if ui.selectable_label(set.rounded, "Rounded").clicked() { set.rounded = true; }
-                    ui.separator();
-                    let mut hide = !set.connector;
-                    if ui.checkbox(&mut hide, "Hide connector").clicked() { set.connector = !hide; }
-                });
-            });
-        });
-        group(ui, "Effects", |ui| {
-            ui.vertical(|ui| {
-                rows(ui);
-                ui.checkbox(&mut set.pulse, "Pulse items if unvisited");
-                ui.checkbox(&mut set.reveal, "Reveal hotspots").on_hover_text("Hotspots are shaded all the time. Off: they show only under the pointer, and a guided tour gives a hint");
-            });
-        });
-        group(ui, "View", |ui| {
-            if big_button(ui, FRAME, "Initial\nView", "The learner starts by looking at what is on the canvas now").clicked() { cmd = Some(Cmd::SetInitialView); }
-        });
-        if set != p { self.pano_set(set); }
-        if let Some(c) = cmd { self.pano_cmd(c); }
-    }
 
     /// Take what the color menus left for the app: a color to add to the palette, a color that was just used, a request to edit
     /// the palette. (The menus have no access to the project, so they leave notes.)
@@ -1511,87 +1284,17 @@ impl App {
         if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open-project-colors"))).unwrap_or(false) { self.theme_colors_open = true; }
     }
 
-    /// The background of the current slide (or layout): none, a color, a gradient you build, or a picture. A window rather
-    /// than a menu, because a picker opened inside a menu closes the menu.
-    pub(super) fn background_window(&mut self, ctx: &egui::Context) {
-        if !self.background_open { return; }
-        let cur = self.slide;
-        let Some(key) = self.project.as_ref().filter(|p| cur < p.slides.len()).map(|p| match &p.slides[cur].background { Some(Background::Image { asset }) => asset.clone(), _ => String::new() }) else { self.background_open = false; return };
-        let Some(proj) = self.project.as_mut() else { return };
-        let picture_name = proj.assets.get(&key).map(|a| a.name.clone());
-        let before = Snap::of(proj);
-        let theme = proj.theme.clone();
-        let inherits = cur > 0;
-        let mut open = true;
-        let mut changed = false;
-        let mut want_picture = false;
-        let slide_size = (proj.slides[cur].width, proj.slides[cur].height);
-        let bg = &mut proj.slides[cur].background;
-        crate::tool_window_at(ctx, "background", "Background", [352.0, 420.0], true, &mut open, |ui| {
-            // The picker takes the width the window has, so there is no empty strip beside it.
-            let w = ui.available_width().clamp(240.0, 720.0);
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
-            // What kind of background. A slide with none uses its layout's (or plain white on the master).
-            let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
-            let mut pick = kind;
-            ui.columns(3, |cols| {
-                for (i, label) in ["Color", "Gradient", "Picture"].into_iter().enumerate() {
-                    if cols[i].add_sized([cols[i].available_width(), 24.0], egui::Button::selectable(kind == i + 1, label)).clicked() { pick = i + 1; }
-                }
-            });
-            if pick != kind {
-                match pick {
-                    1 => { *bg = Some(Background::Solid(bg.as_ref().map(|b| b.base_color()).unwrap_or(Rgba(255, 255, 255, 255)))); changed = true; }
-                    2 => {
-                        let mut g = Background::gradient(135.0, theme.color(4), theme.color(5));
-                        if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, slide_size.0, slide_size.1)); }
-                        *bg = Some(g);
-                        changed = true;
-                    }
-                    _ => want_picture = true,
-                }
-            }
-            ui.add_space(8.0);
-            match bg {
-                None => {
-                    // Nothing set yet: offer the color picker on white. The slide changes once a color is chosen.
-                    let mut cur_c = Some(Rgba(255, 255, 255, 255));
-                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *bg = Some(Background::Solid(n)); changed = true; } }
-                }
-                Some(Background::Solid(c)) => {
-                    let mut cur_c = Some(*c);
-                    if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *c = n; changed = true; } }
-                }
-                Some(Background::Gradient { angle, stops, kind, geom }) => changed |= gradient_editor(ui, angle, stops, kind, geom, slide_size),
-                Some(Background::Image { .. }) => {
-                    ui.label(picture_name.as_deref().unwrap_or("Picture"));
-                    ui.weak("The picture fills the slide.");
-                    ui.add_space(4.0);
-                    if ui.button("Choose another picture…").clicked() { want_picture = true; }
-                }
-            }
-            if inherits && bg.is_some() {
-                ui.add_space(8.0);
-                if ui.button("Use the layout's background").clicked() { *bg = None; changed = true; }
-            }
-        });
-        ctx.data_mut(|d| d.remove_temp::<f32>(egui::Id::new("color-entry-width")));
-        if changed { self.commit_project_edit(ctx, before); }
-        if want_picture {
-            if let Some((key, ..)) = self.load_image_asset_titled("Background Picture") {
-                let before = Snap::of(self.project.as_ref().unwrap());
-                self.project.as_mut().unwrap().slides[cur].background = Some(Background::Image { asset: key });
-                self.commit_project_edit(ctx, before);
-            }
-        }
-        if !open { self.background_open = false; }
+    /// While the Background bar of the Properties panel is open (it says so each time it is drawn), a gradient's dots show on the slide.
+    fn background_bar_open(ctx: &egui::Context) -> bool {
+        let seen: u64 = ctx.data(|d| d.get_temp(egui::Id::new("background-bar-seen"))).unwrap_or(0);
+        seen != 0 && ctx.cumulative_pass_nr().saturating_sub(seen) <= 2
     }
 
     /// While the Background window shows a gradient, dots on the slide set where it starts, ends and centres: drag them.
     pub(super) fn background_handles(&mut self, ui: &mut egui::Ui, painter: &egui::Painter, origin: egui::Pos2, scale: f32, slide_idx: usize) {
-        if !self.background_open || slide_idx != self.slide { return; }
+        if !Self::background_bar_open(ui.ctx()) || slide_idx != self.view.slide { return; }
         let Some(proj) = self.project.as_ref() else { return };
-        let Some(sl) = proj.slides.get(slide_idx) else { return };
+        let Some(sl) = proj.slide_get(slide_idx) else { return };
         let (w, h) = (sl.width, sl.height);
         let Some(Background::Gradient { angle, stops, kind, geom }) = sl.background.clone() else { return };
         let (Some(first), Some(last)) = (stops.first().map(|s| s.1), stops.last().map(|s| s.1)) else { return };
@@ -1638,7 +1341,7 @@ impl App {
             if r.drag_started() { self.snapshot(); }
             let Some(ptr) = r.interact_pointer_pos().filter(|_| r.dragged()) else { continue };
             let p = ((ptr.x - origin.x) / scale, (ptr.y - origin.y) / scale);
-            let Some(Background::Gradient { angle, geom, .. }) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide_idx)).and_then(|s| s.background.as_mut()) else { continue };
+            let Some(Background::Gradient { angle, geom, .. }) = self.project.as_mut().and_then(|p| p.slide_get_mut(slide_idx)).and_then(|s| s.background.as_mut()) else { continue };
             if geom.line.is_none() && matches!(kind, Linear | Reflected) { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(*angle, w, h)); }
             match name {
                 "start" => { let (_, b) = geom.line_px(*angle, w, h); *angle = geom.set_line_px(p, b, w, h); }
@@ -1653,7 +1356,7 @@ impl App {
 
     /// The author's brand colors: pick one to change it with the picker, add more, remove one, and drag them into order.
     /// Every color menu offers them first.
-    pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context) {
+    pub(super) fn theme_colors_window(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         if !self.theme_colors_open { return; }
         let Some(proj) = self.project.as_mut() else { self.theme_colors_open = false; return };
         let mut open = true;
@@ -1666,7 +1369,7 @@ impl App {
         let mut mv: Option<(usize, usize)> = None;
         let mut remove = false;
         let mut add = false;
-        crate::tool_window_at(ctx, "brand-colors", "Brand Colors", [360.0, 260.0], true, &mut open, |ui| {
+        crate::dock_tool(ui, "Brand Colors", &mut open, |ui| {
             // The picker takes the width the window has, so there is no empty strip beside it.
             let w = ui.available_width().clamp(240.0, 720.0);
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
@@ -1747,7 +1450,7 @@ impl App {
     /// the centred title, and the theme toggle plus Publish at the right.
     fn title_bar(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         let bg = root.visuals().panel_fill;
-        egui::Panel::top("titlebar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+        egui::Panel::top("titlebar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(14, 8))).show_separator_line(false).show(root, |ui| {
             flat(ui);
             let bar = ui.max_rect();
             // Drag the window by its empty area; double-click maximizes.
@@ -1763,7 +1466,7 @@ impl App {
             let has = self.project.is_some();
             ui.horizontal(|ui| {
                 ui.set_min_height(24.0);
-                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().item_spacing.x = 6.0;
                 ui.add_space(if cfg!(target_os = "macos") { 76.0 } else { 4.0 });
                 if has { ui.scope(|ui| {
                     if title_icon(ui, SAVE, "Save (⌘S)").clicked() { self.save(false); }
@@ -1773,6 +1476,12 @@ impl App {
                 }); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
+                    // Publish, Preview and Try It live here.
+                    if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+                        let master = self.in_master_view();
+                        self.tab_actions(ui, master);
+                        ui.add_space(6.0);
+                    }
                     let dark = ctx.theme() == egui::Theme::Dark;
                     // The moon is black so it shows on the light theme; the sun keeps its yellow.
                     let ink = text_col(ui);
@@ -1800,181 +1509,28 @@ impl App {
         });
     }
 
-    /// Help: documentation, reporting problems, the community, and checking for a newer version.
-    fn help_tab(&mut self, ui: &mut egui::Ui) {
-        group(ui, "Help", |ui| {
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(false, |ui| { big_button(ui, BOOK_OPEN, "Docs", "Documentation is coming soon"); });
-                if big_button(ui, BUG, "Submit Issue", "Report a problem or suggest a feature on GitHub").clicked() { update::open_in_browser(ISSUES_URL); }
-            });
-        });
-        group(ui, "Community", |ui| {
-            if big_button(ui, DISCORD, "BrainBend Community", "Join the BrainBend community on Discord").clicked() { update::open_in_browser(COMMUNITY_URL); }
-        });
-        group(ui, "AI", |ui| {
-            if big_button(ui, BOLT, "Set up AI", "Choose how to use AI to build your lesson: your own API key, or a tool that uses your subscription").clicked() { self.right_tab = crate::AI_TAB; self.assistant.setup_open = true; }
-        });
-        group(ui, "Updates", |ui| {
-            ui.horizontal(|ui| {
-                let checking = matches!(self.updater.state, update::State::Checking(_));
-                let check = ui.add_enabled_ui(!checking, |ui| big_button(ui, REFRESH, "Check for Updates", "Look for a newer version of BrainBend Studio")).inner;
-                if check.clicked() { self.updater.check_now(ui.ctx()); }
-            });
-        });
+
+    /// The settings as they are now, for the controls to change; `apply_settings` puts what they changed back.
+    pub(crate) fn settings_draft(&self) -> SettingsDraft {
+        SettingsDraft { one: self.one_section, each_tab: self.new_tab_each, preset: None, menu_bar: self.show_menu_bar, insert_bar: self.show_insert_bar, panels: self.panels }
     }
 
-    fn home_tab(&mut self, ui: &mut egui::Ui, normal: bool, obj: Option<&mut Object>, changed: &mut bool) {
-        let has_sel = self.selected.is_some();
-        let n_sel = self.selection().len();
-        let mut list_click: Option<ListStyle> = None;
-        group(ui, "Clipboard", |ui| {
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(normal && self.clipboard.is_some(), |ui| {
-                    if big_button(ui, PASTE, "Paste", "Paste (⌘V)").clicked() { self.paste(); }
-                });
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add_enabled_ui(has_sel, |ui| {
-                        if tiny_button(ui, CUT, false, "Cut").clicked() { self.copy_selected(); self.delete_selected(); }
-                        if tiny_button(ui, COPY, false, "Copy").clicked() { self.copy_selected(); }
-                    });
-                    let on = self.painter.is_some();
-                    ui.add_enabled_ui(has_sel || on, |ui| {
-                        if tiny_button(ui, PAINTER, on, "Format Painter: copy this object's look, then click another object to give it the same look").clicked() {
-                            self.painter = if on { None } else { self.selected_object().map(|o| (o.id.clone(), Box::new(o.clone()))) };
-                            self.status = if self.painter.is_some() { "Format Painter: click the object that should get this look. Esc cancels.".into() } else { String::new() };
-                        }
-                    });
-                });
-            });
-        });
-        // Every control is always shown; with nothing to apply to, a stand-in object is edited and the
-        // controls are disabled, so the ribbon keeps its shape as the selection changes.
-        let mut stand_in = Object::new("none", "none", Kind::Rect, 0.0, 0.0, 0.0, 0.0);
-        let enabled = obj.is_some() && normal;
-        let obj = obj.unwrap_or(&mut stand_in);
-        let is_media = matches!(obj.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
-        let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
-        let has_text = !is_media && !is_line && !matches!(obj.kind, Kind::Path(_) | Kind::Hotspot);
-
-        {
-            let on = enabled && has_text;
-            group(ui, "Font", |ui| { ui.add_enabled_ui(on, |ui| { ui.horizontal(|ui| {
-            self.text_styles_menu(ui);
-            ui.vertical(|ui| {
-            rows(ui);
-                ui.horizontal(|ui| {
-                    framed(ui, |ui| {
-                        *changed |= crate::font_store::font_menu(ui, "rb-font", &mut obj.style.font_family, 92.0);
-                        *changed |= ui.add(egui::DragValue::new(&mut obj.style.size).range(4.0..=400.0).suffix(" pt")).on_hover_text("Font size").changed();
-                        let sizes = {
-                            let (r, resp) = ui.allocate_exact_size(egui::vec2(14.0, 20.0), egui::Sense::click());
-                            chevron(ui.painter(), r.center() + egui::vec2(0.0, 0.5), 3.0, if resp.hovered() { ui.visuals().strong_text_color() } else { text_col(ui) });
-                            resp.on_hover_text("Common sizes")
-                        };
-                        egui::Popup::from_toggle_button_response(&sizes).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
-                            for z in [18.0, 24.0, 28.0, 32.0, 36.0, 40.0, 48.0, 60.0, 72.0, 96.0, 120.0] {
-                                if ui.selectable_label(obj.style.size == z, format!("{z:.0}")).clicked() { obj.style.size = z; *changed = true; }
-                            }
-                        });
-                    });
-                    let part = self.text_sel;
-                    let cur = part.and_then(|(a, _)| obj.char_fmts().get(a).and_then(|(_, f)| f.size)).unwrap_or(obj.style.size);
-                    for (up, tip) in [(true, "Grow font"), (false, "Shrink font")] {
-                        if compact_text_button(ui, grow_job(ui, up), tip).clicked() {
-                            let next = step_size(cur, up);
-                            self.edit_text_range(move |o, a, b, whole| { if whole { o.style.size = next; } o.format_range(a, b, &Attr::Size(next)); });
-                        }
-                    }
-                    if icon_button(ui, CLEAR_FMT, false, "Clear formatting: back to the object's plain text style").clicked() {
-                        self.edit_text_range(|o, a, b, whole| {
-                            o.format_range(a, b, &Attr::Clear);
-                            if whole { o.style.bold = false; o.style.italic = false; o.style.underline = false; }
-                        });
-                    }
-                });
-                ui.horizontal(|ui| {
-                    // While text is selected on the slide these format just the selection.
-                    let part = self.text_sel;
-                    if icon_button(ui, BOLD, obj.style.bold, "Bold (⌘B)").clicked() {
-                        if part.is_some() { self.format_selection(Attr::ToggleBold); } else { obj.style.bold = !obj.style.bold; *changed = true; }
-                    }
-                    if icon_button(ui, ITALIC, obj.style.italic, "Italic (⌘I)").clicked() {
-                        if part.is_some() { self.format_selection(Attr::ToggleItalic); } else { obj.style.italic = !obj.style.italic; *changed = true; }
-                    }
-                    if icon_button(ui, UNDERLINE, obj.style.underline, "Underline (⌘U)").clicked() {
-                        if part.is_some() { self.format_selection(Attr::ToggleUnderline); } else { obj.style.underline = !obj.style.underline; *changed = true; }
-                    }
-                    // The text the next buttons describe: the chosen part, or all of it.
-                    let (ra, rb) = part.unwrap_or((0, usize::MAX));
-                    let span: Vec<Fmt> = obj.char_fmts().into_iter().enumerate().filter(|(i, _)| *i >= ra && *i < rb).map(|(_, (_, f))| f).collect();
-                    let all_strike = !span.is_empty() && span.iter().all(|f| f.strike.unwrap_or(false));
-                    if icon_button(ui, STRIKE, all_strike, "Strikethrough").clicked() { self.edit_text_range(|o, a, b, _| o.format_range(a, b, &Attr::ToggleStrike)); }
-                    icon_popup(ui, SPACING, "Character spacing", egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                        let cur = span.first().and_then(|f| f.spacing).unwrap_or(0.0);
-                        for (v, l) in [(-2.0, "Very tight"), (-1.0, "Tight"), (0.0, "Normal"), (2.0, "Loose"), (4.0, "Very loose")] {
-                            if ui.selectable_label((cur - v).abs() < 0.01, l).clicked() { self.edit_text_range(move |o, a, b, _| o.format_range(a, b, &Attr::Spacing(v))); }
-                        }
-                    });
-                    let mut aa = egui::text::LayoutJob::default();
-                    aa.append("Aa", 0.0, egui::text::TextFormat { font_id: egui::FontId::proportional(13.0), color: text_col(ui), ..Default::default() });
-                    let case = compact_text_button(ui, aa, "Change case");
-                    egui::Popup::from_toggle_button_response(&case).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
-                        for (c, l) in [(brainbend_doc::richtext::Case::Sentence, "Sentence case."), (brainbend_doc::richtext::Case::Lower, "lowercase"), (brainbend_doc::richtext::Case::Upper, "UPPERCASE"), (brainbend_doc::richtext::Case::Capitalize, "Capitalize Each Word"), (brainbend_doc::richtext::Case::Toggle, "tOGGLE cASE")] {
-                            if ui.button(l).clicked() { self.edit_text_range(move |o, a, b, _| o.change_case(a, b, c)); ui.close(); }
-                        }
-                    });
-                    let mut hl = span.first().and_then(|f| f.highlight);
-                    if color_menu(ui, HIGHLIGHT, "Text highlight color", &mut hl, Some("No highlight")) { self.edit_text_range(move |o, a, b, _| o.format_range(a, b, &Attr::Highlight(hl))); }
-                    let mut c = Some(obj.style.color);
-                    if color_menu(ui, TEXT_AA, "Text color", &mut c, None) { if let Some(c) = c { obj.style.color = c; *changed = true; } }
-                });
-            }); }); }); });
-            group(ui, "Paragraph", |ui| { ui.add_enabled_ui(on, |ui| {
-            rows(ui);
-                ui.horizontal(|ui| {
-                    for (a, icon, tip) in [(Align::Left, ALIGN_L, "Align left"), (Align::Center, ALIGN_C, "Center"), (Align::Right, ALIGN_R, "Align right"), (Align::Justify, JUSTIFY, "Justify")] {
-                        if icon_button(ui, icon, obj.style.align == a, tip).clicked() { obj.style.align = a; *changed = true; }
-                    }
-                    ui.add_space(4.0);
-                    let ls = obj.list_style();
-                    if icon_button(ui, LIST_BULLETS, ls == ListStyle::Bullet, "Bullets").clicked() { list_click = Some(if ls == ListStyle::Bullet { ListStyle::None } else { ListStyle::Bullet }); }
-                    if icon_button(ui, LIST_NUM, ls == ListStyle::Number, "Numbering").clicked() { list_click = Some(if ls == ListStyle::Number { ListStyle::None } else { ListStyle::Number }); }
-                    if icon_button(ui, INDENT_OUT, false, "Decrease indent").clicked() { self.edit_text_range(|o, a, b, _| o.format_range(a, b, &Attr::Indent(-1))); }
-                    if icon_button(ui, INDENT_IN, false, "Increase indent").clicked() { self.edit_text_range(|o, a, b, _| o.format_range(a, b, &Attr::Indent(1))); }
-                });
-                ui.horizontal(|ui| {
-                    icon_popup(ui, LINE_SPACING, "Line spacing", egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                        for (v, l) in [(0.0, "Default"), (1.2, "1.0"), (1.38, "1.15"), (1.8, "1.5"), (2.4, "2.0"), (3.0, "2.5")] {
-                            if ui.selectable_label((obj.line_spacing - v).abs() < 0.01, l).clicked() { obj.line_spacing = v; *changed = true; }
-                        }
-                    });
-                    let v_icon = match obj.style.valign { VAlign::Top => AL_TOP, VAlign::Middle => AL_CENTER_V, VAlign::Bottom => AL_BOTTOM };
-                    icon_popup(ui, v_icon, "Vertical position of the text in its box", egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                        for (v, icon, l) in [(VAlign::Top, AL_TOP, "Top"), (VAlign::Middle, AL_CENTER_V, "Middle"), (VAlign::Bottom, AL_BOTTOM, "Bottom")] {
-                            if menu_item(ui, icon, l).clicked() { obj.style.valign = v; *changed = true; }
-                        }
-                    });
-                    icon_popup(ui, ROTATE, "Direction of the text: across, or turned a quarter", egui::PopupCloseBehavior::CloseOnClick, |ui| {
-                        for (v, l) in [(0i16, "Horizontal"), (90, "Rotate all text 90°"), (270, "Rotate all text 270°")] {
-                            if ui.selectable_label(obj.text_rotation == v, l).clicked() { obj.text_rotation = v; *changed = true; }
-                        }
-                    });
-                });
-            }); });
+    pub(crate) fn apply_settings(&mut self, d: SettingsDraft) {
+        let SettingsDraft { one, each_tab, preset, menu_bar, insert_bar, panels } = d;
+        if let Some(pr) = preset { self.apply_preset(pr); }
+        if menu_bar != self.show_menu_bar { self.run_cmd(crate::commands::Cmd::ShowMenuBar); }
+        if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
+        if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
+        if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
+        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers), ("show_slides", self.panels.slides, panels.slides)] {
+            if was != now { crate::prefs::set_bool(key, now); }
         }
-        // The selected object's own groups follow; the tab strip names the object they act on.
-        if enabled && self.format_title().is_some() {
-            self.format_groups(ui, obj, changed);
-        } else {
-            self.arrange_group(ui, has_sel, n_sel);
-            drawing_group(ui, obj, enabled, changed);
-            effects_group(ui, obj, enabled, changed);
-        }
-        if let Some(st) = list_click { self.set_list_selected(st); }
+        self.panels = panels;
     }
 
-    /// What Home calls the selected object in its caption for the selected object, or `None` when it has no such tab yet.
+
+
+    /// What the Properties panel calls the selected object, or `None` when it has no such tab yet.
     pub(super) fn format_title(&self) -> Option<&'static str> {
         if self.in_master_view() || self.try_mode { return None; }
         let o = self.selected_object()?;
@@ -1989,7 +1545,7 @@ impl App {
         }
     }
 
-    /// What Home adds for a table: styles, rows and columns, merging, and borders. They act on the chosen cells.
+    /// What the Properties panel adds for a table: styles, rows and columns, merging, and borders. They act on the chosen cells.
     fn table_groups(&mut self, ui: &mut egui::Ui) {
         use brainbend_doc::tables as t;
         let block = self.cell_block();
@@ -2019,33 +1575,41 @@ impl App {
                     ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(if on || resp.hovered() { 2.0 } else { 1.0 }, if on { ACCENT } else { egui::Color32::GRAY }), egui::StrokeKind::Outside);
                     if resp.on_hover_text(st.label()).clicked() { pick = Some(st); }
                 }
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
-                    opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
-                    opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
-                });
+                if !panel_mode(ui) {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
+                        opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
+                        opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
+                    });
+                }
             });
+            // In the Properties panel the options go under the swatches, where there is room for their words.
+            if panel_mode(ui) {
+                opts_changed |= ui.checkbox(&mut opts.header_row, "Header row").changed();
+                opts_changed |= ui.checkbox(&mut opts.banded_rows, "Banded rows").changed();
+                opts_changed |= ui.checkbox(&mut opts.first_column, "First column bold").changed();
+            }
         });
         // Rows and columns, merging and choosing cells: two menus rather than a row of word buttons.
         let mut op = None;
-        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slides[self.slide].layers[self.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
+        let dims = self.selected_object().and_then(|o| o.group.clone()).and_then(|g| self.project.as_ref().map(|p| t::dims(&p.slide(self.view.slide).layers[self.view.selected.map(|s| s.0).unwrap_or(0)].objects, &g))).unwrap_or((0, 0));
         let mut merge = false;
         let mut split = false;
         let mut choose: Option<((u16, u16), (u16, u16))> = None;
         group(ui, "Rows & Columns", |ui| {
-            ui.horizontal(|ui| {
-                big_menu(ui, TABLE, "Add", "Add a row or column next to the chosen cell", |ui| {
+            hwrap(ui, |ui| {
+                pr(ui, "Add", |ui, _| { big_menu(ui, TABLE, "Add", "Add a row or column next to the chosen cell", |ui| {
                     for (icon, label, o) in [(ARROW_UP, "Row above", TableOp::RowAbove), (ARROW_DOWN, "Row below", TableOp::RowBelow), (AL_LEFT, "Column left", TableOp::ColLeft), (AL_RIGHT, "Column right", TableOp::ColRight)] {
                         if menu_item(ui, icon, label).clicked() { op = Some(o); }
                     }
-                });
-                big_menu(ui, TRASH, "Delete", "Delete the chosen cell's row or column", |ui| {
+                }); });
+                pr(ui, "Delete", |ui, _| { big_menu(ui, TRASH, "Delete", "Delete the chosen cell's row or column", |ui| {
                     for (label, o) in [("Delete row", TableOp::DeleteRow), ("Delete column", TableOp::DeleteCol)] {
                         if menu_item(ui, TRASH, label).clicked() { op = Some(o); }
                     }
-                });
-                big_menu(ui, SQUARE_BORDER, "Cells", "Merge, split or choose cells. Click a cell, then shift-click another to choose a block", |ui| {
+                }); });
+                pr(ui, "Cells", |ui, _| { big_menu(ui, SQUARE_BORDER, "Cells", "Merge, split or choose cells. Click a cell, then shift-click another to choose a block", |ui| {
                     ui.add_enabled_ui(can_merge, |ui| { if menu_item(ui, SQUARE_BORDER, "Merge cells").clicked() { merge = true; } });
                     ui.add_enabled_ui(can_split, |ui| { if menu_item(ui, SQUARE_BORDER, "Split cell").clicked() { split = true; } });
                     ui.separator();
@@ -2055,20 +1619,26 @@ impl App {
                         if menu_item(ui, AL_CENTER_V, "Choose column").clicked() { choose = Some(((0, c0), (dims.0.saturating_sub(1), c1))); }
                         if menu_item(ui, TABLE, "Choose all cells").clicked() { choose = Some(((0, 0), (dims.0.saturating_sub(1), dims.1.saturating_sub(1)))); }
                     });
-                });
+                }); });
             });
         });
         // Borders for the chosen cells.
         let mut borders: Option<(t::BorderSet, Option<Stroke>)> = None;
         group(ui, "Borders", |ui| {
             ui.vertical(|ui| {
+                if panel_mode(ui) {
+                    let mut c = Some(self.border_color);
+                    format_panel::row(ui, "Color", |ui, w| { if format_panel::color_field(ui, w, &mut c, None) { if let Some(c) = c { self.border_color = c; } } });
+                    format_panel::row(ui, "Thickness", |ui, w| { ui.add_sized([w, 22.0], egui::DragValue::new(&mut self.border_width).range(0.5..=24.0).speed(0.25).suffix(" px")); });
+                } else {
                 ui.horizontal(|ui| {
                     let mut c = Some(self.border_color);
                     if color_menu(ui, PEN, "Border color", &mut c, None) { if let Some(c) = c { self.border_color = c; } }
                     framed(ui, |ui| { ui.add(egui::DragValue::new(&mut self.border_width).range(0.5..=24.0).speed(0.25).suffix(" px")); });
                 });
+                }
                 let line = Some(Stroke { color: self.border_color, width: self.border_width });
-                let menu = caret_button(ui, "Borders");
+                let menu = if panel_mode(ui) { let mut r = None; format_panel::row(ui, "Apply to", |ui, w| { fill_next(ui, w); r = Some(compact_widget(ui, SQUARE_BORDER, "Borders", true, false)); }); r.unwrap() } else { caret_button(ui, "Borders") };
                 egui::Popup::from_toggle_button_response(&menu).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
                     use t::BorderSet::*;
                     for (label, set, ln) in [("All", All, line), ("Outside", Outside, line), ("Inside", Inside, line), ("Top", Top, line), ("Bottom", Bottom, line), ("Left", Left, line), ("Right", Right, line), ("No borders", All, None)] {
@@ -2085,17 +1655,19 @@ impl App {
         if let Some((set, ln)) = borders { self.set_cell_borders(set, ln); }
     }
 
-    /// The groups of Home that belong to the selected object: styles, fill and outline, and arrangement.
+    /// The groups of the Properties panel that belong to the selected object: styles, fill and outline, and arrangement.
     fn format_groups(&mut self, ui: &mut egui::Ui, obj: &mut Object, changed: &mut bool) {
-        let has_sel = self.selected.is_some();
+        let has_sel = self.view.selected.is_some();
         let n_sel = self.selection().len();
         let mut style_pick: Option<crate::button_styles::StyleDef> = None;
         let mut pick_captions = false;
         if obj.has_button_states() {
             group(ui, "Button Styles", |ui| {
                 let corners = &mut self.button_corners;
-                big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colors in four looks, with square, rounded or pill corners", |ui| {
-                    if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
+                pr(ui, "Look", |ui, _| {
+                    big_menu_open(ui, SHAPES, "Styles", "Ready-made button looks: nine colors in four looks, with square, rounded or pill corners", |ui| {
+                        if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
+                    });
                 });
             });
         }
@@ -2105,7 +1677,8 @@ impl App {
         }
         if obj.table.is_some() { self.table_groups(ui); }
         let is_media = matches!(obj.kind, Kind::Video | Kind::Audio);
-        if is_media {
+        // The Properties panel has Playback and Captions among its Settings.
+        if is_media && !panel_mode(ui) {
             group(ui, "Playback", |ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
@@ -2149,26 +1722,31 @@ impl App {
             if let Some((key, _)) = self.load_media(&["vtt"], "WebVTT captions") {
                 self.snapshot();
                 let id = obj.id.clone();
-                if let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(self.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
+                if let Some(o) = self.project.as_mut().and_then(|p| p.slide_get_mut(self.view.slide)).and_then(|s| s.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)) { o.captions = Some(key); }
                 self.dirty = true;
             }
         }
     }
 
-    /// Crop, shape and ratio for a single picture. Shared by the selection groups on Home.
+    /// Crop, shape and ratio for a single picture. Shared by the selection groups of the Properties panel.
     fn picture_group(&mut self, ui: &mut egui::Ui, crop_info: &Option<(String, bool)>) {
         group(ui, "Picture", |ui| {
-            ui.horizontal(|ui| {
+            hwrap(ui, |ui| {
                 ui.add_enabled_ui(crop_info.is_some(), |ui| {
-                    let on = crop_info.as_ref().is_some_and(|(id, _)| self.crop_mode.as_deref() == Some(id.as_str()));
-                    if big_toggle(ui, CROP, "Crop", "Crop the picture: drag its edges, or drag inside it to move the picture (Esc or Enter to finish)", on).clicked() {
-                        self.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
-                    }
-                    ui.add_enabled_ui(crop_info.as_ref().is_some_and(|c| c.1), |ui| {
-                        if big_button(ui, ARROW_COUNTER, "Reset", "Remove the crop and show the whole picture").clicked() { self.reset_crop(); }
+                    let on = crop_info.as_ref().is_some_and(|(id, _)| self.view.crop_mode.as_deref() == Some(id.as_str()));
+                    pr(ui, "Crop", |ui, w| {
+                        let half = if w > 0.0 { (w - ui.spacing().item_spacing.x) / 2.0 } else { 0.0 };
+                        if half > 0.0 { fill_next(ui, half); }
+                        if big_toggle(ui, CROP, "Crop", "Crop the picture: drag its edges, or drag inside it to move the picture (Esc or Enter to finish)", on).clicked() {
+                            self.view.crop_mode = if on { None } else { crop_info.as_ref().map(|(id, _)| id.clone()) };
+                        }
+                        ui.add_enabled_ui(crop_info.as_ref().is_some_and(|c| c.1), |ui| {
+                            if half > 0.0 { fill_next(ui, half); }
+                            if big_button(ui, ARROW_COUNTER, "Reset", "Remove the crop and show the whole picture").clicked() { self.reset_crop(); }
+                        });
                     });
                     // Crop to a shape: only the part of the picture inside the shape shows.
-                    ui.add_enabled_ui(crop_info.is_some(), |ui| {
+                    pr(ui, "Shape", |ui, _| {
                         let cur = self.selected_object().and_then(|o| o.mask);
                         big_menu(ui, CIRCLE, "Shape", "Crop the picture to a shape: oval, rounded, diamond, star ...", |ui| {
                             if ui.selectable_label(cur.is_none(), "None").clicked() { self.set_picture_shape(None); ui.close(); }
@@ -2178,19 +1756,21 @@ impl App {
                         });
                     });
                     // The shape of the crop frame: pick one and the frame closes in to it and keeps it while dragged.
-                    ui.add_enabled_ui(crop_info.is_some() && self.crop_mode.is_some(), |ui| {
-                        big_menu(ui, FRAME, "Ratio", "Hold the crop to a shape of frame: 1:1, 4:3, 16:9 ...", |ui| {
-                            let native = crop_info.as_ref().and_then(|(id, _)| self.picture_ratio(id));
-                            let cur = self.crop_aspect;
-                            let pick = |ui: &mut egui::Ui, app: &mut Self, label: &str, r: Option<f32>| {
-                                let on = match (cur, r) { (None, None) => true, (Some(a), Some(b)) => (a - b).abs() < 0.001, _ => false };
-                                if ui.selectable_label(on, label).clicked() { app.set_crop_aspect(r); ui.close(); }
-                            };
-                            pick(ui, self, "Free", None);
-                            if let Some(n) = native { pick(ui, self, "Original", Some(n)); }
-                            for (label, w, h) in [("1:1  square", 1.0, 1.0), ("4:3", 4.0, 3.0), ("3:2", 3.0, 2.0), ("16:9", 16.0, 9.0), ("21:9", 21.0, 9.0), ("3:4  portrait", 3.0, 4.0), ("2:3  portrait", 2.0, 3.0), ("9:16  portrait", 9.0, 16.0)] {
-                                pick(ui, self, label, Some(w / h));
-                            }
+                    ui.add_enabled_ui(self.view.crop_mode.is_some(), |ui| {
+                        pr(ui, "Ratio", |ui, _| {
+                            big_menu(ui, FRAME, "Ratio", "Hold the crop to a shape of frame: 1:1, 4:3, 16:9 ...", |ui| {
+                                let native = crop_info.as_ref().and_then(|(id, _)| self.picture_ratio(id));
+                                let cur = self.view.crop_aspect;
+                                let pick = |ui: &mut egui::Ui, app: &mut Self, label: &str, r: Option<f32>| {
+                                    let on = match (cur, r) { (None, None) => true, (Some(a), Some(b)) => (a - b).abs() < 0.001, _ => false };
+                                    if ui.selectable_label(on, label).clicked() { app.set_crop_aspect(r); ui.close(); }
+                                };
+                                pick(ui, self, "Free", None);
+                                if let Some(n) = native { pick(ui, self, "Original", Some(n)); }
+                                for (label, w, h) in [("1:1  square", 1.0, 1.0), ("4:3", 4.0, 3.0), ("3:2", 3.0, 2.0), ("16:9", 16.0, 9.0), ("21:9", 21.0, 9.0), ("3:4  portrait", 3.0, 4.0), ("2:3  portrait", 2.0, 3.0), ("9:16  portrait", 9.0, 16.0)] {
+                                    pick(ui, self, label, Some(w / h));
+                                }
+                            });
                         });
                     });
                 });
@@ -2198,30 +1778,33 @@ impl App {
         });
     }
 
-    /// Outline editing for a single hotspot. Shared by the selection groups on Home.
+    /// Outline editing for a single hotspot. Shared by the selection groups of the Properties panel.
     fn hotspot_group(&mut self, ui: &mut egui::Ui, obj: &Object, enabled: bool, n_sel: usize) {
         group(ui, "Hotspot", |ui| {
-            ui.horizontal(|ui| {
+            hwrap(ui, |ui| {
                 // Only a single hotspot has an outline to edit: (its id, whether it has an outline that is not just its box).
                 let spot = (enabled && n_sel == 1 && matches!(obj.kind, Kind::Hotspot)).then(|| (obj.id.clone(), obj.hit_area.as_ref().is_some_and(|a| !outline::is_box(a)), obj.hit_area.is_some()));
                 ui.add_enabled_ui(spot.is_some(), |ui| {
-                    let on = spot.as_ref().is_some_and(|(id, _, _)| self.outline_mode.as_deref() == Some(id.as_str()));
-                    if big_toggle(ui, NODES, "Outline", "Edit the hotspot's outline: drag a corner, click an edge to add one, Delete removes the chosen corner (Esc or Enter to finish)", on).clicked() {
-                        if on { self.end_outline(); } else { self.begin_outline(); }
-                    }
+                    let on = spot.as_ref().is_some_and(|(id, _, _)| self.view.outline_mode.as_deref() == Some(id.as_str()));
+                    pr(ui, "Outline", |ui, _| {
+                        if big_toggle(ui, NODES, "Outline", "Edit the hotspot's outline: drag a corner, click an edge to add one, Delete removes the chosen corner (Esc or Enter to finish)", on).clicked() {
+                            if on { self.end_outline(); } else { self.begin_outline(); }
+                        }
+                    });
                     ui.add_enabled_ui(spot.as_ref().is_some_and(|s| s.1), |ui| {
-                        if big_button(ui, FRAME, "Fit", "Shrink the hotspot's frame to its outline").clicked() { self.fit_outline(); }
+                        pr(ui, "Frame", |ui, _| { if big_button(ui, FRAME, "Fit", "Shrink the hotspot's frame to its outline").clicked() { self.fit_outline(); } });
                     });
                     ui.add_enabled_ui(spot.as_ref().is_some_and(|s| s.2), |ui| {
-                        if big_button(ui, ARROW_COUNTER, "Box", "Remove the outline: the whole frame is clickable again").clicked() { self.reset_outline(); }
+                        pr(ui, "Shape", |ui, _| { if big_button(ui, ARROW_COUNTER, "Box", "Remove the outline: the whole frame is clickable again").clicked() { self.reset_outline(); } });
                     });
                 });
             });
         });
     }
 
-    /// Order, group and align the selection. Shared by the selection groups on Home.
+    /// Order, group and align the selection. Shared by the selection groups of the Properties panel.
     fn arrange_group(&mut self, ui: &mut egui::Ui, has_sel: bool, n_sel: usize) {
+        if panel_mode(ui) { return; }
         group(ui, "Arrange", |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(has_sel, |ui| {
@@ -2248,103 +1831,6 @@ impl App {
         });
     }
 
-    fn insert_tab(&mut self, ui: &mut egui::Ui, normal: bool) {
-        ui.add_enabled_ui(normal, |ui| {
-            group(ui, "Text", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, TEXTBOX, "Text Box", "Insert a text box").clicked() { self.insert_text(); }
-                    big_menu(ui, TABLE, "Table", "Insert a table", |ui| {
-                        ui.set_min_width(0.0);
-                        if let Some((r, c)) = table_picker(ui) { self.insert_table(r, c); ui.close(); }
-                    });
-                    big_menu(ui, HASH, "Slide Number", "Insert a number that follows the slide", |ui| {
-                        if menu_item(ui, HASH, "Slide number").clicked() { self.insert_slide_number(false); ui.close(); }
-                        if menu_item(ui, HASH, "Slide number of total").clicked() { self.insert_slide_number(true); ui.close(); }
-                    });
-                    self.symbol_button(ui);
-                    // Hyperlink links the chosen text (or all of the object's text). With no text to link it makes a text box
-                    // holding the link instead.
-                    {
-                        let has_text = self.selected_object().is_some_and(|o| !o.text.is_empty());
-                        let can = self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)));
-                        let link_btn = ui.add_enabled_ui(can, |ui| big_widget(ui, LINK, "Hyperlink", false, false).on_hover_text("Hyperlink: link the selected text (or all of the object's text) to a web address, or make a text box holding a link")).inner
-                            .on_disabled_hover_text("Hyperlink: this object has no text; select a text box or shape, or click an empty part of the slide");
-                        let link_id = egui::Id::new("text_link_url");
-                        let shown_id = egui::Id::new("text_link_shown");
-                        if link_btn.clicked() {
-                            let cur = self.selected_object().and_then(|o| {
-                                let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
-                                o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
-                            }).unwrap_or_default();
-                            ui.data_mut(|d| { d.insert_temp(link_id, cur); d.insert_temp(shown_id, String::new()); });
-                        }
-                        egui::Popup::from_toggle_button_response(&link_btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                            ui.set_min_width(260.0);
-                            let mut url: String = ui.data_mut(|d| d.get_temp(link_id)).unwrap_or_default();
-                            let mut shown: String = ui.data_mut(|d| d.get_temp(shown_id)).unwrap_or_default();
-                            if !has_text {
-                                ui.label("Text to show");
-                                ui.add(egui::TextEdit::singleline(&mut shown).desired_width(240.0).hint_text("Same as the address"));
-                            }
-                            ui.label("Web address (https:// or mailto:)");
-                            ui.add(egui::TextEdit::singleline(&mut url).desired_width(240.0).hint_text("https://example.com"));
-                            ui.data_mut(|d| { d.insert_temp(link_id, url.clone()); d.insert_temp(shown_id, shown.clone()); });
-                            let ok = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
-                            ui.horizontal(|ui| {
-                                let apply = ui.add_enabled(ok, egui::Button::new(if has_text { "Apply" } else { "Insert" })).clicked();
-                                let remove = has_text && ui.button("Remove link").clicked();
-                                if apply || remove {
-                                    if has_text { self.link_selected(apply.then(|| url.trim().to_string())); }
-                                    else { self.insert_link_text(shown.trim(), url.trim()); }
-                                    ui.close();
-                                }
-                            });
-                        });
-                    }
-                });
-            });
-            group(ui, "Media", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, IMAGE, "Picture", "Insert a picture").clicked() { self.insert_image(); }
-                    big_menu(ui, SHAPES, "Shape", "Insert a shape", |ui| {
-                        if let Some(name) = shape_gallery(ui) { self.insert_shape(name); ui.close(); }
-                    });
-                    if big_button(ui, VIDEO, "Video", "Insert a video").clicked() { self.insert_video(); }
-                    if big_button(ui, SPEAKER, "Audio", "Insert audio").clicked() { self.insert_audio(); }
-                    big_menu(ui, CHAT, "Caption", "Insert a speech or thought bubble with text", |ui| self.caption_menu(ui));
-                    if big_button(ui, PANORAMA, "360° Image", "Pick a panoramic picture the learner can look around, with annotations").clicked() { self.insert_pano(); }
-                    if big_button(ui, FUNCTION, "Equation", "Type an equation in LaTeX; it is typeset as a shape you can resize and recolor").clicked() { self.open_equation_dialog(None); }
-                    big_menu(ui, STAR, "Icons", "Insert an icon as a vector shape you can recolor and resize", |ui| self.icon_gallery(ui));
-                    if big_button(ui, GLOBE, "Web Object", "Show a web page inside the slide").clicked() { self.insert_web_object(); }
-                });
-            });
-            group(ui, "Interactive Objects", |ui| {
-                ui.horizontal(|ui| {
-                    if big_button(ui, CLICK, "Button", "Insert a button with hover and click looks").clicked() { self.insert_button(); }
-                    if big_button(ui, SLIDERS, "Slider", "Insert a slider the learner drags to set a number").clicked() { self.insert_slider(); }
-                    big_menu(ui, CLICK, "Hotspot", "Insert an invisible area the learner clicks", |ui| {
-                        if menu_item(ui, RECT, "Rectangle").clicked() { self.insert_hotspot(false); ui.close(); }
-                        if menu_item(ui, CIRCLE, "Oval").clicked() { self.insert_hotspot(true); ui.close(); }
-                        if menu_item(ui, POLYLINE, "Freeform (click its corners)").clicked() {
-                            self.draw_outline = Some(vec![]);
-                            self.draw_slide = self.slide;
-                            self.selected = None;
-                            self.multi.clear();
-                            self.status = "Click each corner of the hotspot. Enter, double-click or the first corner finishes.".into();
-                            ui.close();
-                        }
-                    });
-                    big_menu(ui, GAUGE, "Dial", "Insert a dial the learner turns to set a number", |ui| self.dial_menu(ui));
-                    big_menu(ui, CHECK, "Input", "Insert something the learner ticks, picks or types", |ui| self.input_menu(ui));
-                    big_menu(ui, PIN, "Marker", "Insert a round button with an icon or a number in it", |ui| self.marker_gallery(ui));
-                });
-            });
-        });
-        if !normal {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Question and results slides are laid out by the player.").weak());
-        }
-    }
 
     /// Format Painter: once an object has been copied, the next different object that is selected gets its look.
     fn run_format_painter(&mut self, ctx: &egui::Context) {
@@ -2356,25 +1842,37 @@ impl App {
         }
         let Some(before) = self.selected_object().cloned() else { return };
         if before.id == src || ctx.input(|i| i.pointer.any_down()) { return; }
-        let mut after = before.clone();
-        after.style = proto.style.clone();
-        after.fill = proto.fill;
-        after.gradient = proto.gradient.clone();
-        after.stroke = proto.stroke;
-        after.dash = proto.dash;
-        after.shadow = proto.shadow;
-        after.glow = proto.glow;
-        after.soft_edge = proto.soft_edge;
-        after.reflection = proto.reflection;
-        after.radius = proto.radius;
-        after.line_spacing = proto.line_spacing;
+        let after = styled_like(&before, &proto);
         self.apply_object_edit(ctx, &before, &after);
+        self.clear_word_styles();
         self.painter = None;
         self.status = "Format Painter: applied.".into();
     }
 
-    /// The Symbol button of the Text group: a grid of common symbols; clicking one puts it into the selected text.
-    fn symbol_button(&mut self, ui: &mut egui::Ui) {
+    /// After a style is given to the selected objects, their words lose any bold, italic, size or color of their own (a link stays),
+    /// so the style shows all the way through.
+    fn clear_word_styles(&mut self) {
+        let targets = self.format_targets();
+        let Some(p) = self.project.as_mut() else { return };
+        for (li, oi) in targets {
+            if let Some(o) = p.slide_mut(self.view.slide).layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
+                if o.rich.is_some() { o.format_range(0, usize::MAX, &brainbend_doc::richtext::Attr::Clear); }
+            }
+        }
+    }
+
+    /// Paste Style: the style copied with Copy Style goes onto whatever is selected (and can be pasted again and again).
+    pub(crate) fn paste_style(&mut self, ctx: &egui::Context) {
+        let Some(proto) = self.style_clip.clone() else { return };
+        let Some(before) = self.selected_object().cloned() else { return };
+        let after = styled_like(&before, &proto);
+        self.apply_object_edit(ctx, &before, &after);
+        self.clear_word_styles();
+        self.status = "Paste Style: applied.".into();
+    }
+
+    /// The grid of common symbols, in a menu or a popup: the one clicked, if any.
+    fn symbol_grid(ui: &mut egui::Ui) -> Option<String> {
         const GROUPS: [(&str, &str); 6] = [
             ("Greek", "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ"),
             ("Math", "±×÷≠≈≤≥∞√∑∏∫∂∆∇∈∉⊂⊃⊆⊇∪∩∧∨¬∀∃∅≡∝∠∴∵−·°′″²³½¼¾‰"),
@@ -2383,27 +1881,151 @@ impl App {
             ("Writing", "©®™§¶†‡•…–—«»‘’“”‹›"),
             ("Small numbers", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺ⁿ₀₁₂₃₄₅₆₇₈₉₊"),
         ];
-        // With nothing selected a symbol starts a new text box; only a picture-like object has no text to put it in.
-        let can = self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)));
-        let resp = ui.add_enabled_ui(can, |ui| big_widget(ui, SIGMA, "Symbol", true, false).on_hover_text("Symbol: put a symbol into the selected text, or into a new text box")).inner
-            .on_disabled_hover_text("Symbol: this object has no text; select a text box or shape, or click an empty part of the slide");
         let mut pick: Option<String> = None;
-        egui::Popup::from_toggle_button_response(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-            ui.set_width(8.0 * 36.0 + 12.0);
-            for (name, chars) in GROUPS {
-                ui.label(egui::RichText::new(name).weak().size(12.0));
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                    for c in chars.chars() {
-                        let b = ui.add(egui::Button::new(egui::RichText::new(c.to_string()).family(font_family("Open Sans")).size(18.0)).min_size(egui::vec2(32.0, 30.0)).frame(false));
-                        let code = format!("U+{:04X}", c as u32);
-                        b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &code));
-                        if b.on_hover_text(code).clicked() { pick = Some(c.to_string()); }
-                    }
-                });
-            }
+        ui.set_width(8.0 * 36.0 + 12.0);
+        for (name, chars) in GROUPS {
+            ui.label(egui::RichText::new(name).weak().size(12.0));
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                for c in chars.chars() {
+                    let b = ui.add(egui::Button::new(egui::RichText::new(c.to_string()).family(font_family("Open Sans")).size(18.0)).min_size(egui::vec2(32.0, 30.0)).frame(false));
+                    let code = format!("U+{:04X}", c as u32);
+                    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &code));
+                    if b.on_hover_text(code).clicked() { pick = Some(c.to_string()); }
+                }
+            });
+        }
+        pick
+    }
+
+    /// Whether the selection can hold a symbol or a link: with nothing selected they start a new text box; only a picture-like object has no text.
+    fn can_take_text(&self) -> bool {
+        self.selected_object().is_none_or(|o| !matches!(o.kind, Kind::Image | Kind::Video | Kind::Audio | Kind::Hotspot | Kind::Web(_) | Kind::Pano(_) | Kind::Input(_) | Kind::Slider(_) | Kind::Unsupported(_)))
+    }
+
+    /// The Hyperlink form as a menu shows it: the address (and, with no text to link, the words to show) and Apply or Insert.
+    fn link_form_menu(&mut self, ui: &mut egui::Ui) {
+        ui.set_min_width(260.0);
+        let has_text = self.selected_object().is_some_and(|o| !o.text.is_empty());
+        let cur: String = self.selected_object().and_then(|o| {
+            let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
+            o.char_fmts().into_iter().enumerate().find(|(i, (_, f))| *i >= a && *i < b && f.link.is_some()).and_then(|(_, (_, f))| f.link)
+        }).unwrap_or_default();
+        let key = egui::Id::new("menu-link-form");
+        let (seen, mut url, mut shown): (String, String, String) = ui.data_mut(|d| d.get_temp(key)).unwrap_or((String::from("\u{0}"), String::new(), String::new()));
+        if seen != cur { url = cur.clone(); shown.clear(); }
+        if !has_text {
+            ui.label("Text to show");
+            ui.add(egui::TextEdit::singleline(&mut shown).desired_width(240.0).hint_text("Same as the address"));
+        }
+        ui.label("Web address (https:// or mailto:)");
+        ui.add(egui::TextEdit::singleline(&mut url).desired_width(240.0).hint_text("https://example.com"));
+        let ok = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
+        let (mut apply, mut remove) = (false, false);
+        ui.horizontal(|ui| {
+            apply = ui.add_enabled(ok, egui::Button::new(if has_text { "Apply" } else { "Insert" })).clicked();
+            remove = has_text && ui.button("Remove link").clicked();
         });
-        if let Some(s) = pick { self.insert_symbol(&s); }
+        ui.data_mut(|d| d.insert_temp(key, (cur, url.clone(), shown.clone())));
+        if apply || remove {
+            if has_text { self.link_selected(apply.then(|| url.trim().to_string())); }
+            else { self.insert_link_text(shown.trim(), url.trim()); }
+            ui.close();
+        }
+    }
+
+    /// A slim toolbar at the top of the slide area (between the panels, not across the window): a button for each thing that can be added,
+    /// grouped as Text, Media and Interactive, each named in a tooltip. A button with choices (a table size, a shape) opens them below it.
+    pub(crate) fn insert_bar(&mut self, root: &mut egui::Ui) {
+        // The Scene View, the 360° editor and Try It have nothing to add objects to.
+        if !self.show_insert_bar || self.scene_view || self.pano.edit.is_some() || self.try_mode { return; }
+        let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Panel::top("insert-bar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+            self.insert_bar_row(ui);
+        });
+    }
+
+    /// The same bar inside a window of its own (an editor window), on a band like the main window's.
+    pub(crate) fn insert_bar_in(&mut self, ui: &mut egui::Ui) {
+        if !self.show_insert_bar || self.try_mode { return; }
+        let band = if ui.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| self.insert_bar_row(ui));
+    }
+
+    /// The buttons of the insert bar, centered in the room there is.
+    fn insert_bar_row(&mut self, ui: &mut egui::Ui) {
+            // The buttons sit in the middle of the bar. How wide they come to is known from the frame before, so they start that far in.
+            let width_id = ui.id().with("insert-bar-width");
+            let avail = ui.available_width();
+            let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
+            let pad = ((avail - known) / 2.0).max(0.0);
+            let (mut left, mut right, mut first_top, mut wrapped) = (f32::MAX, 0.0f32, None::<f32>, false);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
+                ui.add_space(pad);
+                for (n, (_, entries)) in insert_sections().into_iter().enumerate() {
+                    if n > 0 { ui.add_space(6.0); ui.separator(); ui.add_space(6.0); }
+                    for entry in entries {
+                        let (label, tip) = (entry.label(), entry.tip());
+                        let button = egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons())).color(text_col(ui))).frame(false).min_size(egui::vec2(30.0, 28.0));
+                        let named = |r: egui::Response| { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); r.on_hover_ui(|ui| { ui.strong(label); ui.weak(tip); }) };
+                        let r = match entry {
+                            InsertEntry::Leaf((_, _, _, act)) => { let r = named(ui.add(button)); if r.clicked() { act(self); } r }
+                            InsertEntry::Sub((_, _, _, content)) => named(egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| content(self, ui)).0),
+                        };
+                        left = left.min(r.rect.left());
+                        right = right.max(r.rect.right());
+                        match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
+                    }
+                }
+            });
+            // Wrapped onto two rows, the bar is as wide as it can be; otherwise it is as wide as the buttons (without the padding in front).
+            let width = if wrapped || right <= left { avail } else { right - left };
+            if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
+    }
+
+    /// The names of the things that are added by one click (the ones with no choices to make), in the order `insert_leaf_act` takes.
+    pub(crate) fn insert_leaf_labels() -> Vec<&'static str> {
+        insert_sections().into_iter().flat_map(|(_, entries)| entries).filter_map(|e| match e { InsertEntry::Leaf(l) => Some(l.1), InsertEntry::Sub(_) => None }).collect()
+    }
+
+    /// Add the thing at place `n` of `insert_leaf_labels`.
+    pub(crate) fn insert_leaf_act(&mut self, n: usize) {
+        let act = insert_sections().into_iter().flat_map(|(_, entries)| entries).filter_map(|e| match e { InsertEntry::Leaf(l) => Some(l.3), InsertEntry::Sub(_) => None }).nth(n);
+        if let Some(act) = act { act(self); }
+    }
+
+    /// Everything that can be added to a slide, as a menu with a search box on top: the gallery behind the + button and the Insert menu.
+    /// Typing narrows the list to the objects whose names match; an object with choices (a table size, a shape) opens them beside it.
+    pub(crate) fn insert_menu(&mut self, ui: &mut egui::Ui) {
+        let sections = insert_sections();
+        ui.set_min_width(240.0);
+        let id = egui::Id::new("insert-search");
+        let mut query: String = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
+        let field = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search objects").desired_width(240.0));
+        // Typing starts the search as soon as the gallery opens.
+        if !field.has_focus() && ui.memory(|m| m.focused().is_none()) { field.request_focus(); }
+        ui.data_mut(|d| d.insert_temp(id, query.clone()));
+        let needle = query.trim().to_lowercase();
+        let wanted = |label: &str, tip: &str| needle.is_empty() || label.to_lowercase().contains(&needle) || tip.to_lowercase().contains(&needle);
+        let mut found = false;
+        let room = (ui.ctx().content_rect().height() - 160.0).max(200.0);
+        egui::ScrollArea::vertical().max_height(room).auto_shrink([true, true]).show(ui, |ui| {
+        for (heading, entries) in sections {
+            let shown: Vec<InsertEntry> = entries.into_iter().filter(|e| wanted(e.label(), e.tip())).collect();
+            if shown.is_empty() { continue; }
+            found = true;
+            if needle.is_empty() { ui.label(egui::RichText::new(heading).weak().size(12.0)); }
+            for e in shown {
+                match e {
+                    InsertEntry::Leaf((icon, label, tip, act)) => { if menu_item(ui, icon, label).on_hover_text(tip).clicked() { act(self); ui.close(); } }
+                    InsertEntry::Sub((icon, label, tip, content)) => { ui.menu_button(menu_job(ui, icon, label), |ui| content(self, ui)).response.on_hover_text(tip); }
+                }
+            }
+        }
+        if !found { ui.weak("Nothing matches"); }
+        });
     }
 
     /// The Caption menu: the eight bubbles two to a row, each drawn with "Abc" in it.
@@ -2564,45 +2186,11 @@ impl App {
         if let Some(icon) = pick { self.insert_icon(icon); ui.close(); }
     }
 
-    /// The Publish choices, shared by the title bar and the Home tab.
+    /// The Publish choices, shared by the title bar.
     /// Whether Try It applies: slide-based projects only.
     fn can_try(&self) -> bool { self.project.as_ref().is_some_and(|p| !p.is_web()) }
 
-    /// How wide the pinned group is, so the ribbon can leave room for it at the right.
-    fn pinned_width(&self, ui: &egui::Ui) -> f32 {
-        let mut widths = vec![big_width(ui, "Preview", true), big_width(ui, "Publish", false) + OUTLINE_PAD];
-        if self.can_try() { widths.push(big_width(ui, "Try It", false)); }
-        widths.iter().sum::<f32>() + 3.0 * (widths.len() as f32 - 1.0) + 14.0
-    }
-
-    /// Try It, Preview and Publish: pinned at the right end of the ribbon, always in view.
-    fn pinned_actions(&mut self, ui: &mut egui::Ui) {
-        // A thin divider separates the group from the tabs' controls.
-        let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, BIG_H + CAP_H), egui::Sense::hover());
-        let col = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
-        ui.painter().line_segment([line.center_top() + egui::vec2(0.0, 6.0), line.center_bottom() - egui::vec2(0.0, 6.0)], egui::Stroke::new(1.0, col));
-        ui.add_space(5.0);
-        let can_try = self.can_try();
-        pinned_group(ui, "", |ui| {
-            ui.horizontal(|ui| {
-                if can_try {
-                    let tip = "Press buttons on the slide to see their Hover, Down, Visited and Selected looks and the layers they show. Nothing is changed or saved. Esc stops. GIF animation, video, audio, JavaScript and variables do not run here: use Preview for those.";
-                    if big_toggle(ui, CLICK, "Try It", tip, self.try_mode).clicked() { self.try_mode = !self.try_mode; }
-                }
-                big_menu(ui, PLAY, "Preview", "Play the lesson in your browser", |ui| self.preview_items(ui));
-                // Publish is the main action, so it is outlined in the main-action color; the outline darkens and the
-                // inside tints while the pointer is over it, and more while pressed or while the Publish window is open.
-                let backing = ui.painter().add(egui::Shape::Noop);
-                let publishing = self.publish_open;
-                let resp = ui.scope(|ui| { outlined_look(ui); big_widget_min(ui, EXPORT, "Publish", false, false, big_width(ui, "Publish", false) + OUTLINE_PAD).on_hover_text("Publish the project: to the web, an LMS, PDF and more") }).inner;
-                if resp.clicked() { self.publish_open = true; }
-                ui.painter().set(backing, outline_shape(ui, resp.rect, resp.hovered(), publishing || resp.is_pointer_button_down_on()));
-            });
-        });
-    }
-
-
-    /// The Preview choices, shared by the title bar and the Home tab.
+    /// The Preview choices, shared by the title bar.
     pub(super) fn preview_items(&mut self, ui: &mut egui::Ui) {
         ui.set_min_width(200.0);
         if menu_item(ui, PLAY, "Entire lesson").clicked() { self.preview(PreviewScope::All); }
@@ -2618,10 +2206,10 @@ impl App {
 
     /// Link the selected text (or all of the selected object's text) to a web address; `None` removes the link.
     fn link_selected(&mut self, url: Option<String>) {
-        let Some((li, oi)) = self.selected else { return };
-        let (a, b) = self.text_sel.unwrap_or((0, usize::MAX));
+        let Some((li, oi)) = self.view.selected else { return };
+        let (a, b) = self.view.text_sel.unwrap_or((0, usize::MAX));
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slide_mut(self.view.slide).layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             let n = o.text.chars().count();
             o.format_range(a.min(n), b.min(n), &Attr::Link(url));
             let (t, r) = (o.text.clone(), o.rich.clone());
@@ -2629,379 +2217,55 @@ impl App {
         }
     }
 
-    /// The New Slide choices, shared by Home and Insert.
-    fn new_slide_menu(&mut self, ui: &mut egui::Ui) {
-        if menu_item(ui, FILE_PLUS, "Same layout").clicked() { self.add_slide(SlideKind::Normal); ui.close(); }
-        ui.label(egui::RichText::new("Layouts").weak().size(12.0));
+
+    /// The menu that adds a slide, in the slide list and its right-click menu: the choices of the Add Slides tab, with their icons.
+    /// `scene` is the scene the slide goes at the end of (`None`: after the slide that is showing).
+    pub(crate) fn add_slide_choices(&mut self, ui: &mut egui::Ui, scene: Option<usize>) {
+        enum Pick { Kind(SlideKind), Layout(Option<String>), Scene }
+        let mut pick: Option<Pick> = None;
+        ui.set_min_width(220.0);
+        if menu_item(ui, FILE_PLUS, "Slide").on_hover_text("A slide with the layout of the one before it").clicked() { pick = Some(Pick::Kind(SlideKind::Normal)); ui.close(); }
         let layouts: Vec<(String, String)> = self.project.as_ref().map(|p| p.layouts.iter().map(|l| (l.id.clone(), l.name.clone())).collect()).unwrap_or_default();
-        for (id, name) in layouts {
-            if menu_item(ui, FRAME, &name).clicked() { self.add_slide_with_layout(SlideKind::Normal, Some(id)); ui.close(); }
-        }
-        ui.separator();
-        if menu_item(ui, FILE_PLUS, "No layout").clicked() { self.add_slide_with_layout(SlideKind::Normal, None); ui.close(); }
-        if menu_item(ui, CHECK, "Results slide").clicked() { self.add_slide(SlideKind::Results); }
-    }
-
-    fn slides_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        group(ui, "Project", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, FILE_PLUS, "New Scene", "Add a scene after the current one").clicked() { self.add_scene(); }
-                big_menu(ui, FILE_PLUS, "New Slide", "Add a slide after this one", |ui| self.new_slide_menu(ui));
-            });
-        });
-        fn multiple_response() -> Question {
-            let mut q = Question::new_single();
-            q.multiple = true;
-            q.choices[1].correct = true;
-            q
-        }
-        // Every question type is a button of its own, laid out three to a column so they fit the ribbon.
-        let graded: [(char, &str, &str, fn() -> Question); 15] = [
-            (RADIO, "Multiple choice", "One correct answer from several", Question::new_single),
-            (CHECK, "Multiple response", "Several correct answers", multiple_response),
-            (SLIDERS, "True / False", "True or false", Question::new_true_false),
-            (TEXT_T, "Fill in the blank", "Type the answer", Question::new_text_entry),
-            (SHAPES, "Matching", "Match each item to its partner", Question::new_matching),
-            (LIST_NUM, "Sequencing", "Put the items in order", Question::new_sequence),
-            (TEXTBOX, "Fill in the blanks", "Type the missing words in a passage", Question::new_fill_blanks),
-            (CLICK, "Drag the words", "Drag words into the gaps of a passage", Question::new_drag_words),
-            (PEN, "Mark the words", "Mark the right words in a passage", Question::new_mark_words),
-            (TEXT_AA, "Number", "Type a number", Question::new_numeric),
-            (STACK, "Sort into groups", "Drag each item into its group", Question::new_categorize),
-            (IMAGE, "Find the hotspot", "Click the right place on a picture", Question::new_hotspot),
-            (FRAME, "Label the picture", "Put each label on its place in a picture", Question::new_label_picture),
-            (RADIO, "Choose from lists", "Pick the right word from drop-down lists in a passage", Question::new_dropdowns),
-            (SPEAKER, "Dictation", "Type what is heard", Question::new_dictation),
-        ];
-        let survey: [(char, &str, &str, fn() -> Question); 2] = [
-            (SLIDERS, "Rating scale", "A survey question answered on a scale; not scored", Question::new_likert),
-            (TEXTBOX, "Free text", "A survey question answered in the learner's own words; not scored", Question::new_reflection),
-        ];
-        fn grid(ui: &mut egui::Ui, items: &[(char, &str, &str, fn() -> Question)]) -> Option<fn() -> Question> {
-            let mut picked = None;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
-                for column in items.chunks(3) {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        ui.spacing_mut().button_padding.y = 1.0;
-                        ui.spacing_mut().interact_size.y = 20.0;
-                        let w = column.iter().map(|c| c.1.len() as f32 * 7.0 + 36.0).fold(0.0, f32::max);
-                        for (icon, label, tip, make) in column {
-                            if ui.add(egui::Button::new(caret_job_plain(ui, *icon, label)).frame(false).min_size(egui::vec2(w, 20.0))).on_hover_text(*tip).clicked() { picked = Some(*make); }
-                        }
-                    });
+        if !layouts.is_empty() {
+            ui.menu_button(menu_job(ui, FRAME, "Slide from layout"), |ui| {
+                for (id, name) in &layouts {
+                    if menu_item(ui, FRAME, name).clicked() { pick = Some(Pick::Layout(Some(id.clone()))); ui.close(); }
                 }
             });
-            picked
         }
-        group(ui, "Graded Questions", |ui| {
-            if let Some(make) = grid(ui, &graded) { self.add_slide(SlideKind::Question(make())); }
-        });
-        group(ui, "Survey Questions", |ui| {
-            if let Some(make) = grid(ui, &survey) { self.add_slide(SlideKind::Question(make())); }
-        });
-        group(ui, "Results", |ui| {
-            if big_button(ui, CHECK, "Results", "Add a quiz results slide").clicked() { self.add_slide(SlideKind::Results); }
-        });
-        group(ui, "Course", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, SLIDERS, "Variables", "The project's variables, which triggers read and change").clicked() { self.variables_open = true; }
-                ui.vertical(|ui| {
-                    rows(ui);
-                    ui.label("Pass mark");
-                    if let Some(proj) = self.project.as_mut() {
-                        let before = Snap::of(proj);
-                        let mut changed = false;
-                        framed(ui, |ui| { changed = ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed(); });
-                        if changed { self.commit_project_edit(_ctx, before); }
-                    }
-                });
-            });
-        });
-    }
-
-    fn master_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let cur = self.slide;
-        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
-        let is_layout = cur > 0 && cur < n;
-        group(ui, "Edit", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, FILE_PLUS, "Insert Layout", "Add a new layout").clicked() { self.insert_layout(None); }
-                ui.add_enabled_ui(is_layout, |ui| {
-                    if big_button(ui, COPY, "Duplicate", "Copy this layout").clicked() { self.insert_layout(Some(cur)); }
-                    if big_button(ui, TRASH, "Delete", "Delete this layout").clicked() { self.delete_layout(cur); }
-                });
-            });
-        });
-        // Delete and Insert change the slide list and the current slide: look again before using the index.
-        let n = self.project.as_ref().map(|p| p.slides.len()).unwrap_or(0);
-        let cur = self.slide.min(n.saturating_sub(1));
-        let is_layout = cur > 0 && cur < n;
-        group(ui, "Placeholders", |ui| {
-            big_menu(ui, TEXTBOX, "Placeholder", "Add a heading or text placeholder", |ui| {
-                for k in PlaceholderKind::CHOICES {
-                    if menu_item(ui, TEXT_T, k.label()).clicked() { self.insert_placeholder(k); ui.close(); }
-                }
-            });
-        });
-        group(ui, "Layout", |ui| {
-            rows(ui);
-            let Some(proj) = self.project.as_mut() else { return };
-            let before = Snap::of(proj);
-            let mut changed = false;
-            if is_layout {
-                let id = proj.slides[cur].layout.clone().unwrap_or_default();
-                if let Some(l) = proj.layouts.iter_mut().find(|l| l.id == id) {
-                    changed |= ui.checkbox(&mut l.show_master, "Show master shapes").changed();
-                }
-            } else {
-                ui.label(egui::RichText::new("Shapes and background here appear on every layout").weak().size(12.0));
+        ui.menu_button(menu_job(ui, RADIO, "Graded question"), |ui| {
+            for (icon, label, tip, make) in GRADED_QUESTIONS {
+                if menu_item(ui, icon, label).on_hover_text(tip).clicked() { pick = Some(Pick::Kind(SlideKind::Question(make()))); ui.close(); }
             }
-            if changed { self.commit_project_edit(ctx, before); }
         });
-        group(ui, "Background", |ui| {
-            if big_button(ui, BUCKET, "Background", "Background of this layout or the master").clicked() { self.background_open = !self.background_open; }
+        ui.menu_button(menu_job(ui, SLIDERS, "Survey question"), |ui| {
+            for (icon, label, tip, make) in SURVEY_QUESTIONS {
+                if menu_item(ui, icon, label).on_hover_text(tip).clicked() { pick = Some(Pick::Kind(SlideKind::Question(make()))); ui.close(); }
+            }
         });
-    }
-
-    /// What an author checks once the project is built: the player's settings, the accessibility report, spelling and focus order.
-    fn review_tab(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        if self.project.is_none() { return; }
-        group(ui, "Player", |ui| {
-            if big_button(ui, PLAY, "Player\nSettings", "Colors, font, sidebar, title, logo and controls of the published player").clicked() { self.player_open = true; }
-        });
-                group(ui, "Check", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, ACCESS, "Accessibility\nChecker", "Accessibility and consistency report").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
-                if big_button(ui, SPELL, "Spelling", "Check the spelling of the whole project (F7)").clicked() { self.open_spelling(); }
-                if big_button(ui, LIST_NUM, "Focus Order", "The order the Tab key and screen readers move through this slide's objects").clicked() { self.focus_open = !self.focus_open; }
-            });
-        });
-    }
-
-    fn design_tab(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let slide_idx = self.slide;
-        let Some(proj) = self.project.as_mut() else { return };
-        let before = Snap::of(proj);
-        let mut changed = false;
-        let mut open_master = false;
-        let mut layout_pick: Option<Option<String>> = None;
-        let mut open_theme_colors = false;
-        let mut toggle_background = false;
-        group(ui, "Master", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, STACK, "Layout Builder", "Build your own slide layouts").clicked() { open_master = true; }
-                big_menu(ui, FRAME, "Layout", "Change this slide's layout", |ui| {
-                    let current = proj.slides[slide_idx].layout.clone();
-                    for l in proj.layouts.clone() {
-                        if ui.selectable_label(current.as_deref() == Some(l.id.as_str()), l.name.as_str()).clicked() { layout_pick = Some(Some(l.id.clone())); ui.close(); }
-                    }
-                    ui.separator();
-                    if ui.selectable_label(current.is_none(), "No layout").clicked() { layout_pick = Some(None); ui.close(); }
-                });
-                let cur = (proj.slides[0].width as i32, proj.slides[0].height as i32);
-                big_menu(ui, FRAME, "Slide Size", &format!("Now {} x {}", cur.0, cur.1), |ui| {
-                    for (w, h, label) in [(1920, 1080, "1920 x 1080 (16:9)"), (1280, 720, "1280 x 720 (16:9)"), (1440, 1080, "1440 x 1080 (4:3)"), (1024, 768, "1024 x 768 (4:3)")] {
-                        if ui.selectable_label(cur == (w, h), label).clicked() {
-                            for sl in proj.slides.iter_mut() { sl.width = w as f32; sl.height = h as f32; }
-                            changed = true;
-                        }
-                    }
-                });
-            });
-        });
-        group(ui, "Brand", |ui| {
-            ui.horizontal(|ui| {
-                if big_button(ui, BUCKET, "Background", "Color, gradient or picture behind this slide").clicked() { toggle_background = true; }
-                if big_button(ui, DROP, "Colors", "Your project's colors, offered first in every color menu").clicked() { open_theme_colors = true; }
-                // The theme's fonts, stacked: headings on top, body text below.
-                ui.vertical(|ui| {
-                    let mut next = proj.theme.clone();
-                    let mut moved = false;
-                    ui.spacing_mut().item_spacing.y = 4.0;
-                    for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
-                        ui.horizontal(|ui| {
-                            ui.add_sized([54.0, 22.0], egui::Label::new(egui::RichText::new(label).weak().size(12.0))).on_hover_text(tip);
-                            let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
-                            moved |= crate::font_store::font_menu(ui, id, font, 130.0);
-                        });
-                    }
-                    if moved { proj.set_theme(next.named()); changed = true; }
-                });
-            });
-        });
-        if changed { self.commit_project_edit(ctx, before); }
-        if open_master { self.enter_master_view(); }
-        if toggle_background { self.background_open = !self.background_open; }
-        if open_theme_colors { self.theme_colors_open = true; }
-        if let Some(l) = layout_pick { self.set_slide_layout(slide_idx, l); }
-    }
-
-    /// The slide's transition: a gallery to which more can be added (each is a name, an icon and what the player does).
-    fn transition_groups(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let slide_idx = self.slide;
-        let Some(proj) = self.project.as_mut() else { return };
-        let before = Snap::of(proj);
-        let mut changed = false;
-        let mut apply_all = false;
-        group(ui, "Slide Transition", |ui| {
-            use brainbend_doc::{Transition, TransitionKind};
-            ui.horizontal(|ui| {
-                let fade = proj.slides[slide_idx].fade_ms;
-                let cur = proj.slides[slide_idx].transition;
-                if big_toggle(ui, SQUARE_BORDER, "None", "No transition: the next slide just appears", fade == 0).clicked() { proj.slides[slide_idx].fade_ms = 0; changed = true; }
-                for k in TransitionKind::ALL {
-                    let tip = match k {
-                        TransitionKind::Fade => "The slide fades in",
-                        TransitionKind::Push => "The new slide pushes the old one out",
-                        TransitionKind::Wipe => "The new slide is wiped in",
-                        TransitionKind::Split => "The new slide opens from the middle, or closes in from the sides",
-                        TransitionKind::Cover => "The new slide slides over the old one",
-                        TransitionKind::Uncover => "The old slide slides away to show the new one",
-                        TransitionKind::Zoom => "The new slide zooms in, or the old one zooms away",
-                        TransitionKind::Dissolve => "The new slide appears in scattered pieces",
-                    };
-                    if big_drawn_button(ui, k.label(), tip, fade > 0 && cur.kind == k, |p, f, new, old| draw_transition(k, p, f, new, old)).clicked() {
-                        proj.slides[slide_idx].transition = Transition::of(k);
-                        if fade == 0 { proj.slides[slide_idx].fade_ms = 500; }
-                        changed = true;
-                    }
-                }
-                // The choices a kind has: where it comes from, or whether it goes in or out.
-                let variants = Transition::variants(cur.kind);
-                ui.add_enabled_ui(fade > 0 && variants.len() > 1, |ui| {
-                    big_menu(ui, SLIDERS, "Effect\nOptions", "Direction, or in and out, for this transition", |ui| {
-                        for v in variants {
-                            if ui.selectable_label(v.variant_label() == cur.variant_label(), v.variant_label()).clicked() { proj.slides[slide_idx].transition = v; changed = true; }
-                        }
-                    });
-                });
-            });
-        });
-        group(ui, "Transition Timing", |ui| {
-            rows(ui);
-            ui.horizontal(|ui| {
-                ui.label(icon_text(TIMER, 17.0));
-                ui.label("Duration");
-                if proj.slides[slide_idx].fade_ms > 0 {
-                    framed(ui, |ui| { changed |= ui.add(egui::DragValue::new(&mut proj.slides[slide_idx].fade_ms).range(50..=5000).speed(10.0).suffix(" ms")).changed(); });
-                } else {
-                    ui.weak("none");
-                }
-            });
-            if ui.button("Apply to all slides").clicked() { apply_all = true; }
-        });
-        if apply_all {
-            let (ms, tr) = (proj.slides[slide_idx].fade_ms, proj.slides[slide_idx].transition);
-            for sl in proj.slides.iter_mut() { sl.fade_ms = ms; sl.transition = tr; }
-            changed = true;
+        if menu_item(ui, CHECK, "Results").on_hover_text("A quiz results slide").clicked() { pick = Some(Pick::Kind(SlideKind::Results)); ui.close(); }
+        ui.separator();
+        if menu_item(ui, STACK, "New scene").on_hover_text("A new scene, with a slide in it").clicked() { pick = Some(Pick::Scene); ui.close(); }
+        if let Some(p) = pick {
+            if let Some(&last) = scene.and_then(|si| self.project.as_ref().map(|pr| pr.scene_slides(si))).as_ref().and_then(|v| v.last()) { self.view.slide = last; }
+            match p {
+                Pick::Kind(kind) => self.add_slide(kind),
+                Pick::Layout(l) => self.add_slide_with_layout(SlideKind::Normal, l),
+                Pick::Scene => self.add_scene(),
+            }
+            self.scene_view = false;
         }
-        if changed { self.commit_project_edit(ctx, before); }
     }
 
-    fn animations_tab(&mut self, ui: &mut egui::Ui, obj: Option<&mut Object>, changed: &mut bool) {
-        // Shown even with nothing selected, but disabled.
-        let mut stand_in = Object::new("none", "none", Kind::Rect, 0.0, 0.0, 0.0, 0.0);
-        let enabled = obj.is_some();
-        let obj = obj.unwrap_or(&mut stand_in);
-        ui.add_enabled_ui(enabled, |ui| {
-        group(ui, "Entrance and Exit", |ui| {
-            ui.horizontal(|ui| {
-                *changed |= effect_menu(ui, ARROW_DOWN, "Entrance", "How the object appears", &mut obj.entrance, &mut obj.click_steps.entrance, true);
-                let had_exit = obj.exit.is_some();
-                let exit_changed = effect_menu(ui, ARROW_UP, "Exit", "How the object leaves", &mut obj.exit, &mut obj.click_steps.exit, false);
-                // An exit plays when the object leaves, so an object that stays to the end of the timeline is given an end to leave at.
-                if exit_changed && !had_exit && obj.exit.is_some() && obj.click_steps.exit == 0 && obj.timing.map_or(true, |t| t.dur_ms.is_none()) {
-                    let start = obj.timing.map_or(0, |t| t.start_ms);
-                    obj.timing = Some(Timing { start_ms: start, dur_ms: Some(2000) });
-                }
-                *changed |= exit_changed;
-            });
-        });
-        group(ui, "Emphasis", |ui| {
-            ui.horizontal(|ui| {
-                let on = obj.emphasis.is_some();
-                let tip = obj.emphasis.map(|e| format!("Emphasis: {}", e.kind.label())).unwrap_or_else(|| "Draw attention to the object while it is showing".into());
-                let btn = big_widget(ui, STAR, "Emphasis", true, on).on_hover_text(tip);
-                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                    ui.set_min_width(210.0);
-                    if ui.selectable_label(obj.emphasis.is_none(), "none").clicked() { obj.emphasis = None; *changed = true; }
-                    for k in EmphasisKind::ALL {
-                        let r = ui.selectable_label(obj.emphasis.map(|e| e.kind) == Some(k), k.label());
-                        if r.clicked() {
-                            let old = obj.emphasis;
-                            obj.emphasis = Some(Emphasis { kind: k, delay_ms: old.map(|e| e.delay_ms).unwrap_or(0), duration_ms: old.map(|e| e.duration_ms).unwrap_or(800), repeat: old.map(|e| e.repeat).unwrap_or(1) });
-                            *changed = true;
-                        }
-                    }
-                    if let Some(e) = obj.emphasis.as_mut() {
-                        ui.separator();
-                        *changed |= click_row(ui, "ck-emphasis", "Starts", &mut obj.click_steps.emphasis);
-                        ui.horizontal(|ui| {
-                            ui.label("lasts");
-                            *changed |= ui.add(egui::DragValue::new(&mut e.duration_ms).range(100..=60_000).speed(50.0).suffix(" ms")).changed();
-                            ui.label("plays");
-                            *changed |= ui.add(egui::DragValue::new(&mut e.repeat).range(0..=99).suffix("×")).on_hover_text("Times it plays; 0 = until the slide ends").changed();
-                        });
-                        *changed |= delay_leftover(ui, &mut e.delay_ms);
-                    }
-                });
-            });
-        });
-        group(ui, "Motion path", |ui| {
-            ui.horizontal(|ui| {
-                let on = obj.motion.is_some();
-                let btn = big_widget(ui, POLYLINE, "Motion", true, on).on_hover_text("Move the object along a path. Drag the points on the slide to shape it");
-                egui::Popup::from_toggle_button_response(&btn).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-                    ui.set_min_width(210.0);
-                    if ui.selectable_label(obj.motion.is_none(), "none").clicked() { obj.motion = None; *changed = true; }
-                    for k in PathPreset::ALL {
-                        if ui.selectable_label(false, k.label()).clicked() {
-                            let (delay, dur) = obj.motion.as_ref().map(|m| (m.delay_ms, m.duration_ms)).unwrap_or((0, 2000));
-                            let mut m = MotionPath::preset(k);
-                            m.delay_ms = delay;
-                            m.duration_ms = dur;
-                            obj.motion = Some(m);
-                            *changed = true;
-                        }
-                    }
-                    if let Some(m) = obj.motion.as_mut() {
-                        ui.separator();
-                        *changed |= click_row(ui, "ck-motion", "Starts", &mut obj.click_steps.motion);
-                        ui.horizontal(|ui| {
-                            ui.label("takes");
-                            *changed |= ui.add(egui::DragValue::new(&mut m.duration_ms).range(100..=120_000).speed(50.0).suffix(" ms")).changed();
-                            *changed |= ui.checkbox(&mut m.smooth, "Smooth").on_hover_text("Smooth curve through the points").changed();
-                        });
-                        ui.horizontal(|ui| {
-                            if ui.small_button("+ Point").on_hover_text("Add a point after the last one").clicked() {
-                                let (lx, ly) = m.points.last().copied().unwrap_or((0.0, 0.0));
-                                m.points.push((lx + 120.0, ly));
-                                *changed = true;
-                            }
-                            if m.points.len() > 2 && ui.small_button("- Point").clicked() { m.points.pop(); *changed = true; }
-                        });
-                        *changed |= delay_leftover(ui, &mut m.delay_ms);
-                    }
-                });
-            });
-        });
-        group(ui, "Visibility", |ui| {
-            rows(ui);
-            ui.horizontal(|ui| {
-                ui.label(icon_text(EYE_OFF, 17.0));
-                *changed |= ui.checkbox(&mut obj.hidden, "Hidden when the slide starts").changed();
-            });
-        });
-        });
-    }
+
+
+
 
     /// Format the characters selected in the in-place editor (set by the canvas while editing).
     pub(super) fn format_selection(&mut self, attr: Attr) {
-        let (Some((a, b)), Some((li, oi))) = (self.text_sel, self.selected) else { return };
+        let (Some((a, b)), Some((li, oi))) = (self.view.text_sel, self.view.selected) else { return };
         self.snapshot();
-        if let Some(o) = self.project.as_mut().and_then(|p| p.slides[self.slide].layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
+        if let Some(o) = self.project.as_mut().and_then(|p| p.slide_mut(self.view.slide).layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) {
             o.format_range(a, b, &attr);
             let (t, r) = (o.text.clone(), o.rich.clone());
             for st in o.states.iter_mut() { st.text = t.clone(); st.rich = r.clone(); }
@@ -3013,12 +2277,12 @@ impl App {
     pub(super) fn edit_text_range(&mut self, f: impl Fn(&mut Object, usize, usize, bool)) {
         let targets = self.format_targets();
         if targets.is_empty() { return; }
-        let (part, primary) = (self.text_sel, self.selected);
+        let (part, primary) = (self.view.text_sel, self.view.selected);
         self.snapshot();
-        let slide = self.slide;
+        let slide = self.view.slide;
         let Some(p) = self.project.as_mut() else { return };
         for (li, oi) in targets {
-            let Some(o) = p.slides[slide].layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { continue };
+            let Some(o) = p.slide_mut(slide).layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { continue };
             let n = o.text.chars().count();
             match part {
                 Some((a, b)) if primary == Some((li, oi)) => f(o, a.min(n), b.min(n), false),
@@ -3036,9 +2300,9 @@ impl App {
             self.align_selected(axis, mode);
             return;
         }
-        let Some((li, oi)) = self.selected else { return };
+        let Some((li, oi)) = self.view.selected else { return };
         self.snapshot();
-        let slide = &mut self.project.as_mut().unwrap().slides[self.slide];
+        let slide = &mut self.project.as_mut().unwrap().slide_mut(self.view.slide);
         let (sw, sh) = (slide.width, slide.height);
         if let Some(o) = slide.layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) {
             let (pos, len, span) = if axis == 0 { (&mut o.x, o.w, sw) } else { (&mut o.y, o.h, sh) };
@@ -3176,12 +2440,19 @@ fn effects_preview(ui: &mut egui::Ui, obj: &Object) {
 enum EffectPane { Presets, Shadow, Glow, Reflection, Soft, Corners }
 
 /// The contents of one Effects popup: a small preview, then that effect's controls. Returns true when anything changed.
-fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
+fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool { effect_pane_in(ui, obj, pane, false) }
+
+/// `effect_pane`; `inline` is for the Properties panel, where it takes the panel's width and has no preview of its own.
+fn effect_pane_in(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane, inline: bool) -> bool {
     let mut changed = false;
-    ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
-    ui.spacing_mut().slider_width = 96.0;
-    effects_preview(ui, obj);
-    ui.add_space(6.0);
+    if !inline {
+        ui.set_width(if pane == EffectPane::Shadow { 330.0 } else { 280.0 });
+        ui.spacing_mut().slider_width = 96.0;
+        effects_preview(ui, obj);
+        ui.add_space(6.0);
+    } else {
+        ui.spacing_mut().slider_width = 90.0;
+    }
     match pane {
         EffectPane::Presets => {
             for (name, tip) in [("None", "Remove every effect"), ("Soft shadow", "A gentle shadow just below"), ("Warm glow", "A warm halo"), ("Mirror", "A faded reflection below")] {
@@ -3255,6 +2526,7 @@ fn effect_pane(ui: &mut egui::Ui, obj: &mut Object, pane: EffectPane) -> bool {
 
 /// The Effects group of the ribbon: a button for each effect, lit while the object uses it.
 fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &mut bool) {
+    if panel_mode(ui) { return; }
     let is_media = matches!(obj.kind, Kind::Video | Kind::Audio | Kind::Web(_) | Kind::Pano(_) | Kind::Unsupported(_));
     let is_line = matches!(obj.kind, Kind::Line | Kind::LineUp);
     let is_pic = matches!(obj.kind, Kind::Image);
@@ -3283,4 +2555,83 @@ fn effects_group(ui: &mut egui::Ui, obj: &mut Object, enabled: bool, changed: &m
             });
         }
     }); });
+}
+
+/// The object with the look of `proto` (text style, fill, line, effects, corners, line spacing) and everything else its own.
+fn styled_like(before: &Object, proto: &Object) -> Object {
+    let mut after = before.clone();
+    // Bold, italic and the like may sit on the words rather than on the object: take what the first word has.
+    let mut style = proto.style.clone();
+    if let Some((_, f)) = proto.char_fmts().first() {
+        style.bold = f.bold.unwrap_or(style.bold);
+        style.italic = f.italic.unwrap_or(style.italic);
+        style.underline = f.underline.unwrap_or(style.underline);
+        if let Some(c) = f.color { style.color = c; }
+        if let Some(z) = f.size { style.size = z; }
+        if let Some(n) = &f.font_family { style.font_family = n.clone(); }
+    }
+    after.style = style;
+    after.fill = proto.fill;
+    after.gradient = proto.gradient.clone();
+    after.stroke = proto.stroke;
+    after.dash = proto.dash;
+    after.shadow = proto.shadow;
+    after.glow = proto.glow;
+    after.soft_edge = proto.soft_edge;
+    after.reflection = proto.reflection;
+    after.radius = proto.radius;
+    after.line_spacing = proto.line_spacing;
+    after
+}
+
+/// The controls of a slide's (or layout's) background: none, a color, a gradient you build, or a picture. They are the body of the
+/// Background bar in the Properties panel. Returns whether something changed; `want_picture` asks the caller to choose a picture.
+pub(crate) fn background_controls(ui: &mut egui::Ui, bg: &mut Option<Background>, theme: &brainbend_doc::Theme, slide_size: (f32, f32), inherits: bool, picture_name: Option<String>, want_picture: &mut bool) -> bool {
+    let mut changed = false;
+    // The picker takes the width the panel has, so there is no empty strip beside it.
+    let w = ui.available_width().clamp(200.0, 720.0);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("color-entry-width"), w));
+    // What kind of background. A slide with none uses its layout's (or plain white on the master).
+    let kind = match &*bg { None => 1, Some(Background::Solid(_)) => 1, Some(Background::Gradient { .. }) => 2, Some(Background::Image { .. }) => 3 };
+    let mut pick = kind;
+    ui.columns(3, |cols| {
+        for (i, label) in ["Color", "Gradient", "Picture"].into_iter().enumerate() {
+            if cols[i].add_sized([cols[i].available_width(), 24.0], egui::Button::selectable(kind == i + 1, label)).clicked() { pick = i + 1; }
+        }
+    });
+    if pick != kind {
+        match pick {
+            1 => { *bg = Some(Background::Solid(bg.as_ref().map(|b| b.base_color()).unwrap_or(Rgba(255, 255, 255, 255)))); changed = true; }
+            2 => {
+                let mut g = Background::gradient(135.0, theme.color(4), theme.color(5));
+                if let Background::Gradient { geom, .. } = &mut g { geom.line = Some(brainbend_doc::GradientGeom::fitted_line(135.0, slide_size.0, slide_size.1)); }
+                *bg = Some(g);
+                changed = true;
+            }
+            _ => *want_picture = true,
+        }
+    }
+    ui.add_space(4.0);
+    match bg {
+        None => {
+            // Nothing set yet: offer the color picker on white. The slide changes once a color is chosen.
+            let mut cur_c = Some(Rgba(255, 255, 255, 255));
+            if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *bg = Some(Background::Solid(n)); changed = true; } }
+        }
+        Some(Background::Solid(c)) => {
+            let mut cur_c = Some(*c);
+            if color_popup(ui, &mut cur_c, None) { if let Some(n) = cur_c { *c = n; changed = true; } }
+        }
+        Some(Background::Gradient { angle, stops, kind, geom }) => changed |= gradient_editor(ui, angle, stops, kind, geom, slide_size),
+        Some(Background::Image { .. }) => {
+            ui.label(picture_name.as_deref().unwrap_or("Picture"));
+            ui.weak("The picture fills the slide.");
+            if ui.button("Choose another picture…").clicked() { *want_picture = true; }
+        }
+    }
+    if inherits && bg.is_some() && ui.button("Use the layout's background").clicked() { *bg = None; changed = true; }
+    ui.ctx().data_mut(|d| d.remove_temp::<f32>(egui::Id::new("color-entry-width")));
+    let pass = ui.ctx().cumulative_pass_nr().max(1);
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("background-bar-seen"), pass));
+    changed
 }

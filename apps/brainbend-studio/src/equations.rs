@@ -257,7 +257,7 @@ impl App {
     /// Open the Equation window: for a new equation, or to change the equation `target`.
     pub(super) fn open_equation_dialog(&mut self, target: Option<(usize, usize)>) {
         let (latex, display) = target
-            .and_then(|(li, oi)| self.project.as_ref()?.slides.get(self.slide)?.layers.get(li)?.objects.get(oi)?.equation.as_ref().map(|e| (e.latex.clone(), e.display)))
+            .and_then(|(li, oi)| self.project.as_ref()?.slides.get(self.view.slide)?.layers.get(li)?.objects.get(oi)?.equation.as_ref().map(|e| (e.latex.clone(), e.display)))
             .unwrap_or_default();
         self.eq_dialog = Some(Dialog { target, latex, display: display || target.is_none(), cache: None });
     }
@@ -278,7 +278,7 @@ impl App {
     pub(super) fn update_equation(&mut self, (li, oi): (usize, usize), latex: &str, display: bool) -> Result<(), String> {
         let r = render(latex, display)?;
         self.snapshot();
-        let slide = self.slide;
+        let slide = self.view.slide;
         let Some(o) = self.project.as_mut().and_then(|p| p.slides.get_mut(slide)).and_then(|s| s.layers.get_mut(li)).and_then(|l| l.objects.get_mut(oi)) else { return Err("The equation is gone.".into()) };
         let scale = o.equation.as_ref().filter(|e| e.width_pt > 0.0).map(|e| o.w / e.width_pt).unwrap_or(DEFAULT_SCALE);
         o.w = r.width_pt * scale;

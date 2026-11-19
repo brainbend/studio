@@ -338,7 +338,7 @@ mod tests {
         assert!(!job.output.with_extension("mp4.part").exists());
         let details = Command::new(&program).args(["-nostdin", "-hide_banner", "-i"]).arg(&job.output).output().unwrap();
         assert!(String::from_utf8_lossy(&details.stderr).contains("title           : My Lesson"), "the title is in the file");
-        // Halfway through the blend both pictures show: the left of the frame is still red or already blue, not one flat colour.
+        // Halfway through the blend both pictures show: the left of the frame is still red or already blue, not one flat color.
         let mid = dir.join("mid.png");
         make(&["-ss", "1.2", "-i", job.output.to_str().unwrap(), "-frames:v", "1"], &mid);
         assert!(std::fs::metadata(&mid).unwrap().len() > 0);
