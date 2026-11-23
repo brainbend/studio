@@ -242,7 +242,9 @@
       if (li > 0 && layer.modal === false) lEl.style.pointerEvents = 'none';
       sEl.appendChild(lEl);
       layers[layer.id] = { el: lEl, base: li === 0, layer: layer, si: si };
-      layer.objects.forEach(function (o) {
+      // One object, built into `parent`: a layer for the objects on a slide, or the object itself for the shapes that belong to one
+      // of its states (their place is measured from its top left corner, and they show only while it is in that state).
+      function buildObject(o, parent) {
         var node = el('div', 'obj');
         node.style.left = o.x + 'px'; node.style.top = o.y + 'px';
         if (o.rotation) node.style.rotate = o.rotation + 'deg';
@@ -389,8 +391,8 @@
         var grp = groupOf(si, o), isGroupPart = !!grp && grp.owners.indexOf(o.id) < 0;
         var plainKind = typeof o.kind === 'string' ? ['Rect', 'Ellipse', 'Text', 'Image', 'Line', 'LineUp'].indexOf(o.kind) >= 0 : !!(o.kind && o.kind.Path);
         if (plainKind && !grp && !o.states.length && !o.check && !o.dial && !o.marker && !o.button_set && !o.hit_area && !slides[si].triggers.some(function (t) { return t.owner.Object === o.id; })) node.style.pointerEvents = 'none';
-        lEl.appendChild(node);
-        var entry = { node: node, label: label, o: o, si: si, layerId: layer.id, state: o.initial_state, hover: false, down: false };
+        parent.appendChild(node);
+        var entry = { node: node, label: label, o: o, si: si, layerId: layer.id, state: o.initial_state, hover: false, down: false, extras: [] };
         objects[o.id] = entry;
         objectSlide[o.id] = si;
         if (/%[A-Za-z0-9_.]+%/.test(o.text) || o.states.some(function (x) { return /%[A-Za-z0-9_.]+%/.test(x.text); })) textVarEntries.push(entry);
@@ -468,7 +470,14 @@
         if (o.marker) buildMarker(entry, o.marker, lEl);
         if (o.equation) buildEquation(node, o);
         if (o.kind && o.kind.Pano) buildPano(node, o, entry);
-      });
+        // The shapes that belong to a state are built inside this object and shown by `draw` while it is in that state.
+        o.states.forEach(function (st) {
+          (st.extras || []).forEach(function (x) { entry.extras.push({ entry: buildObject(x, node), state: st.name }); });
+        });
+        if (entry.extras.length) draw(entry);
+        return entry;
+      }
+      layer.objects.forEach(function (o) { buildObject(o, lEl); });
       // Keyboard and screen-reader order: stacking order unless the author set a focus order. Stacking is by z-index,
       // so the nodes can then be put in the DOM in focus order without changing what is in front of what.
       if (layer.focus_order && layer.focus_order.length) {
@@ -1217,6 +1226,8 @@
     else if (entry.hiddenByState) { entry.node.style.display = ''; entry.hiddenByState = false; }
     if (entry.drawCheck) entry.drawCheck();
     var o = entry.o, s = stateFor(entry);
+    // The shapes of the state the object is in show; the others of its states do not.
+    if (entry.extras && entry.extras.length) entry.extras.forEach(function (x) { x.entry.node.style.display = (s && s.name === x.state && !x.entry.o.hidden) ? '' : 'none'; });
     var fill = s ? s.fill : o.fill, text = s ? s.text : o.text, st = s ? s.style : o.style, rich = s ? s.rich : o.rich;
     var stroke = s ? s.stroke : o.stroke, shadow = s ? s.shadow : o.shadow, grad = s ? s.gradient : o.gradient;
     if (entry.node._path && entry.node._inside) {

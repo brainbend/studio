@@ -240,6 +240,10 @@ fn object_html(o: &Object, p: &Project) -> String {
             text_html(o, p.theme.color(4)),
         );
     }
+    // A handout shows each object as it starts, so the shapes that belong to its starting state are drawn on it (their place is measured
+    // from the object's corner, which is where the object's own box starts).
+    let start = if o.initial_state.is_empty() { "Normal" } else { o.initial_state.as_str() };
+    for x in o.states.iter().filter(|s| s.name == start).flat_map(|s| s.extras.iter()) { inner.push_str(&object_html(x, p)); }
     format!("<div class=\"obj\" style=\"{style}\">{inner}</div>")
 }
 
@@ -537,6 +541,22 @@ mod tests {
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"M"), "TQ==");
+    }
+
+    #[test]
+    fn a_handout_draws_the_shapes_of_the_starting_state_only() {
+        let p = Project::new("t");
+        let mut b = Object::new("b", "Button", Kind::Rect, 10.0, 20.0, 100.0, 40.0);
+        let st = |name: &str, word: &str| {
+            let mut x = Object::new(word, word, Kind::Text, 6.0, 8.0, 30.0, 20.0);
+            x.text = word.into();
+            ObjectState { extras: vec![x], shine: None, gradient: None, name: name.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: b.style.clone(), asset: None, size: None }
+        };
+        b.states = vec![st("Normal", "START"), st("Visited", "LATER")];
+        b.initial_state = "Normal".into();
+        let html = object_html(&b, &p);
+        assert!(html.contains("START") && !html.contains("LATER"), "{html}");
+        assert!(html.contains("left:6px;top:8px"), "the shape sits at its place measured from the object's corner: {html}");
     }
 
     #[test]

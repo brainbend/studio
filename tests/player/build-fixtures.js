@@ -37,6 +37,7 @@ cargo('markers', [path.join(out, 'markers')]);
 cargo('equation', [path.join(out, 'equation')]);
 cargo('panorama', [path.join(out, 'panorama')]);
 cargo('hiddenstate', [path.join(out, 'hiddenstate')]);
+cargo('stateshapes', [path.join(out, 'stateshapes')]);
 cargo('clicks', [path.join(out, 'clicks')]);
 cargo('tabs', [path.join(out, 'tabs')]);
 cargo('pause', [path.join(out, 'pause')]);

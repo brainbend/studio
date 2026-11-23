@@ -124,6 +124,13 @@ fn package_panos(project: &Project, files: &mut Vec<(String, Vec<u8>)>, urls: &m
     tags
 }
 
+/// A picture cropped to a shape gets its clip-path ready made, so the player needs no geometry.
+fn add_mask_clip(js: &mut serde_json::Value, o: &brainbend_doc::Object) {
+    if let (Some(shape), Some(map)) = (o.mask, js.as_object_mut()) {
+        map.insert("mask_clip".into(), serde_json::Value::String(shape.css_polygon(o.w, o.h)));
+    }
+}
+
 pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, String> {
     if project.is_web() {
         return web::build_web(project, lms);
@@ -145,8 +152,10 @@ pub fn build(project: &Project, lms: Lms) -> Result<Vec<(String, Vec<u8>)>, Stri
             for (jl, layer) in layers.into_iter().flatten().zip(&slide.layers) {
                 let objs = jl.get_mut("objects").and_then(|o| o.as_array_mut());
                 for (jo, o) in objs.into_iter().flatten().zip(&layer.objects) {
-                    if let (Some(shape), Some(map)) = (o.mask, jo.as_object_mut()) {
-                        map.insert("mask_clip".into(), serde_json::Value::String(shape.css_polygon(o.w, o.h)));
+                    add_mask_clip(jo, o);
+                    // The shapes that belong to a state are cropped the same way.
+                    for (js, st) in jo.get_mut("states").and_then(|s| s.as_array_mut()).into_iter().flatten().zip(&o.states) {
+                        for (jx, x) in js.get_mut("extras").and_then(|e| e.as_array_mut()).into_iter().flatten().zip(&st.extras) { add_mask_clip(jx, x); }
                     }
                 }
             }

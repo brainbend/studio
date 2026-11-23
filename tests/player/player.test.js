@@ -1420,6 +1420,32 @@ test('the Hidden state keeps an object off the slide until another state is set,
   assert.deepEqual(errors, []);
 });
 
+test('the shapes of a state show only while the object is in that state, from the object\'s corner', () => {
+  const { w, errors } = boot(fixture('stateshapes'));
+  const go = $$(w, '.obj').find((o) => o.querySelector('.label')?.textContent === 'Go');
+  const shape = (text) => $$(w, '.obj').find((o) => o.textContent === text);
+  const other = $$(w, '.obj').find((o) => o.textContent === 'Other');
+  assert.equal(shape('TICK').style.display, 'none', 'Normal has no checkmark');
+  assert.equal(shape('SEL').style.display, 'none');
+  assert.equal(shape('TICK').parentNode, go, 'the shape is inside its object, so it moves with it');
+  assert.equal(shape('TICK').style.left, '6px');
+  assert.equal(shape('TICK').style.top, '8px');
+  // A press takes the button to Visited, which has the checkmark.
+  click(w, go);
+  assert.equal(shape('TICK').style.display, '', 'Visited shows its checkmark');
+  assert.equal(shape('SEL').style.display, 'none', 'and not the badge of Selected');
+  // Hover has its own look, so the checkmark of Visited steps aside while the pointer is over it.
+  go.dispatchEvent(new w.MouseEvent('mouseenter'));
+  assert.equal(shape('TICK').style.display, 'none');
+  go.dispatchEvent(new w.MouseEvent('mouseleave'));
+  assert.equal(shape('TICK').style.display, '');
+  // A trigger moves it to Selected: the badge shows and the checkmark goes.
+  click(w, other);
+  assert.equal(shape('SEL').style.display, '', 'Selected shows its badge');
+  assert.equal(shape('TICK').style.display, 'none');
+  assert.deepEqual(errors, []);
+});
+
 test('an outline can be dotted or dashed', () => {
   const { w, errors } = boot(fixture('richtext'));
   const box = $$(w, '.obj').find((o) => o.style.border && /dotted/.test(o.style.border));
