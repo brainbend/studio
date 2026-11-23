@@ -11831,6 +11831,47 @@ mod tests {
     }
 
     #[test]
+    fn a_state_being_edited_takes_decoration_only() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Hover".into()));
+        a.view.state_editing = true;
+        a.begin_state_swap();
+        let labels = App::insert_leaf_labels();
+        let count = |a: &App| a.project.as_ref().unwrap().slides[0].layers[li].objects.len();
+        let before = count(&a);
+        for (n, l) in labels.iter().enumerate() { if ["Button", "Slider", "Video", "Audio", "Web Object", "360° Image"].contains(l) { a.insert_leaf_act(n); } }
+        assert_eq!(count(&a), before, "nothing that a state cannot hold was added");
+        let n = labels.iter().position(|l| *l == "Text Box").unwrap();
+        a.insert_leaf_act(n);
+        assert_eq!(count(&a), before + 1, "a text box can be");
+        a.end_state_swap();
+    }
+
+    #[test]
+    fn an_icon_added_while_a_state_is_edited_belongs_to_that_state() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Hover".into()));
+        a.view.state_editing = true;
+        a.begin_state_swap();
+        let icon = icons::all().iter().find(|i| icons::outline(i).is_some()).unwrap();
+        a.insert_icon(icon);
+        a.end_state_swap();
+        let o = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi];
+        let hover = o.states.iter().find(|s| s.name == "Hover").unwrap();
+        assert_eq!(hover.extras.len(), 1);
+        assert!(hover.extras[0].icon_look().is_some(), "it keeps its icon look");
+        assert_eq!(a.project.as_ref().unwrap().slides[0].layers[li].objects.len(), 1);
+    }
+
+    #[test]
     fn a_shape_in_a_state_adds_no_issues_when_editing_ends() {
         let mut a = app();
         a.insert_button();

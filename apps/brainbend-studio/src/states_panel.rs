@@ -380,7 +380,8 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
     // The shapes the state holds sit on the preview where they sit on the object.
     for e in st.extras.iter().filter(|e| !e.hidden) {
         let r = egui::Rect::from_min_size(pv.min + egui::vec2(e.x, e.y) * k, egui::vec2(e.w, e.h) * k);
-        let Some(f) = e.fill.map(crate::color) else { continue };
+        // An icon is drawn in its line color (its outline is a solid band); other shapes in their fill.
+        let Some(f) = e.icon_look().map(|l| l.lines).or(e.fill).map(crate::color) else { continue };
         match &e.kind {
             Kind::Path(cmds) => for poly in crate::path_polygons(cmds, r) {
                 // Shapes such as a chevron are not convex, so the fill is cut into triangles.

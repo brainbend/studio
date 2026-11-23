@@ -1073,6 +1073,14 @@ impl InsertEntry {
 }
 
 /// Everything that can be added to a slide, in three groups: the gallery and the toolbar are both drawn from this.
+/// What cannot be added to a state: things with states or values of their own, and media. A state holds decoration (shapes, icons,
+/// pictures, text, equations), because those are what the player can show and hide with the state.
+fn blocked_in_state(label: &str) -> bool {
+    matches!(label, "Button" | "Slider" | "Hotspot" | "Dial" | "Input" | "Marker" | "Video" | "Audio" | "360° Image" | "Web Object")
+}
+
+const BLOCKED_TIP: &str = "A state can hold shapes, icons, pictures, text and equations. Press Done to add this to the slide.";
+
 fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
     use InsertEntry::{Leaf as L, Sub as S};
     [
@@ -1991,6 +1999,14 @@ impl App {
                         let (label, tip) = (entry.label(), entry.tip());
                         let button = egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons())).color(text_col(ui))).frame(false).min_size(egui::vec2(30.0, 28.0));
                         let named = |r: egui::Response| { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); r.on_hover_ui(|ui| { ui.strong(label); ui.weak(tip); }) };
+                        let blocked = self.view.state_editing && self.swap.is_some() && blocked_in_state(label);
+                        if blocked {
+                            let r = ui.add_enabled(false, button).on_disabled_hover_text(BLOCKED_TIP);
+                            left = left.min(r.rect.left());
+                            right = right.max(r.rect.right());
+                            match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
+                            continue;
+                        }
                         let r = match entry {
                             InsertEntry::Leaf((_, _, _, act)) => { let r = named(ui.add(button)); if r.clicked() { act(self); } r }
                             InsertEntry::Sub((_, _, _, content)) => named(egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| content(self, ui)).0),
@@ -2014,6 +2030,7 @@ impl App {
     /// Add the thing at place `n` of `insert_leaf_labels`.
     pub(crate) fn insert_leaf_act(&mut self, n: usize) {
         let act = insert_sections().into_iter().flat_map(|(_, entries)| entries).filter_map(|e| match e { InsertEntry::Leaf(l) => Some(l.3), InsertEntry::Sub(_) => None }).nth(n);
+        if self.view.state_editing && self.swap.is_some() && Self::insert_leaf_labels().get(n).is_some_and(|l| blocked_in_state(l)) { return; }
         if let Some(act) = act { act(self); }
     }
 
@@ -2039,6 +2056,10 @@ impl App {
             found = true;
             if needle.is_empty() { ui.label(egui::RichText::new(heading).weak().size(12.0)); }
             for e in shown {
+                if self.view.state_editing && self.swap.is_some() && blocked_in_state(e.label()) {
+                    ui.add_enabled(false, egui::Label::new(egui::RichText::new(e.label()).weak())).on_disabled_hover_text(BLOCKED_TIP);
+                    continue;
+                }
                 match e {
                     InsertEntry::Leaf((icon, label, tip, act)) => { if menu_item(ui, icon, label).on_hover_text(tip).clicked() { act(self); ui.close(); } }
                     InsertEntry::Sub((icon, label, tip, content)) => { ui.menu_button(menu_job(ui, icon, label), |ui| content(self, ui)).response.on_hover_text(tip); }
