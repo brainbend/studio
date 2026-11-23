@@ -377,6 +377,23 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
             q.text(pv.left_center() + egui::vec2(3.0, 0.0), egui::Align2::LEFT_CENTER, first, egui::FontId::proportional(size), crate::color(st.style.color));
         }
     }
+    // The shapes the state holds sit on the preview where they sit on the object.
+    for e in st.extras.iter().filter(|e| !e.hidden) {
+        let r = egui::Rect::from_min_size(pv.min + egui::vec2(e.x, e.y) * k, egui::vec2(e.w, e.h) * k);
+        let Some(f) = e.fill.map(crate::color) else { continue };
+        match &e.kind {
+            Kind::Path(cmds) => for poly in crate::path_polygons(cmds, r) {
+                // Shapes such as a chevron are not convex, so the fill is cut into triangles.
+                if poly.len() < 3 { continue; }
+                let mut mesh = egui::Mesh::default();
+                for p in &poly { mesh.colored_vertex(*p, f); }
+                for t in crate::triangulate(&poly) { mesh.add_triangle(t[0] as u32, t[1] as u32, t[2] as u32); }
+                q.add(egui::Shape::mesh(mesh));
+            },
+            Kind::Ellipse => { q.add(egui::epaint::EllipseShape::filled(r.center(), r.size() / 2.0, f)); }
+            _ => { q.rect_filled(r, 0.0, f); }
+        }
+    }
     p.text(egui::pos2(rect.center().x, rect.bottom() - 12.0), egui::Align2::CENTER_CENTER, &st.name, egui::FontId::proportional(12.0), ui.visuals().text_color());
     if starts {
         p.text(rect.left_top() + egui::vec2(6.0, 5.0), egui::Align2::LEFT_TOP, "\u{2691}", egui::FontId::proportional(11.0), accent);
@@ -419,7 +436,10 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
         ui.spacing_mut().item_spacing.y = 6.0;
         // Edit opens the viewed state so that shapes added go into it; Done closes it again.
         let (label, tip, fill) = if editing { ("Done", "Finish editing this state: the shapes you added stay in it", egui::Color32::from_rgb(11, 110, 105)) } else { ("Edit", "Add shapes to this state. Anything you insert while editing belongs to the state, and shows only while the object is in it", egui::Color32::from_rgb(3, 83, 158)) };
-        if ui.add(egui::Button::new(egui::RichText::new(label).strong().color(egui::Color32::WHITE)).fill(fill)).on_hover_text(tip).clicked() { out.toggle_edit = true; }
+        // Normal is the object itself, as it is on the slide: to change how it looks, change the object. Extra shapes belong in the other states.
+        let normal = viewed == "Normal" && o.initial_state == "Normal" && !editing;
+        let tip = if normal { "Normal is the object as it is on the slide while it is the state the object starts in. Choose another state to give it shapes of its own, or start the object in another state to edit Normal too" } else { tip };
+        if ui.add_enabled(!normal, egui::Button::new(egui::RichText::new(label).strong().color(egui::Color32::WHITE)).fill(fill)).on_hover_text(tip).clicked() { out.toggle_edit = true; }
         ui.add_space(8.0);
         if ui.button("+ New").on_hover_text("A copy of the state you are viewing").clicked() {
             let mut copy = o.states[v].clone();

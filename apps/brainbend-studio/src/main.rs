@@ -5295,6 +5295,8 @@ impl App {
             _ => init,
         };
         self.view.state_view = Some((id.clone(), viewed.clone()));
+        // Normal, while it is the starting state, is the object on the slide itself, so it has no shapes of its own to edit.
+        if viewed == "Normal" && o.initial_state == "Normal" { self.view.state_editing = false; }
         self.swap = states_panel::begin(&mut proj.slides, slide_idx, &id, &viewed, self.view.state_editing);
         if self.swap.is_none() { self.view.state_editing = false; }
     }
@@ -8074,13 +8076,17 @@ impl App {
                 }
             }
             for l in tslide.layers.iter_mut() {
+                let mut shapes: Vec<Object> = vec![];
                 for o in l.objects.iter_mut() {
                     if o.states.is_empty() { continue; }
                     let under = hit_id.as_deref() == Some(o.id.as_str());
                     if let Some(st) = states_panel::tried_state(o, self.try_states.get(&o.id), under, under && pressed).cloned() {
                         states_panel::show_state(o, &st);
+                        // The shapes the state holds are drawn on the slide, measured from the object's corner, for as long as it is in that state.
+                        for e in &st.extras { let mut e = e.clone(); e.x += o.x; e.y += o.y; shapes.push(e); }
                     }
                 }
+                l.objects.extend(shapes);
             }
             (tslide, tshown)
         } else {
@@ -8099,6 +8105,19 @@ impl App {
                 for o in s.layers[0].objects.iter_mut().filter(|o| hide.contains(&o.id)) { o.hidden = true; }
                 s
             }
+        };
+        // Outside the States tab an object with states is drawn in the state it starts in, with that state's shapes, as the player shows it.
+        let mut start_shapes: Vec<(usize, Object)> = vec![];
+        let slide = if try_on || self.swap.is_some() { slide } else {
+            let mut s = slide;
+            for (li, l) in s.layers.iter_mut().enumerate() {
+                for o in l.objects.iter_mut() {
+                    let Some(st) = o.states.iter().find(|st| st.name == o.initial_state).cloned() else { continue };
+                    states_panel::show_state(o, &st);
+                    for mut e in st.extras { e.x += o.x; e.y += o.y; start_shapes.push((li, e)); }
+                }
+            }
+            s
         };
         // The object being edited shows its text in the edit box alone, so it is not drawn twice.
         let slide = match self.view.editing.filter(|_| !try_on) {
@@ -8157,6 +8176,12 @@ impl App {
             self.paint_slide(ctx, &painter, origin, scale, &slide, &shown, if try_on { None } else { self.view.selected });
         }
 
+        if !start_shapes.is_empty() {
+            let mut only = slide.clone();
+            for l in only.layers.iter_mut() { l.objects.clear(); }
+            for (li, e) in start_shapes { only.layers[li].objects.push(e); }
+            self.paint_slide(ctx, &painter, origin, scale, &only, &shown, None);
+        }
         if !try_on { self.background_handles(ui, &painter, origin, scale, slide_idx); }
         if try_on {
             // Nothing is selected, moved or saved while trying.
@@ -11805,6 +11830,25 @@ mod tests {
         a
     }
 
+    #[test]
+    fn a_shape_in_a_state_adds_no_issues_when_editing_ends() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id.clone(), "Hover".into()));
+        a.view.state_editing = true;
+        let before = a.project.as_ref().unwrap().check().len();
+        a.begin_state_swap();
+        a.insert_shape("leftArrow");
+        let during = a.project.as_ref().unwrap().check();
+        a.end_state_swap();
+        let after = a.project.as_ref().unwrap().check();
+        eprintln!("before {before} during {during:?} after {after:?}");
+        assert_eq!(after.len(), before, "{after:?}");
+    }
+
     /// Shapes added while a state is edited belong to that state: they are on the slide for the frame, saved in the state measured
     /// from the object, and gone from the slide when the frame ends.
     #[test]
@@ -12395,6 +12439,27 @@ mod tests {
             h.run_steps(6);
             h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("states-{}.png", if side { "side" } else { "bottom" }))).unwrap();
         }
+    }
+
+    /// An object that starts in a state with a shape of its own shows that shape on the canvas even when the States tab is closed.
+    #[test]
+    fn the_starting_state_and_its_shapes_show_on_the_canvas() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let mut dot = blank_object("dot".into(), "Dot", Kind::Rect, 10.0, 10.0, 60.0, 60.0);
+        dot.fill = Some(Rgba(255, 0, 255, 255));
+        {
+            let o = &mut a.project.as_mut().unwrap().slides[0].layers[li].objects[oi];
+            o.states.iter_mut().find(|s| s.name == "Hover").unwrap().extras = vec![dot];
+            o.initial_state = "Hover".into();
+        }
+        a.bottom_tab = P_TIMELINE;
+        let mut h = harness(a);
+        h.run_steps(6);
+        let img = h.render().expect("renderer");
+        let magenta = img.pixels().filter(|p| p.0[0] > 240 && p.0[1] < 20 && p.0[2] > 240).count();
+        assert!(magenta > 50, "the shape of the starting state is drawn ({magenta} pixels)");
     }
 
     #[test]
