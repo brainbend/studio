@@ -12288,6 +12288,23 @@ mod tests {
     }
 
     #[test]
+    fn shot_states_panel_narrow_and_wide() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        for side in [true, false] {
+            let mut a = app();
+            a.insert_rect();
+            let (si, li) = (a.view.slide, a.view.layer);
+            let oi = a.project.as_ref().unwrap().slides[si].layers[li].objects.len() - 1;
+            a.view.selected = Some((li, oi));
+            if let Some(o) = a.project.as_mut().and_then(|p| p.slides[si].layers[li].objects.get_mut(oi)) { states_panel::add_button_states(o); }
+            if side { a.place_tab(P_STATES, dock::Spot::EdgeEnd(dock::Edge::Right)); a.right_tab = P_STATES; } else { a.bottom_tab = P_STATES; }
+            let mut h = harness(a);
+            h.run_steps(6);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("states-{}.png", if side { "side" } else { "bottom" }))).unwrap();
+        }
+    }
+
+    #[test]
     fn shot_document_tabs() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
         for (name, light) in [("dark", false), ("light", true)] {

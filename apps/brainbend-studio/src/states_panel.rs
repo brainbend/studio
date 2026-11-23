@@ -332,7 +332,7 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
 pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut bool) -> Outcome {
     let mut out = Outcome::default();
     if o.states.is_empty() {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui.button("DONE").clicked() { out.done = true; }
             ui.label(format!("{} has no states yet.", if o.name.is_empty() { "This object" } else { &o.name }));
             if ui.button("Add button states").on_hover_text("Normal, Hover, Down, Visited and Disabled").clicked() {
@@ -361,8 +361,9 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
     let mut make_initial = false;
     ui.horizontal_wrapped(|ui| {
         crate::ribbon::flat(ui);
+        ui.spacing_mut().item_spacing.y = 6.0;
         if ui.add(egui::Button::new(egui::RichText::new("DONE").strong().color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(11, 110, 105))).clicked() { out.done = true; }
-        ui.separator();
+        ui.add_space(8.0);
         if ui.button("+ New").on_hover_text("A copy of the state you are viewing").clicked() {
             let mut copy = o.states[v].clone();
             copy.name = next_name(o);
@@ -374,22 +375,23 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
             add_button_states(o);
             out.changed = true;
         }
-        ui.add_enabled_ui(o.states[v].name != init, |ui| {
-            if ui.button("Start as this").on_hover_text("The object begins in this state").clicked() { make_initial = true; }
-            if ui.button("Delete").clicked() { remove = true; }
-        });
-        ui.separator();
+        let not_first = o.states[v].name != init;
+        if ui.add_enabled(not_first, egui::Button::new("Start as this")).on_hover_text("The object begins in this state").clicked() { make_initial = true; }
+        if ui.add_enabled(not_first, egui::Button::new("Delete")).clicked() { remove = true; }
+        ui.add_space(8.0);
+        // The name field takes the room the row has left (up to 110), so it never runs off the edge of a narrow panel.
+        let room = (ui.available_width() - 56.0).clamp(40.0, 110.0);
         ui.label("Name");
         let mut name = o.states[v].name.clone();
-        crate::ribbon::framed(ui, |ui| { if ui.add(egui::TextEdit::singleline(&mut name).desired_width(110.0)).changed() { rename = Some(name.clone()); } });
-        ui.separator();
+        crate::ribbon::framed(ui, |ui| { if ui.add(egui::TextEdit::singleline(&mut name).desired_width(room)).changed() { rename = Some(name.clone()); } });
+        ui.add_space(8.0);
         ui.checkbox(dim, "Dim background objects");
         let st = &mut o.states[v];
         if is_image {
-            ui.separator();
+            ui.add_space(8.0);
             if ui.button("Choose picture…").clicked() { out.want_picture = true; }
         } else {
-            ui.separator();
+            ui.add_space(8.0);
             let mut on = st.shine.is_some();
             if ui.checkbox(&mut on, "Shine").changed() {
                 st.shine = on.then_some(Shine { alpha: 0.4, reverse: false });
@@ -401,15 +403,14 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
             }
         }
     });
-    egui::ScrollArea::horizontal().id_salt("state-cards").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let snapshot: Vec<ObjectState> = o.states.clone();
-            for s in &snapshot {
-                if card(ui, o, s, &s.name == viewed, s.name == init).clicked() {
-                    *viewed = s.name.clone();
-                }
-            }
-        });
+    // The cards flow in rows that fit the width, so the layout follows the space the panel has (one column when it is narrow, one row
+    // when it is wide) with no point where it switches, and every card stays in view without a horizontal scroll bar.
+    let snapshot: Vec<ObjectState> = o.states.clone();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        for s in &snapshot {
+            if card(ui, o, s, &s.name == viewed, s.name == init).clicked() { *viewed = s.name.clone(); }
+        }
     });
     if let Some(to) = rename {
         let from = o.states[v].name.clone();
