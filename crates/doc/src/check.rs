@@ -177,9 +177,12 @@ impl Project {
             }
             let layer_ids: HashSet<&str> = slide.layers.iter().map(|l| l.id.as_str()).collect();
             let object_ids: HashSet<&str> = slide.layers.iter().flat_map(|l| l.objects.iter()).map(|o| o.id.as_str()).collect();
+            let own_ids = object_ids.clone();
+            // A trigger can belong to, or act on, a shape that belongs to a state.
+            let object_ids: HashSet<&str> = object_ids.into_iter().chain(slide.layers.iter().flat_map(|l| l.objects.iter()).flat_map(|o| o.states.iter()).flat_map(|s| s.extras.iter()).map(|e| e.id.as_str())).collect();
             // The shapes that belong to a state: no states of their own, and ids that are theirs alone (a trigger finds an object by its id).
             {
-                let mut seen: HashSet<&str> = object_ids.clone();
+                let mut seen: HashSet<&str> = own_ids.clone();
                 for (li, layer) in slide.layers.iter().enumerate() {
                     for (oi, o) in layer.objects.iter().enumerate() {
                         for e in o.states.iter().flat_map(|s| s.extras.iter()) {

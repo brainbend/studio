@@ -22,6 +22,8 @@ pub(crate) struct View {
     pub visible: Vec<bool>,
     /// The States tab: (object id, state name) whose look the canvas shows.
     pub state_view: Option<(String, String)>,
+    /// The States tab is in Edit mode: shapes added go into the viewed state (see `states_panel::begin`).
+    pub state_editing: bool,
     // What is going on on this canvas right now: the drag, the text being edited, the crop or outline being worked on.
     /// Rubber-band start in slide coordinates while dragging on empty canvas.
     pub(crate) marquee: Option<egui::Pos2>,
@@ -70,6 +72,6 @@ pub(crate) struct View {
 
 impl Default for View {
     fn default() -> Self {
-        View { slide: 0, layer: 0, selected: None, multi: vec![], zoom: 1.0, pan: egui::Vec2::ZERO, visible: vec![], state_view: None, marquee: None, fit_scale: 1.0, canvas_frame: None, drag: None, drag_changed: false, obj_drag: None, obj_edit: None, obj_drag_group: false, group_edit: None, hot_drag: None, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, text_sel: None, caret: None, range_end: None, fresh_text: None, start_edit: None, show_hidden: false }
+        View { slide: 0, layer: 0, selected: None, multi: vec![], zoom: 1.0, pan: egui::Vec2::ZERO, visible: vec![], state_view: None, state_editing: false, marquee: None, fit_scale: 1.0, canvas_frame: None, drag: None, drag_changed: false, obj_drag: None, obj_edit: None, obj_drag_group: false, group_edit: None, hot_drag: None, crop_mode: None, crop_aspect: None, outline_mode: None, outline_sel: None, draw_outline: None, draw_slide: 0, editing: None, editing_old: String::new(), edit_turn: None, text_sel: None, caret: None, range_end: None, fresh_text: None, start_edit: None, show_hidden: false }
     }
 }

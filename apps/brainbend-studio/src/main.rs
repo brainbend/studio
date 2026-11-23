@@ -3004,6 +3004,13 @@ impl App {
         let cascade = (slide.layers[li].objects.len() % 8) as f32 * 36.0;
         obj.x = ((slide.width - obj.w) / 2.0 + cascade - 120.0).round().max(0.0);
         obj.y = ((slide.height - obj.h) / 2.0 + cascade - 120.0).round().max(0.0);
+        // A shape added while a state is edited starts on the object that state belongs to.
+        if let (true, Some(sw)) = (self.view.state_editing, self.swap.as_ref()) {
+            if let Some(o) = slide.layers.iter().flat_map(|l| l.objects.iter()).find(|o| o.id == sw.owner()) {
+                obj.x = (o.x + (o.w - obj.w) / 2.0).round();
+                obj.y = (o.y + (o.h - obj.h) / 2.0).round();
+            }
+        }
         self.snapshot();
         let slide = &mut self.project.as_mut().unwrap().slide_mut(self.view.slide);
         slide.layers[li].objects.push(obj);
@@ -4350,21 +4357,19 @@ impl App {
     /// The States tab body: the cards and toolbar of the selected object's states. Edits made anywhere in the
     /// editor while a state is viewed go to that state (see `begin_state_swap`).
     fn states_tab(&mut self, ui: &mut egui::Ui, slide_idx: usize) {
-        let Some((li, oi)) = self.view.selected else {
-            ui.horizontal(|ui| {
-                if ui.button("DONE").clicked() { self.show_panel_tab(P_TIMELINE); }
-                ui.weak("Select an object to see its states.");
-            });
+        // The object whose states are shown: the selected one, or, while a state is being edited, the object it belongs to (the selection
+        // may be one of the state's shapes).
+        let owner = if self.view.state_editing { self.view.state_view.as_ref().map(|(id, _)| id.clone()) } else { None };
+        let owner_at = owner.and_then(|id| self.project.as_ref()?.slide_get(slide_idx)?.layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == id).map(|oi| (li, oi))));
+        let Some((li, oi)) = owner_at.or(self.view.selected) else {
+            ui.weak("Select an object to see its states.");
             return;
         };
         let proj = self.project.as_mut().unwrap();
         let before = proj.slides.clone();
         let Some(obj) = proj.slide_mut(slide_idx).layers.get_mut(li).and_then(|l| l.objects.get_mut(oi)) else { return };
         if !states_panel::supports_states(obj) {
-            ui.horizontal(|ui| {
-                if ui.button("DONE").clicked() { self.show_panel_tab(P_TIMELINE); }
-                ui.weak("States are not available for this kind of object.");
-            });
+            ui.weak("States are not available for this kind of object.");
             return;
         }
         let mut viewed = match &self.view.state_view {
@@ -4372,7 +4377,7 @@ impl App {
             _ => obj.initial_state.clone(),
         };
         let id = obj.id.clone();
-        let out = states_panel::editor(ui, obj, &mut viewed, &mut self.state_dim);
+        let out = states_panel::editor(ui, obj, &mut viewed, &mut self.state_dim, self.view.state_editing);
         self.view.state_view = Some((id, viewed.clone()));
         if out.changed {
             let mut before = before;
@@ -4380,9 +4385,13 @@ impl App {
             self.push_undo(before);
             self.dirty = true;
         }
-        if out.done {
-            self.show_panel_tab(P_TIMELINE);
-            self.view.state_view = None;
+        if let (Some((from, to)), Some(sw)) = (&out.renamed, self.swap.as_mut()) { sw.renamed(from, to); }
+        if out.toggle_edit {
+            // Edit puts the state's shapes on the slide from the next frame on; Done takes them back into the state at the end of this one.
+            self.view.state_editing = !self.view.state_editing;
+            self.view.layer = li;
+            self.view.selected = Some((li, oi));
+            self.view.multi.clear();
         }
         if out.want_picture {
             if let Some((key, _, _, _)) = self.load_image_asset() {
@@ -5265,10 +5274,20 @@ impl App {
     /// Put the States tab's viewed state on its object for this frame.
     fn begin_state_swap(&mut self) {
         self.swap = None;
-        if !self.states_showing() || self.try_mode { return; }
-        let Some((li, oi)) = self.view.selected else { return };
+        if !self.states_showing() || self.try_mode { self.view.state_editing = false; return; }
         let slide_idx = self.view.slide;
         let Some(proj) = self.project.as_mut() else { return };
+        // While a state is being edited its object is the one whose state is open, wherever the selection is. Editing ends when that
+        // object is gone, the layer was changed, or something else on the slide was chosen.
+        let mut target = self.view.selected;
+        if self.view.state_editing {
+            let id = self.view.state_view.as_ref().map(|(id, _)| id.clone()).unwrap_or_default();
+            let owner = proj.slide_get(slide_idx).and_then(|s| s.layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().position(|o| o.id == id).map(|oi| (li, oi, l.objects.len()))));
+            // The layer's own objects are all there now; the state's shapes come after them, so a selection past them is one of those.
+            let stays = owner.is_some_and(|(li, oi, own_len)| li == self.view.layer && self.view.selected.is_none_or(|(sl, so)| sl == li && (so == oi || so >= own_len)));
+            if stays { target = owner.map(|(li, oi, _)| (li, oi)); } else { self.view.state_editing = false; }
+        }
+        let Some((li, oi)) = target else { return };
         let Some(o) = proj.slide_get(slide_idx).and_then(|s| s.layers.get(li)).and_then(|l| l.objects.get(oi)) else { return };
         let (id, init) = (o.id.clone(), o.initial_state.clone());
         let viewed = match &self.view.state_view {
@@ -5276,7 +5295,8 @@ impl App {
             _ => init,
         };
         self.view.state_view = Some((id.clone(), viewed.clone()));
-        self.swap = states_panel::begin(&mut proj.slides, slide_idx, &id, &viewed);
+        self.swap = states_panel::begin(&mut proj.slides, slide_idx, &id, &viewed, self.view.state_editing);
+        if self.swap.is_none() { self.view.state_editing = false; }
     }
 
     /// Copy the viewed state's edits back into the state and give the object its own look again.
@@ -8095,17 +8115,38 @@ impl App {
             _ => slide,
         };
         // The States tab shows its object alone and brightly, with everything else faded behind it.
-        let state_object = if self.states_showing() && self.state_dim && self.swap.is_some() && !try_on { self.view.selected } else { None };
+        let state_object = if self.states_showing() && self.state_dim && self.swap.is_some() && !try_on {
+            match (&self.swap, self.view.state_editing) {
+                // While a state is edited its object is the one it belongs to, whatever is selected (a shape of the state, say).
+                (Some(sw), true) => slide.layers.iter().enumerate().find_map(|(l, ly)| ly.objects.iter().position(|o| o.id == sw.owner()).map(|o| (l, o))),
+                _ => self.view.selected,
+            }
+        } else { None };
         if let Some((sli, soi)) = state_object.filter(|&(l, o)| slide.layers.get(l).is_some_and(|ly| o < ly.objects.len())) {
             let mut rest = slide.clone();
-            let one = rest.layers[sli].objects.remove(soi);
+            let owner = rest.layers[sli].objects.remove(soi);
+            // What is shown bright: the object and the shapes of its state (the ones being edited are on the slide; otherwise the
+            // viewed state's own are shown, as the player would draw them).
+            let mut bright = vec![owner];
+            if let (Some(sw), true) = (&self.swap, self.view.state_editing) {
+                let (shapes, own): (Vec<Object>, Vec<Object>) = std::mem::take(&mut rest.layers[sli].objects).into_iter().partition(|o| sw.is_shape(&o.id));
+                rest.layers[sli].objects = own;
+                bright.extend(shapes);
+            } else {
+                let (ox, oy) = (bright[0].x, bright[0].y);
+                let viewed = self.view.state_view.as_ref().map(|(_, n)| n.clone());
+                if let Some(st) = bright[0].states.iter().find(|s| Some(&s.name) == viewed.as_ref()) {
+                    for mut e in st.extras.clone() { e.x += ox; e.y += oy; bright.push(e); }
+                }
+            }
+            let picked = self.view.selected.and_then(|(l, o)| slide.layers.get(l)?.objects.get(o)).and_then(|s| bright.iter().position(|b| b.id == s.id));
             self.paint_slide(ctx, &painter, origin, scale, &rest, &shown, None);
             let bg = self.project.as_ref().and_then(|p| p.resolved_background(&slide)).map(|b| color(b.base_color())).unwrap_or(egui::Color32::WHITE);
             painter.rect_filled(egui::Rect::from_min_size(origin, egui::vec2(slide.width, slide.height) * scale), 0.0, bg.gamma_multiply(0.75));
             let mut only = slide.clone();
             for l in only.layers.iter_mut() { l.objects.clear(); }
-            only.layers[sli].objects.push(one);
-            self.paint_slide(ctx, &painter, origin, scale, &only, &[sli], Some((sli, 0)));
+            only.layers[sli].objects = bright;
+            self.paint_slide(ctx, &painter, origin, scale, &only, &[sli], picked.map(|i| (sli, i)));
         } else if self.dim_base && self.view.layer > 0 && shown.len() > 1 && !try_on {
             // Working on a layer: show the base layer faded behind it.
             self.paint_slide(ctx, &painter, origin, scale, &slide, &[0], None);
@@ -11764,6 +11805,58 @@ mod tests {
         a
     }
 
+    /// Shapes added while a state is edited belong to that state: they are on the slide for the frame, saved in the state measured
+    /// from the object, and gone from the slide when the frame ends.
+    #[test]
+    fn shapes_added_while_a_state_is_edited_belong_to_that_state() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        let (bx, by, bw, bh) = { let b = &a.project.as_ref().unwrap().slides[0].layers[li].objects[oi]; (b.x, b.y, b.w, b.h) };
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id.clone(), "Visited".into()));
+        a.view.state_editing = true;
+        let layer_len = |a: &App| a.project.as_ref().unwrap().slides[0].layers[li].objects.len();
+        let visited = |a: &App| a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().find(|s| s.name == "Visited").unwrap().extras.clone();
+        assert_eq!(layer_len(&a), 1);
+        // The frame in which a rectangle is inserted.
+        a.begin_state_swap();
+        assert!(a.swap.is_some() && a.view.state_editing);
+        a.insert_rect();
+        assert_eq!(layer_len(&a), 2, "the new shape is on the slide for the frame");
+        a.end_state_swap();
+        assert_eq!(layer_len(&a), 1, "and not on it afterwards: it belongs to the state");
+        let shapes = visited(&a);
+        assert_eq!(shapes.len(), 1);
+        assert_eq!((shapes[0].x, shapes[0].y), (((bw - shapes[0].w) / 2.0).round(), ((bh - shapes[0].h) / 2.0).round()), "centered on the object, measured from its corner");
+        let others: usize = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().filter(|s| s.name != "Visited").map(|s| s.extras.len()).sum();
+        assert_eq!(others, 0, "no other state has it");
+        // The next frame puts it back on the slide at the slide's own coordinates, then takes it away again.
+        a.begin_state_swap();
+        assert_eq!(layer_len(&a), 2);
+        let on_slide = a.project.as_ref().unwrap().slides[0].layers[li].objects[1].clone();
+        assert_eq!((on_slide.x, on_slide.y), (bx + shapes[0].x, by + shapes[0].y));
+        a.end_state_swap();
+        assert_eq!((layer_len(&a), visited(&a).len()), (1, 1));
+        // An undo step taken during a frame holds the state with its shapes inside it, not shapes among the slide's objects.
+        a.begin_state_swap();
+        a.snapshot();
+        a.end_state_swap();
+        let snap = a.undo.last().unwrap();
+        assert_eq!(snap.slides[0].layers[li].objects.len(), 1, "the slide's own objects only");
+        assert_eq!(snap.slides[0].layers[li].objects[oi].states.iter().find(|s| s.name == "Visited").unwrap().extras.len(), 1);
+        // Choosing something else on the slide ends the editing.
+        let mut other = blank_object("other".into(), "Other", Kind::Rect, 900.0, 900.0, 50.0, 50.0);
+        other.fill = Some(Rgba(1, 1, 1, 255));
+        a.project.as_mut().unwrap().slides[0].layers[li].objects.push(other);
+        a.view.selected = Some((li, 1));
+        a.begin_state_swap();
+        assert!(!a.view.state_editing, "the object that was chosen is not the state's");
+        a.end_state_swap();
+        assert_eq!(visited(&a).len(), 1, "what was added stays");
+    }
+
     #[test]
     fn editing_while_a_state_is_viewed_changes_that_state_and_undo_puts_it_back() {
         let mut a = app();
@@ -12301,6 +12394,26 @@ mod tests {
             let mut h = harness(a);
             h.run_steps(6);
             h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("states-{}.png", if side { "side" } else { "bottom" }))).unwrap();
+        }
+    }
+
+    #[test]
+    fn shot_state_edit_mode() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        for editing in [false, true] {
+            let mut a = app();
+            a.insert_button();
+            let (li, oi) = a.view.selected.unwrap();
+            let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+            let mut tick = blank_object("tick".into(), "Checkmark", Kind::Ellipse, 12.0, 12.0, 40.0, 40.0);
+            tick.fill = Some(Rgba(255, 200, 0, 255));
+            if let Some(st) = a.project.as_mut().unwrap().slides[0].layers[li].objects[oi].states.iter_mut().find(|s| s.name == "Visited") { st.extras = vec![tick]; }
+            a.bottom_tab = P_STATES;
+            a.view.state_view = Some((id, "Visited".into()));
+            a.view.state_editing = editing;
+            let mut h = harness(a);
+            h.run_steps(6);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("state-{}.png", if editing { "editing" } else { "viewing" }))).unwrap();
         }
     }
 

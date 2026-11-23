@@ -70,24 +70,76 @@ pub struct Swap {
     initial_name: String,
     /// The object's own look before the viewed state's was put on it; `None` when the viewed state is the starting one.
     own: Option<Look>,
+    /// Set while the state is being edited: its shapes are on the slide, among the objects of this layer, for the frame.
+    edit: Option<EditPart>,
+}
+
+/// What it takes to put a state's shapes back where they belong at the end of the frame.
+#[derive(Clone, Debug)]
+struct EditPart {
+    layer: usize,
+    /// The ids of the layer's own objects before the shapes were put among them: anything else is a shape of the state.
+    base: Vec<String>,
+}
+
+impl Swap {
+    /// The object whose state is open.
+    pub fn owner(&self) -> &str { &self.id }
+    /// Whether an object on the slide this frame is one of the state's shapes (and not one of the slide's own).
+    pub fn is_shape(&self, id: &str) -> bool { self.edit.as_ref().is_some_and(|e| !e.base.iter().any(|b| b == id)) && id != self.id }
+    /// The state was renamed this frame: its shapes still go to it.
+    pub fn renamed(&mut self, from: &str, to: &str) { if self.viewed == from { self.viewed = to.into(); } }
+}
+
+/// The shapes of `st`, put on the object's layer at the slide's own coordinates (they are saved measured from the object's corner).
+fn raise_shapes(slides: &mut [Slide], slide: usize, id: &str, st: &ObjectState) -> Option<EditPart> {
+    let sl = slides.get_mut(slide)?;
+    let (li, o) = sl.layers.iter().enumerate().find_map(|(li, l)| l.objects.iter().find(|o| o.id == id).map(|o| (li, (o.x, o.y))))?;
+    let layer = &mut sl.layers[li];
+    let base = layer.objects.iter().map(|x| x.id.clone()).collect();
+    // The shapes are on the slide now; the state holds them again when the frame ends (`lower_shapes`).
+    if let Some(own) = layer.objects.iter_mut().find(|x| x.id == id).and_then(|x| x.states.iter_mut().find(|s| s.name == st.name)) { own.extras.clear(); }
+    for e in &st.extras {
+        let mut e = e.clone();
+        e.x += o.0;
+        e.y += o.1;
+        layer.objects.push(e);
+    }
+    Some(EditPart { layer: li, base })
+}
+
+/// Take the state's shapes off the layer (the objects that were not there before) and save them in the state, measured from the object.
+fn lower_shapes(slides: &mut [Slide], slide: usize, swap: &Swap) {
+    let Some(part) = &swap.edit else { return };
+    let Some(layer) = slides.get_mut(slide).and_then(|s| s.layers.get_mut(part.layer)) else { return };
+    let Some((ox, oy)) = layer.objects.iter().find(|o| o.id == swap.id).map(|o| (o.x, o.y)) else { return };
+    let (own, shapes): (Vec<Object>, Vec<Object>) = std::mem::take(&mut layer.objects).into_iter().partition(|o| part.base.iter().any(|b| *b == o.id));
+    layer.objects = own;
+    let Some(st) = layer.objects.iter_mut().find(|o| o.id == swap.id).and_then(|o| o.states.iter_mut().find(|s| s.name == swap.viewed)) else { return };
+    st.extras = shapes.into_iter().map(|mut e| { e.x -= ox; e.y -= oy; e }).collect();
 }
 
 fn find_object<'a>(slides: &'a mut [Slide], slide: usize, id: &str) -> Option<&'a mut Object> {
     slides.get_mut(slide)?.layers.iter_mut().flat_map(|l| l.objects.iter_mut()).find(|o| o.id == id)
 }
 
-/// Put the viewed state's look on the object. Returns the swap to undo at the end of the frame.
-pub fn begin(slides: &mut [Slide], slide: usize, id: &str, viewed: &str) -> Option<Swap> {
+/// Put the viewed state's look on the object. Returns the swap to undo at the end of the frame. While the state is being edited
+/// (`editing`) its shapes go on the slide too, so the canvas, the insert bar and the panels work on them like any objects.
+pub fn begin(slides: &mut [Slide], slide: usize, id: &str, viewed: &str, editing: bool) -> Option<Swap> {
     let o = find_object(slides, slide, id)?;
     if o.states.is_empty() || !supports_states(o) { return None; }
     let st = o.states.iter().find(|s| s.name == viewed)?.clone();
     let own = (st.name != o.initial_state).then(|| Look::of(o));
     if own.is_some() { show_state(o, &st); }
-    Some(Swap { slide, id: id.into(), viewed: viewed.into(), initial_name: o.initial_state.clone(), own })
+    let initial_name = o.initial_state.clone();
+    let edit = if editing { raise_shapes(slides, slide, id, &st) } else { None };
+    Some(Swap { slide, id: id.into(), viewed: viewed.into(), initial_name, own, edit })
 }
 
 /// Copy the object's look back into the viewed state and give the object its own look again.
 pub fn end(slides: &mut [Slide], swap: Swap) {
+    // The shapes go back into the state first, while the object is still where they were measured from.
+    lower_shapes(slides, swap.slide, &swap);
     let Some(o) = find_object(slides, swap.slide, &swap.id) else { return };
     let seen = Look::of(o);
     let own_asset = swap.own.as_ref().map(|l| l.asset.clone()).unwrap_or_else(|| seen.asset.clone());
@@ -112,6 +164,7 @@ pub fn end(slides: &mut [Slide], swap: Swap) {
 
 /// What an undo step captured mid-frame should hold: the object with its own look, not the viewed state's.
 pub fn unswap(slides: &mut [Slide], swap: &Swap) {
+    lower_shapes(slides, swap.slide, swap);
     if let (Some(own), Some(o)) = (&swap.own, find_object(slides, swap.slide, &swap.id)) {
         own.restore(o);
     }
@@ -289,7 +342,10 @@ pub fn not_run_note(parts: &[String]) -> Option<String> {
 pub struct Outcome {
     pub changed: bool,
     pub want_picture: bool,
-    pub done: bool,
+    /// The Edit or Done button was pressed.
+    pub toggle_edit: bool,
+    /// A state was renamed: (from, to).
+    pub renamed: Option<(String, String)>,
 }
 
 /// One card: the state drawn small, its name under it, a flag on the starting state.
@@ -329,11 +385,10 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
 }
 
 /// The panel body. `viewed` is the state on the canvas; `dim` dims the other objects while it is open.
-pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut bool) -> Outcome {
+pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut bool, editing: bool) -> Outcome {
     let mut out = Outcome::default();
     if o.states.is_empty() {
         ui.horizontal_wrapped(|ui| {
-            if ui.button("DONE").clicked() { out.done = true; }
             ui.label(format!("{} has no states yet.", if o.name.is_empty() { "This object" } else { &o.name }));
             if ui.button("Add button states").on_hover_text("Normal, Hover, Down, Visited and Disabled").clicked() {
                 add_button_states(o);
@@ -362,11 +417,15 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
     ui.horizontal_wrapped(|ui| {
         crate::ribbon::flat(ui);
         ui.spacing_mut().item_spacing.y = 6.0;
-        if ui.add(egui::Button::new(egui::RichText::new("DONE").strong().color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(11, 110, 105))).clicked() { out.done = true; }
+        // Edit opens the viewed state so that shapes added go into it; Done closes it again.
+        let (label, tip, fill) = if editing { ("Done", "Finish editing this state: the shapes you added stay in it", egui::Color32::from_rgb(11, 110, 105)) } else { ("Edit", "Add shapes to this state. Anything you insert while editing belongs to the state, and shows only while the object is in it", egui::Color32::from_rgb(3, 83, 158)) };
+        if ui.add(egui::Button::new(egui::RichText::new(label).strong().color(egui::Color32::WHITE)).fill(fill)).on_hover_text(tip).clicked() { out.toggle_edit = true; }
         ui.add_space(8.0);
         if ui.button("+ New").on_hover_text("A copy of the state you are viewing").clicked() {
             let mut copy = o.states[v].clone();
             copy.name = next_name(o);
+            // The copy's shapes are its own, so their ids are new (a trigger finds an object by its id).
+            for (k, e) in copy.extras.iter_mut().enumerate() { e.id = format!("{}-{}-{k}", e.id, copy.name.replace(' ', "_")); }
             *viewed = copy.name.clone();
             o.states.push(copy);
             out.changed = true;
@@ -417,6 +476,7 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
         if !to.is_empty() && !o.states.iter().enumerate().any(|(i, s)| i != v && s.name == to) {
             if o.initial_state == from { o.initial_state = to.clone(); }
             o.states[v].name = to.clone();
+            out.renamed = Some((from.clone(), to.clone()));
             *viewed = to;
             out.changed = true;
         }
@@ -583,7 +643,7 @@ mod tests {
         add_button_states(&mut o);
         o.states[1].fill = Some(Rgba(200, 0, 0, 255));
         let mut slides = slides_with(o);
-        let swap = begin(&mut slides, 0, "a", "Hover").unwrap();
+        let swap = begin(&mut slides, 0, "a", "Hover", false).unwrap();
         assert_eq!(obj(&slides).fill, Some(Rgba(200, 0, 0, 255)), "the object shows Hover");
         // The ribbon recolors the object.
         slides[0].layers[0].objects[0].fill = Some(Rgba(0, 200, 0, 255));
@@ -601,7 +661,7 @@ mod tests {
         let mut o = rect();
         add_button_states(&mut o);
         let mut slides = slides_with(o);
-        let swap = begin(&mut slides, 0, "a", "Normal").unwrap();
+        let swap = begin(&mut slides, 0, "a", "Normal", false).unwrap();
         slides[0].layers[0].objects[0].fill = Some(Rgba(9, 9, 9, 255));
         end(&mut slides, swap);
         assert_eq!(obj(&slides).fill, Some(Rgba(9, 9, 9, 255)));
@@ -615,7 +675,7 @@ mod tests {
         add_button_states(&mut o);
         o.states[1].fill = Some(Rgba(200, 0, 0, 255));
         let mut slides = slides_with(o);
-        let swap = begin(&mut slides, 0, "a", "Hover").unwrap();
+        let swap = begin(&mut slides, 0, "a", "Hover", false).unwrap();
         let mut before = slides.clone();
         unswap(&mut before, &swap);
         assert_eq!(obj(&before).fill, Some(Rgba(10, 20, 30, 255)), "not Hover's red");
@@ -628,7 +688,7 @@ mod tests {
         add_button_states(&mut o);
         o.states[1].fill = Some(Rgba(200, 0, 0, 255));
         let mut slides = slides_with(o);
-        let swap = begin(&mut slides, 0, "a", "Hover").unwrap();
+        let swap = begin(&mut slides, 0, "a", "Hover", false).unwrap();
         slides[0].layers[0].objects[0].initial_state = "Hover".into();
         end(&mut slides, swap);
         assert_eq!(obj(&slides).fill, Some(Rgba(200, 0, 0, 255)), "the object now starts as Hover");
@@ -640,10 +700,10 @@ mod tests {
         o.asset = Some("one".into());
         add_button_states(&mut o);
         let mut slides = slides_with(o);
-        let swap = begin(&mut slides, 0, "p", "Hover").unwrap();
+        let swap = begin(&mut slides, 0, "p", "Hover", false).unwrap();
         end(&mut slides, swap);
         assert_eq!(obj(&slides).states[1].asset.as_deref(), Some("one"), "viewing without editing changes nothing");
-        let swap = begin(&mut slides, 0, "p", "Hover").unwrap();
+        let swap = begin(&mut slides, 0, "p", "Hover", false).unwrap();
         slides[0].layers[0].objects[0].asset = Some("two".into());
         end(&mut slides, swap);
         assert_eq!(obj(&slides).states[1].asset.as_deref(), Some("two"));
