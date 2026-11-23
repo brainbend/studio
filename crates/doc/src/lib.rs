@@ -1106,6 +1106,11 @@ pub struct ObjectState {
     /// A gradient drawn instead of `fill` while the object is in this state (`fill` then holds a representative flat color).
     #[serde(default)]
     pub gradient: Option<Gradient>,
+    /// Shapes that belong to this state (a checkmark in Visited, say): they are drawn, and take part in clicks, only while the object is in
+    /// this state. Their `x` and `y` are measured from the top left corner of the object's frame, so they move with it. They have no states
+    /// of their own and their ids are unique across the slide (the accessibility check says when not).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extras: Vec<Object>,
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2152,6 +2157,12 @@ impl Project {
             if let Some(a) = &o.poster { out.insert(a.as_str()); }
             // Pictures shown by an object's states, and a slider's thumb.
             out.extend(o.states.iter().filter_map(|st| st.asset.as_deref()));
+            // The shapes that belong to a state use pictures too.
+            for e in o.states.iter().flat_map(|st| st.extras.iter()) {
+                if let Some(a) = &e.asset { out.insert(a.as_str()); }
+                if let Some(a) = &e.captions { out.insert(a.as_str()); }
+                if let Some(a) = &e.poster { out.insert(a.as_str()); }
+            }
             if let Kind::Slider(Slider { thumb: Some(a), .. }) = &o.kind { out.insert(a.as_str()); }
         }
         if let Some(a) = &self.player.logo { out.insert(a.as_str()); }
@@ -2407,12 +2418,38 @@ mod tests {
     }
 
     #[test]
+    fn shapes_inside_a_state_are_saved_and_their_pictures_are_kept() {
+        let mut p = Project::new("t");
+        p.slides.push(Slide::new("s", "S", 100.0, 100.0));
+        let mut b = Object::new("b", "Button", Kind::Rect, 0.0, 0.0, 80.0, 30.0);
+        let mut tick = Object::new("tick", "Tick", Kind::Image, 5.0, 5.0, 10.0, 10.0);
+        tick.asset = Some("check".into());
+        let st = |name: &str, extras: Vec<Object>| ObjectState { extras, shine: None, gradient: None, name: name.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: b.style.clone(), asset: None, size: None };
+        b.states = vec![st("Normal", vec![]), st("Visited", vec![tick])];
+        p.slides[0].layers[0].objects.push(b);
+        p.assets.insert("check".into(), Asset { name: "check".into(), mime: "image/png".into(), bytes: vec![1], file: None });
+        assert_eq!(p.referenced_assets().into_iter().collect::<Vec<_>>(), ["check"]);
+        assert_eq!(p.prune_unused_assets(), 0, "a picture used only inside a state is kept");
+        // It comes back the way it went in, with its place measured from the object's corner.
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Project = serde_json::from_str(&json).unwrap();
+        let states = &back.slides[0].layers[0].objects[0].states;
+        assert!(states[0].extras.is_empty());
+        assert_eq!((states[1].extras.len(), states[1].extras[0].x, states[1].extras[0].y), (1, 5.0, 5.0));
+        // A state with none writes nothing, so files without them are unchanged; and older files load.
+        let plain = serde_json::to_string(&states[0]).unwrap();
+        assert!(!plain.contains("extras"), "{plain}");
+        let old: ObjectState = serde_json::from_str(&plain).unwrap();
+        assert!(old.extras.is_empty());
+    }
+
+    #[test]
     fn state_pictures_and_slider_thumbs_count_as_used_assets() {
         let mut p = Project::new("t");
         p.slides.push(Slide::new("s", "S", 100.0, 100.0));
         let mut pic = Object::new("p", "Pic", Kind::Image, 0.0, 0.0, 10.0, 10.0);
         pic.asset = Some("front".into());
-        let st = |asset: &str| ObjectState { shine: None, gradient: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
+        let st = |asset: &str| ObjectState { extras: vec![], shine: None, gradient: None, name: asset.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: pic.style.clone(), asset: Some(asset.into()), size: None };
         pic.states = vec![st("front"), st("side")];
         let slider = Object::new("sl", "Slider", Kind::Slider(Slider { thumb: Some("knob".into()), ..Slider::new() }), 0.0, 20.0, 100.0, 20.0);
         p.slides[0].layers[0].objects.extend([pic, slider]);
@@ -2846,7 +2883,7 @@ mod alt_use_tests {
         assert_eq!(obj(Kind::Rect, "Next").alt_use(true, None), ButtonText);
         assert_eq!(obj(Kind::Text, "Next").alt_use(true, None), ButtonText);
         let mut states = obj(Kind::Rect, "Go");
-        states.states = vec![ObjectState { shine: None, gradient: None, name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: states.style.clone(), asset: None, size: None }];
+        states.states = vec![ObjectState { extras: vec![], shine: None, gradient: None, name: "Hover".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: states.style.clone(), asset: None, size: None }];
         assert_eq!(states.alt_use(false, None), ButtonText, "button states make it a button without a trigger");
         let mut check = obj(Kind::Text, "I agree");
         check.check = Some(Check::look(0, None));

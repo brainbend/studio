@@ -16,6 +16,8 @@ Readers also accept the earlier ids `storyapp.project/1` and `storyapp.project/0
 - `Object`: frame (`x y w h`), `kind` (`Rect`, `Text`, `Image`, `Video`, `Audio`, `Unsupported`),
   `fill`, `stroke`, `shadow`, `radius`, `margins`, `hidden`, `text` + `style`, `asset`, `captions`,
   `alt`, and optional named `states` (Normal/Hover/Down/Disabled looks) with `initial_state`.
+  A state can also hold `extras`: shapes drawn only while the object is in that state (a checkmark in Visited). Their `x` and `y` are measured from the
+  object's top left corner, they have no states of their own, and their ids are unique on the slide. The key is left out when there are none.
 - `Trigger`: `owner` (slide, layer or object) + `event` (SlideStart, LayerStart, Click,
   VariableChanged) + `action` (ShowLayer, HideLayer, SetVariable, SetObjectState, RunJavaScript,
   JumpToSlide, NextSlide, PreviousSlide) + `conditions[]` (evaluated left to right).

@@ -921,6 +921,7 @@ fn parse_states(n: Node, fallback: &TextParts, ctx: &mut Ctx) -> Vec<ObjectState
         };
         let stroke = if says(&["solidLine", "noLine"]) { stroke_of(shape, ctx) } else { stroke_of(n, ctx) };
         out.push(ObjectState {
+            extras: vec![],
             name: st.attribute("name").unwrap_or("").into(),
             rich,
             fill,

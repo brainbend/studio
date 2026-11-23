@@ -9,6 +9,7 @@ fn main() {
     let drop = Some(Shadow { dx: 0.0, dy: 4.0, blur: 3.5, spread: 0.0, color: Rgba(0, 0, 0, 74) });
     let grad = |top: Rgba, bottom: Rgba| Some(Gradient { angle: 180.0, stops: vec![(0.0, top), (1.0, bottom)] });
     let state = |name: &str, g: Option<Gradient>, stroke: Option<Stroke>| ObjectState {
+        extras: vec![],
         shine: None, gradient: g, name: name.into(), rich: None, fill: Some(Rgba(79, 129, 189, 255)), stroke, shadow: drop,
         text: "Go".into(), style: o.style.clone(), asset: None, size: None,
     };

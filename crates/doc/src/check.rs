@@ -177,6 +177,23 @@ impl Project {
             }
             let layer_ids: HashSet<&str> = slide.layers.iter().map(|l| l.id.as_str()).collect();
             let object_ids: HashSet<&str> = slide.layers.iter().flat_map(|l| l.objects.iter()).map(|o| o.id.as_str()).collect();
+            // The shapes that belong to a state: no states of their own, and ids that are theirs alone (a trigger finds an object by its id).
+            {
+                let mut seen: HashSet<&str> = object_ids.clone();
+                for (li, layer) in slide.layers.iter().enumerate() {
+                    for (oi, o) in layer.objects.iter().enumerate() {
+                        for e in o.states.iter().flat_map(|s| s.extras.iter()) {
+                            let at = Location { slide: si, object: Some((li, oi)) };
+                            if !e.states.is_empty() {
+                                out.push(Issue { severity: Severity::Error, at: at.clone(), message: format!("\"{}\" is inside a state of \"{}\", so it cannot have states of its own.", e.name, o.name) });
+                            }
+                            if !seen.insert(e.id.as_str()) {
+                                out.push(Issue { severity: Severity::Error, at, message: format!("\"{}\" inside a state of \"{}\" has the same id as another object on the slide.", e.name, o.name) });
+                            }
+                        }
+                    }
+                }
+            }
             let clickable: HashSet<&str> = slide
                 .triggers
                 .iter()
@@ -520,7 +537,7 @@ mod tests {
         let mut car = Object::new("car", "Car", Kind::Image, 0.0, 0.0, 100.0, 50.0);
         car.asset = Some("a".into());
         car.alt = "A car".into();
-        let st = |n: &str| ObjectState { shine: None, gradient: None, name: n.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: car.style.clone(), asset: Some("a".into()), size: None };
+        let st = |n: &str| ObjectState { extras: vec![], shine: None, gradient: None, name: n.into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: car.style.clone(), asset: Some("a".into()), size: None };
         car.states = vec![st("Car-01"), st("Car-02")];
         p.slides[0].layers[0].objects = vec![car.clone()];
         let m = msgs(&p).join("\n");
@@ -528,6 +545,29 @@ mod tests {
         car.alt.clear();
         p.slides[0].layers[0].objects = vec![car];
         assert!(msgs(&p).join("\n").contains("has no alt text"), "a picture with picture states still needs alt text");
+    }
+
+    #[test]
+    fn shapes_inside_a_state_need_their_own_ids_and_no_states() {
+        let mut p = project();
+        let mut b = Object::new("b", "Button", Kind::Rect, 0.0, 0.0, 100.0, 40.0);
+        let mut tick = Object::new("tick", "Checkmark", Kind::Rect, 4.0, 4.0, 12.0, 12.0);
+        let mut st = ObjectState { extras: vec![], shine: None, gradient: None, name: "Visited".into(), rich: None, fill: None, stroke: None, shadow: None, text: String::new(), style: b.style.clone(), asset: None, size: None };
+        st.extras = vec![tick.clone()];
+        b.states = vec![st.clone()];
+        p.slides[0].layers[0].objects = vec![b.clone()];
+        assert!(!msgs(&p).iter().any(|m| m.contains("Checkmark")), "a shape of its own in a state is fine: {:?}", msgs(&p));
+        // The same id as a shape on the slide.
+        let other = Object::new("tick", "Other", Kind::Rect, 0.0, 0.0, 5.0, 5.0);
+        p.slides[0].layers[0].objects = vec![b.clone(), other];
+        assert!(msgs(&p).iter().any(|m| m.contains("\"Checkmark\" inside a state of \"Button\" has the same id")), "{:?}", msgs(&p));
+        // States inside a state.
+        tick.states = vec![st.clone()];
+        let mut st2 = st;
+        st2.extras = vec![tick];
+        b.states = vec![st2];
+        p.slides[0].layers[0].objects = vec![b];
+        assert!(msgs(&p).iter().any(|m| m.contains("cannot have states of its own")), "{:?}", msgs(&p));
     }
 
     #[test]

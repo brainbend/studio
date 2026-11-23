@@ -135,6 +135,7 @@ pub fn apply(o: &mut Object, def: &StyleDef) {
         let mut st = style.clone();
         if disabled { st.color = c(120, 124, 130); }
         ObjectState {
+            extras: vec![],
             name: name.into(),
             rich: prev.and_then(|s| s.rich.clone()).or_else(|| o.rich.clone()),
             fill: Some(base),

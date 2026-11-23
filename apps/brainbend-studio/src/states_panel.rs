@@ -118,7 +118,7 @@ pub fn unswap(slides: &mut [Slide], swap: &Swap) {
 }
 
 fn state_of(o: &Object) -> ObjectState {
-    ObjectState { shine: None, gradient: o.gradient.clone(), name: "Normal".into(), rich: o.rich.clone(), fill: o.fill, stroke: o.stroke, shadow: o.shadow, text: o.text.clone(), style: o.style.clone(), asset: o.asset.clone().filter(|_| matches!(o.kind, Kind::Image)), size: None }
+    ObjectState { extras: vec![], shine: None, gradient: o.gradient.clone(), name: "Normal".into(), rich: o.rich.clone(), fill: o.fill, stroke: o.stroke, shadow: o.shadow, text: o.text.clone(), style: o.style.clone(), asset: o.asset.clone().filter(|_| matches!(o.kind, Kind::Image)), size: None }
 }
 
 /// Add whichever of Normal, Hover, Down, Visited and Disabled the object does not have yet.
