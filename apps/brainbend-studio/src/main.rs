@@ -12782,7 +12782,7 @@ mod tests {
             a.show_menu_bar = true;
             a.show_insert_bar = true;
             for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(6) { a.add_block(k); }
-            a.blk = Some(if light { 1 } else { 4 });
+            a.blk = Some(1);
             let mut h = egui_kittest::Harness::builder()
                 .with_size(egui::vec2(1280.0, 830.0))
                 .with_pixels_per_point(1.5)
@@ -12837,6 +12837,36 @@ mod tests {
         assert!(h.state().tabs_in(Area::Window).contains(&0));
         h.state_mut().apply_preset(dock::Preset::Standard);
         h.run_steps(2);
+    }
+
+    #[test]
+    fn gui_the_web_lesson_insert_bar_adds_and_arranges_blocks() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.show_insert_bar = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        let count = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().lesson.as_ref().unwrap().sections[0].blocks.len();
+        let start = count(&h);
+        assert!(h.query_by_label("Move up").is_some() && h.query_by_label("Lesson settings").is_some(), "the bar has its buttons");
+        h.get_by_label("Quote").click();
+        h.run_steps(3);
+        assert_eq!(count(&h), start + 1, "a block kind's button adds it");
+        assert_eq!(h.state().blk, Some(start), "and chooses it");
+        h.get_by_label("Duplicate").click();
+        h.run_steps(3);
+        assert_eq!(count(&h), start + 2);
+        h.get_by_label("Delete").click();
+        h.run_steps(3);
+        assert_eq!(count(&h), start + 1);
+        h.get_by_label("Lesson settings").click();
+        h.run_steps(3);
+        assert!(h.state().lesson_settings);
+        // Turned off in Studio Settings, the bar is gone.
+        h.state_mut().show_insert_bar = false;
+        h.run_steps(3);
+        assert!(h.query_by_label("Move up").is_none());
     }
 
     #[test]

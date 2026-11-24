@@ -194,40 +194,86 @@ impl App {
         self.blk = None;
     }
 
-    /// The tool strip above a Web Lesson: add and arrange blocks, search, check and settings.
+    /// The insert bar of a Web Lesson, the same slim band as a media lesson's: a button for each kind of block, grouped as in the Add block
+    /// menu, then the buttons that arrange blocks, then the tools. Preview and Publish are in the title bar with the other buttons there.
     pub(super) fn lesson_toolbar(&mut self, root: &mut egui::Ui, _ctx: &egui::Context) {
-        let bg = root.visuals().panel_fill;
-        egui::Panel::top("lessonbar").frame(egui::Frame::new().fill(bg).inner_margin(egui::Margin::symmetric(10, 6))).show_separator_line(true).show(root, |ui| {
-            // Preview and Publish stay at the right; the editing controls wrap in the space that is left.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                if ui.button("Publish").clicked() { self.open_file_page(backstage::FilePage::Publish); }
-                ui.menu_button("Preview", |ui| self.preview_items(ui));
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        if !self.show_insert_bar { return; }
+        let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        egui::Panel::top("lessonbar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
+            // The buttons sit in the middle of the bar; how wide they come to is known from the frame before.
+            let width_id = ui.id().with("lesson-bar-width");
+            let avail = ui.available_width();
+            let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
+            let pad = ((avail - known) / 2.0).max(0.0);
+            let (mut left, mut right, mut first_top, mut wrapped) = (f32::MAX, 0.0f32, None::<f32>, false);
+            let has = self.blk.is_some();
+            let n_sections = self.project.as_ref().and_then(|p| p.lesson.as_ref()).map(|l| l.sections.len()).unwrap_or(1);
+            let mut add: Option<BlockKind> = None;
+            // 0 move up, 1 move down, 2 duplicate, 3 delete, 4 section, 5 find, 6 spelling, 7 check, 8 settings
+            let mut act: Option<u8> = None;
             ui.horizontal_wrapped(|ui| {
-                ui.menu_button("+ Add block", |ui| {
-                    for (group, kinds) in BlockKind::catalog() {
-                        ui.weak(group);
-                        for k in kinds {
-                            if ui.button(k.label()).clicked() { self.add_block(k); ui.close(); }
-                        }
-                        ui.separator();
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
+                ui.add_space(pad);
+                let mut seen = |r: &egui::Response| {
+                    left = left.min(r.rect.left());
+                    right = right.max(r.rect.right());
+                    match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
+                };
+                let button = |ui: &mut egui::Ui, icon: char, label: &str, tip: &str, enabled: bool| -> egui::Response {
+                    let b = egui::Button::new(egui::RichText::new(icon.to_string()).font(egui::FontId::new(18.0, ribbon::icons())).color(ui.visuals().text_color())).frame(false).min_size(egui::vec2(30.0, 28.0));
+                    let r = ui.add_enabled(enabled, b);
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+                    r.on_hover_ui(|ui| { ui.strong(label); if !tip.is_empty() { ui.weak(tip); } })
+                };
+                let divide = |ui: &mut egui::Ui| { ui.add_space(6.0); ui.separator(); ui.add_space(6.0); };
+                for (n, (group, kinds)) in BlockKind::catalog().into_iter().enumerate() {
+                    if n > 0 { divide(ui); }
+                    for k in kinds {
+                        let r = button(ui, block_icon(&k), k.label(), group, true);
+                        seen(&r);
+                        if r.clicked() { add = Some(k); }
                     }
-                });
-                let has = self.blk.is_some();
-                if ui.add_enabled(has, egui::Button::new("Move up")).clicked() { self.move_block(-1); }
-                if ui.add_enabled(has, egui::Button::new("Move down")).clicked() { self.move_block(1); }
-                if ui.add_enabled(has, egui::Button::new("Duplicate")).clicked() { self.duplicate_block(); }
-                if ui.add_enabled(has, egui::Button::new("Delete")).clicked() { self.delete_block(); }
-                ui.separator();
-                if ui.button("+ Section").clicked() { self.add_section(); }
-                ui.separator();
-                if ui.button("Find").on_hover_text("Find and replace (⌘F)").clicked() { self.find.get_or_insert_with(Default::default).focus = true; }
-                if ui.button("Spelling").on_hover_text("Check spelling (F7)").clicked() { self.open_spelling(); }
-                if ui.button("Check").on_hover_text("Check the lesson for problems").clicked() { self.check_results = self.project.as_ref().map(|p| p.check()); }
-                if ui.button("Lesson settings").clicked() { self.lesson_settings = true; }
+                }
+                divide(ui);
+                for (i, icon, label, tip, enabled) in [
+                    (0u8, ribbon::ARROW_UP, "Move up", "Move the chosen block up", has),
+                    (1, ribbon::ARROW_DOWN, "Move down", "Move the chosen block down", has),
+                    (2, ribbon::COPY, "Duplicate", "Copy the chosen block below itself", has),
+                    (3, ribbon::TRASH, "Delete", "Delete the chosen block", has),
+                    (4, ribbon::FILE_PLUS, "+ Section", "Add a section after this one", n_sections > 0),
+                ] {
+                    let r = button(ui, icon, label, tip, enabled);
+                    seen(&r);
+                    if r.clicked() { act = Some(i); }
+                }
+                divide(ui);
+                for (i, icon, label, tip) in [
+                    (5u8, ribbon::MAGNIFY, "Find", "Find and replace"),
+                    (6, ribbon::TEXT_AA, "Spelling", "Check spelling (F7)"),
+                    (7, ribbon::CHECK, "Check", "Check the lesson for problems"),
+                    (8, ribbon::GEAR, "Lesson settings", "The lesson's title, theme and options"),
+                ] {
+                    let r = button(ui, icon, label, tip, true);
+                    seen(&r);
+                    if r.clicked() { act = Some(i); }
+                }
             });
-                });
-            });
+            let width = if wrapped || right <= left { avail } else { right - left };
+            if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
+            if let Some(k) = add { self.add_block(k); }
+            match act {
+                Some(0) => self.move_block(-1),
+                Some(1) => self.move_block(1),
+                Some(2) => self.duplicate_block(),
+                Some(3) => self.delete_block(),
+                Some(4) => self.add_section(),
+                Some(5) => { self.find.get_or_insert_with(Default::default).focus = true; }
+                Some(6) => self.open_spelling(),
+                Some(7) => { self.check_results = self.project.as_ref().map(|p| p.check()); }
+                Some(8) => self.lesson_settings = true,
+                _ => {}
+            }
         });
     }
 

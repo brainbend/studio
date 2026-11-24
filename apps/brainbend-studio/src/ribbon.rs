@@ -1495,7 +1495,7 @@ impl App {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(gap);
             // Publish, Preview and Try It live here.
-            if self.project.is_some() && !self.file_view && !self.project.as_ref().is_some_and(|p| p.is_web()) {
+            if self.project.is_some() && !self.file_view {
                 let master = self.in_master_view();
                 self.tab_actions(ui, master, hang);
                 ui.add_space(6.0);
