@@ -12927,7 +12927,10 @@ mod tests {
         // Its side panel holds the Project settings, and the chosen card's Properties too.
         assert!(h.query_by_label("Project").is_some(), "the Project tab is there");
         assert!(h.query_by_label("Properties").is_none());
-        assert!(h.query_by_label("Open on the table of contents").is_some(), "with the lesson's settings");
+        assert!(h.query_by_label("Lesson").is_some() && h.query_by_label("Title banner").is_some() && h.query_by_label("Colors and fonts").is_some(), "with the lesson's settings in groups");
+        open_bars(&h, 10, &["toc"]);
+        h.run_steps(12);
+        assert!(h.query_by_label("Open on the table of contents").is_some(), "a group opens to its settings");
         h.state_mut().toc_pick = web_tabs::TocPick::Card;
         h.run_steps(4);
         assert!(h.query_by_label("Properties").is_some(), "a card chosen: its Properties tab");
@@ -12936,7 +12939,7 @@ mod tests {
         // An extra Table of Contents tab has the Project settings too.
         h.state_mut().web_new_toc_tab();
         h.run_steps(4);
-        assert!(h.state().toc_showing() && h.query_by_label("Open on the table of contents").is_some());
+        assert!(h.state().toc_showing() && h.query_by_label("Open on the table of contents").is_some(), "an extra Table of Contents tab has the panel too");
         let k = h.state().web_active;
         h.state_mut().web_close_tab(k);
         h.run_steps(3);
@@ -13029,7 +13032,10 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         assert!(h.query_by_label("Project").is_some(), "the side panel has a Project tab");
-        assert!(h.query_by_label("Slide size").is_some() && h.query_by_label("Pass mark").is_some(), "with the project's settings");
+        assert!(h.query_by_label("Slide size").is_some() && h.query_by_label("Scoring").is_some() && h.query_by_label("Brand").is_some(), "with the project's settings in groups");
+        open_bars(&h, 10, &["scoring"]);
+        h.run_steps(12);
+        assert!(h.query_all_by_label_contains("Pass mark").next().is_some(), "a group opens to its settings");
         // An extra Scene View tab has the panel too.
         h.state_mut().new_scene_tab();
         h.run_steps(4);
@@ -13540,7 +13546,7 @@ mod tests {
     #[test]
     fn shot_file_pages() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
-        for (name, page) in [("project", backstage::FilePage::Project), ("publish", backstage::FilePage::Publish), ("player", backstage::FilePage::Player), ("settings", backstage::FilePage::Settings), ("help", backstage::FilePage::Help)] {
+        for (name, page) in [("publish", backstage::FilePage::Publish), ("player", backstage::FilePage::Player), ("settings", backstage::FilePage::Settings), ("help", backstage::FilePage::Help)] {
             let mut a = app();
             a.file_view = true;
             a.file_page = page;
@@ -16291,8 +16297,6 @@ mod tests {
             h.run_steps(4);
             assert!(h.state().file_page == want, "{nav} opens its page");
         };
-        page(&mut h, "Project Settings", backstage::FilePage::Project);
-        assert!(h.query_all_by_label_contains("Slide size").next().is_some() && h.query_all_by_label_contains("Pass mark").next().is_some());
         page(&mut h, "Player Settings", backstage::FilePage::Player);
         assert!(h.query_all_by_label_contains("Features").next().is_some(), "the player's tabs are on the page");
         page(&mut h, "Studio Settings", backstage::FilePage::Settings);

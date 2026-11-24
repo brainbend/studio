@@ -21,7 +21,6 @@ pub enum FilePage {
     Open,
     Info,
     /// Slide size, pass mark, fonts and colors of the whole project.
-    Project,
     Player,
     Publish,
     /// The app's own settings.
@@ -125,7 +124,7 @@ impl App {
             .show_separator_line(false)
             .show(root, |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
-                let items: [(char, &str, Choice, bool); 9] = [
+                let items: [(char, &str, Choice, bool); 8] = [
                     (BACK, "Back to Project", Choice::Back, has_project),
                     (INFO, "Project Info", Choice::Page(FilePage::Info), has_project),
                     (NEW, "New", Choice::Page(FilePage::New), true),
@@ -133,7 +132,6 @@ impl App {
                     (SAVE, "Save", Choice::Save, has_project),
                     (SAVE_AS, "Save As", Choice::SaveAs, has_project),
                     (ribbon::EXPORT, "Publish", Choice::Page(FilePage::Publish), has_project),
-                    (ribbon::GEAR, "Project Settings", Choice::Page(FilePage::Project), has_project),
                     (ribbon::PLAY, "Player Settings", Choice::Page(FilePage::Player), has_project),
                 ];
                 for (n, (icon, label, ch, enabled)) in items.into_iter().enumerate() {
@@ -156,7 +154,6 @@ impl App {
             let used = ui.allocate_ui_with_layout(egui::vec2(w, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
                 match self.file_page {
                     FilePage::Info if has_project => self.info_page(ui),
-                    FilePage::Project if has_project => self.project_page(ui, ctx),
                     FilePage::Player if has_project => self.player_page(ui, ctx),
                     FilePage::Publish if has_project => self.publish_page_ui(ui, ctx),
                     FilePage::Settings => self.settings_page(ui),
@@ -302,54 +299,51 @@ impl App {
         });
     }
 
-    /// The Project Settings page: how the whole project looks and behaves, which used to be groups of the ribbon's Project tab.
-    fn project_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.heading("Project Settings");
-        ui.add_space(6.0);
-        self.project_settings_body(ui, ctx);
-    }
-
-    /// What the Project Settings page and the Project panel (beside the Scene View and the Table of Contents) both show.
+    /// The project's settings, in groups: the Project panel beside the Scene View and the Table of Contents.
     pub(super) fn project_settings_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.is_web_lesson() { self.lesson_settings_ui(ui, ctx); return; }
         ui.weak("These apply to every slide of the project.");
-        ui.add_space(14.0);
-        ui.label(egui::RichText::new("Slide size").strong());
-        let current = self.project.as_ref().and_then(|p| p.slides.first()).map(|s| (s.width as u32, s.height as u32)).unwrap_or((0, 0));
-        let mut size: Option<(u32, u32)> = None;
-        ui.horizontal_wrapped(|ui| {
-            for (w, h) in crate::commands::SLIDE_SIZES {
-                if ui.selectable_label(current == (w, h), crate::commands::Cmd::SlideSize(w, h).label()).clicked() { size = Some((w, h)); }
+        ui.add_space(8.0);
+        let Some(first) = self.project.as_ref() else { return };
+        let before = Snap::of(first);
+        let current = first.slides.first().map(|s| (s.width as u32, s.height as u32)).unwrap_or((0, 0));
+        let (mut size, mut changed, mut colors, mut builder) = (None::<(u32, u32)>, false, false, false);
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 10u8));
+        ribbon::format_panel::section(ui, "size", "Slide size", true, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (w, h) in crate::commands::SLIDE_SIZES {
+                    if ui.selectable_label(current == (w, h), crate::commands::Cmd::SlideSize(w, h).label()).clicked() { size = Some((w, h)); }
+                }
+            });
+        });
+        ribbon::format_panel::section(ui, "scoring", "Scoring", false, |ui| {
+            let proj = self.project.as_mut().unwrap();
+            ui.horizontal(|ui| {
+                changed |= ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed();
+                ui.weak("Pass mark: the score a learner needs to pass.");
+            });
+        });
+        ribbon::format_panel::section(ui, "brand", "Brand", false, |ui| {
+            let proj = self.project.as_mut().unwrap();
+            let mut next = proj.theme.clone();
+            let mut moved = false;
+            for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
+                ui.horizontal(|ui| {
+                    ui.add_sized([70.0, 24.0], egui::Label::new(label)).on_hover_text(tip);
+                    let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
+                    moved |= crate::font_store::font_menu(ui, id, font, 220.0);
+                });
             }
+            if moved { proj.set_theme(next.named()); changed = true; }
+            ui.horizontal(|ui| {
+                if ui.button("Brand colors…").on_hover_text("Your project's colors, offered first in every color menu").clicked() { colors = true; }
+                if ui.button("Layout Builder…").on_hover_text("Build your own slide layouts").clicked() { builder = true; }
+            });
         });
         if let Some((w, h)) = size { self.run_cmd(crate::commands::Cmd::SlideSize(w, h)); }
-        ui.add_space(16.0);
-        ui.label(egui::RichText::new("Pass mark").strong());
-        let Some(proj) = self.project.as_mut() else { return };
-        let before = Snap::of(proj);
-        let mut changed = ui.horizontal(|ui| {
-            let c = ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed();
-            ui.weak("The score a learner needs to pass the lesson.");
-            c
-        }).inner;
-        ui.add_space(16.0);
-        ui.label(egui::RichText::new("Brand").strong());
-        let mut next = proj.theme.clone();
-        let mut moved = false;
-        for (label, tip, id) in [("Headings", "The font of headings, in the master, layouts and slides that follow them", "theme-heading-font"), ("Body", "The font of body text, in the master, layouts and slides that follow them", "theme-body-font")] {
-            ui.horizontal(|ui| {
-                ui.add_sized([70.0, 24.0], egui::Label::new(label)).on_hover_text(tip);
-                let font = if id == "theme-heading-font" { &mut next.heading_font } else { &mut next.body_font };
-                moved |= crate::font_store::font_menu(ui, id, font, 220.0);
-            });
-        }
-        if moved { proj.set_theme(next.named()); changed = true; }
         if changed { self.commit_project_edit(ctx, before); }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button("Brand colors…").on_hover_text("Your project's colors, offered first in every color menu").clicked() { self.theme_colors_open = true; self.file_view = false; }
-            if ui.button("Layout Builder…").on_hover_text("Build your own slide layouts").clicked() { self.file_view = false; self.enter_master_view(); }
-        });
+        if colors { self.theme_colors_open = true; self.file_view = false; }
+        if builder { self.file_view = false; self.enter_master_view(); }
     }
 
     /// The Studio Settings page: the same settings as the window.

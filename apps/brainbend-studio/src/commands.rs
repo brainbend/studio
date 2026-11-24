@@ -30,7 +30,6 @@ pub(crate) enum Cmd {
     Settings,
     /// The File pages: the project's name and facts, its settings, and the About page.
     ProjectInfo,
-    ProjectSettings,
     About,
     Quit,
     ZoomIn,
@@ -64,7 +63,7 @@ pub(crate) enum Item { Do(Cmd), Gap, Sub(&'static str, Vec<Cmd>), /// The galler
 pub(crate) fn menus() -> Vec<(&'static str, Vec<Item>)> {
     use Item::{Do, Gap, Sub};
     vec![
-        ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::ProjectInfo), Do(Cmd::ProjectSettings), Do(Cmd::PlayerSettings), Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
+        ("File", vec![Do(Cmd::New), Do(Cmd::Open), Gap, Do(Cmd::Save), Do(Cmd::SaveAs), Gap, Do(Cmd::ProjectInfo), Do(Cmd::PlayerSettings), Do(Cmd::Publish), Gap, Do(Cmd::Settings), Gap, Do(Cmd::Quit)]),
         ("Edit", vec![Do(Cmd::Undo), Do(Cmd::Redo), Gap, Do(Cmd::Cut), Do(Cmd::Copy), Do(Cmd::Paste), Do(Cmd::Delete), Gap, Do(Cmd::Duplicate), Do(Cmd::SelectAll), Gap, Do(Cmd::Find)]),
         ("View", vec![Do(Cmd::ZoomIn), Do(Cmd::ZoomOut), Do(Cmd::ZoomFit), Do(Cmd::ZoomActual), Gap, Do(Cmd::ShowMenuBar), Do(Cmd::ShowInsertBar), Do(Cmd::DarkMode)]),
         ("Insert", vec![Item::Gallery]),
@@ -106,7 +105,6 @@ impl Cmd {
             Cmd::Publish => "Publish…".into(),
             Cmd::Settings => "Studio Settings…".into(),
             Cmd::ProjectInfo => "Project Info…".into(),
-            Cmd::ProjectSettings => "Project Settings…".into(),
             Cmd::About => "About BrainBend Studio".into(),
             Cmd::Quit => if cfg!(target_os = "macos") { "Quit BrainBend Studio".into() } else { "Exit".into() },
             Cmd::ZoomIn => "Zoom In".into(),
@@ -197,7 +195,7 @@ impl App {
             Cmd::Cut | Cmd::Delete => if slides { self.project.as_ref().is_some_and(|p| p.slides.len() > self.slide_selection().len()) } else { self.view.selected.is_some() },
             Cmd::Copy | Cmd::Duplicate => slides || self.view.selected.is_some(),
             Cmd::Paste => if slides { !self.slide_clip.is_empty() } else { self.clipboard.is_some() },
-            Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ProjectInfo | Cmd::ProjectSettings => true,
+            Cmd::SelectAll | Cmd::Find | Cmd::Save | Cmd::SaveAs | Cmd::Publish | Cmd::ProjectInfo => true,
             Cmd::ZoomIn | Cmd::ZoomOut | Cmd::ZoomFit | Cmd::ZoomActual => !self.scene_view && !self.file_view,
         }
     }
@@ -242,7 +240,6 @@ impl App {
             Cmd::Publish => self.open_file_page(crate::backstage::FilePage::Publish),
             Cmd::Settings => self.open_file_page(crate::backstage::FilePage::Settings),
             Cmd::ProjectInfo => self.open_file_page(crate::backstage::FilePage::Info),
-            Cmd::ProjectSettings => self.open_file_page(crate::backstage::FilePage::Project),
             Cmd::About => self.open_file_page(crate::backstage::FilePage::About),
             Cmd::Quit => if let Some(ctx) = &self.ctx_copy { ctx.send_viewport_cmd(egui::ViewportCommand::Close); },
             Cmd::ZoomIn => self.view.zoom = (self.view.zoom * 1.25).clamp(0.1, 8.0),

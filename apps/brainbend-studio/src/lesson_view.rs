@@ -993,7 +993,7 @@ impl App {
         if !open { self.lesson_settings = false; }
     }
 
-    /// The settings of the whole lesson, in the Lesson settings window, the Project Settings page and the Project panel.
+    /// The settings of the whole lesson, in the Lesson settings window and the Project panel.
     pub(super) fn lesson_settings_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let _ = ctx;
         let before = Snap::of(self.project.as_ref().unwrap());
@@ -1001,52 +1001,59 @@ impl App {
         let mut changed = false;
         {
             let p = self.project.as_mut().unwrap();
-            changed |= single(ui, "Lesson title", &mut p.name);
-            ui.separator();
-            ui.label("The lesson counts as complete when");
-            if let Some(l) = p.lesson.as_mut() {
-                for c in Completion::ALL { if ui.radio_value(&mut l.completion, c, c.label()).changed() { changed = true; } }
-            }
-            ui.horizontal(|ui| {
-                ui.label("Pass mark for knowledge checks");
-                changed |= ui.add(egui::DragValue::new(&mut p.pass_mark).range(0..=100).suffix("%")).changed();
-            });
-            ui.separator();
-            if let Some(l) = p.lesson.as_mut() {
-                changed |= ui.checkbox(&mut l.show_toc, "Open on the table of contents").changed();
-                ui.weak("Off, learners start in the first section.");
-                changed |= ui.checkbox(&mut l.show_menu, "Show the section menu").changed();
-                let mut has_cover = l.cover.is_some();
-                if ui.checkbox(&mut has_cover, "Show a title banner").changed() { l.cover = has_cover.then(Cover::default); changed = true; }
-                if let Some(c) = l.cover.as_mut() {
-                    changed |= single(ui, "Banner subtitle", &mut c.subtitle);
-                    ui.label("Description (under the title)");
-                    changed |= ui.add(egui::TextEdit::multiline(&mut c.description).desired_rows(3).desired_width(f32::INFINITY)).changed();
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Banner picture: {}", if c.image.is_some() { "chosen" } else { "none" }));
-                        if ui.button("Choose picture…").clicked() { want_cover = true; }
-                        if c.image.is_some() && ui.small_button("Remove").clicked() { c.image = None; changed = true; }
-                    });
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 10u8));
+            crate::ribbon::format_panel::section(ui, "lesson", "Lesson", true, |ui| {
+                changed |= single(ui, "Lesson title", &mut p.name);
+                ui.label("The lesson counts as complete when");
+                if let Some(l) = p.lesson.as_mut() {
+                    for c in Completion::ALL { if ui.radio_value(&mut l.completion, c, c.label()).changed() { changed = true; } }
                 }
-            }
-            ui.separator();
-            ui.label("Colors and fonts");
-            ui.horizontal_wrapped(|ui| {
-                for t in Theme::presets() {
-                    if ui.selectable_label(p.theme.name == t.name, &t.name).clicked() { p.theme = t; changed = true; }
+                ui.horizontal(|ui| {
+                    ui.label("Pass mark for knowledge checks");
+                    changed |= ui.add(egui::DragValue::new(&mut p.pass_mark).range(0..=100).suffix("%")).changed();
+                });
+            });
+            crate::ribbon::format_panel::section(ui, "toc", "Table of contents", false, |ui| {
+                if let Some(l) = p.lesson.as_mut() {
+                    changed |= ui.checkbox(&mut l.show_toc, "Open on the table of contents").changed();
+                    ui.weak("Off, learners start in the first section.");
+                    changed |= ui.checkbox(&mut l.show_menu, "Show the section menu").changed();
                 }
             });
-            if let Some(l) = p.lesson.as_mut() {
-                for (label, slot, idx) in [("Primary color (buttons, progress)", &mut l.primary, 4usize), ("Secondary color (highlights)", &mut l.secondary, 5)] {
-                    ui.horizontal(|ui| {
-                        let theme_c = p.theme.color(idx);
-                        let mut c = slot.unwrap_or(theme_c);
-                        if crate::ribbon::color_swatch(ui, &mut c) { *slot = Some(c); changed = true; }
-                        ui.label(label);
-                        if slot.is_some() && ui.small_button("Use theme color").clicked() { *slot = None; changed = true; }
-                    });
+            crate::ribbon::format_panel::section(ui, "banner", "Title banner", false, |ui| {
+                if let Some(l) = p.lesson.as_mut() {
+                    let mut has_cover = l.cover.is_some();
+                    if ui.checkbox(&mut has_cover, "Show a title banner").changed() { l.cover = has_cover.then(Cover::default); changed = true; }
+                    if let Some(c) = l.cover.as_mut() {
+                        changed |= single(ui, "Banner subtitle", &mut c.subtitle);
+                        ui.label("Description (under the title)");
+                        changed |= ui.add(egui::TextEdit::multiline(&mut c.description).desired_rows(3).desired_width(f32::INFINITY)).changed();
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Banner picture: {}", if c.image.is_some() { "chosen" } else { "none" }));
+                            if ui.button("Choose picture…").clicked() { want_cover = true; }
+                            if c.image.is_some() && ui.small_button("Remove").clicked() { c.image = None; changed = true; }
+                        });
+                    }
                 }
-            }
+            });
+            crate::ribbon::format_panel::section(ui, "colors", "Colors and fonts", false, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for t in Theme::presets() {
+                        if ui.selectable_label(p.theme.name == t.name, &t.name).clicked() { p.theme = t; changed = true; }
+                    }
+                });
+                if let Some(l) = p.lesson.as_mut() {
+                    for (label, slot, idx) in [("Primary color (buttons, progress)", &mut l.primary, 4usize), ("Secondary color (highlights)", &mut l.secondary, 5)] {
+                        ui.horizontal(|ui| {
+                            let theme_c = p.theme.color(idx);
+                            let mut c = slot.unwrap_or(theme_c);
+                            if crate::ribbon::color_swatch(ui, &mut c) { *slot = Some(c); changed = true; }
+                            ui.label(label);
+                            if slot.is_some() && ui.small_button("Use theme color").clicked() { *slot = None; changed = true; }
+                        });
+                    }
+                }
+            });
         }
         if changed { self.undo.push(before); self.redo.clear(); self.dirty = true; }
         if want_cover { self.pick_lesson_asset(LessonAsset::CoverImage); }
