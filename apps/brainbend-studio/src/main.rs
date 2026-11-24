@@ -12782,7 +12782,7 @@ mod tests {
             a.show_menu_bar = true;
             a.show_insert_bar = true;
             for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(6) { a.add_block(k); }
-            a.blk = Some(1);
+            a.blk = Some(if light { 1 } else { 4 });
             let mut h = egui_kittest::Harness::builder()
                 .with_size(egui::vec2(1280.0, 830.0))
                 .with_pixels_per_point(1.5)

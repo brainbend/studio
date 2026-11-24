@@ -610,95 +610,132 @@ fn single(ui: &mut egui::Ui, label: &str, text: &mut String) -> bool {
     ui.add(egui::TextEdit::singleline(text).desired_width(f32::INFINITY)).changed()
 }
 
+/// One group of a block's properties: a bar that opens and closes, the same as the groups of a media lesson's Properties panel.
+fn sec(ui: &mut egui::Ui, id: &str, title: &str, open: bool, body: impl FnOnce(&mut egui::Ui)) {
+    crate::ribbon::format_panel::section(ui, id, title, open, |ui| {
+        ui.add_space(4.0);
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 0)).show(ui, |ui| body(ui));
+        ui.add_space(6.0);
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn block_editor(ui: &mut egui::Ui, id: &str, kind: &mut BlockKind, names: &std::collections::BTreeMap<String, String>, dims: &dyn Fn(&str) -> Option<(u32, u32)>, number_vars: &[(String, String)], gen: &mut dyn FnMut() -> String, want: &mut Option<LessonAsset>) -> bool {
     let mut changed = false;
+    // Each kind of block remembers which of its groups was open.
+    let scope = 10 + (kind.label().bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)) % 200) as u8;
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), scope));
     match kind {
         BlockKind::Heading { text, level } => {
-            changed |= single(ui, "Heading", text);
-            ui.horizontal(|ui| {
-                ui.label("Size");
-                for (n, label) in [(1u8, "Large"), (2, "Medium"), (3, "Small")] { if ui.selectable_label(*level == n, label).clicked() { *level = n; changed = true; } }
+            sec(ui, "content", "Content", true, |ui| { changed |= single(ui, "Heading", text); });
+            sec(ui, "appearance", "Appearance", false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Size");
+                    for (n, label) in [(1u8, "Large"), (2, "Medium"), (3, "Small")] { if ui.selectable_label(*level == n, label).clicked() { *level = n; changed = true; } }
+                });
             });
         }
-        BlockKind::Text { text } => { changed |= md_edit(ui, id, text, 10); ui.weak(markdown_hint()); }
+        BlockKind::Text { text } => {
+            sec(ui, "content", "Content", true, |ui| { changed |= md_edit(ui, id, text, 10); ui.weak(markdown_hint()); });
+        }
         BlockKind::Image { asset, alt, caption, width, decorative, crop } => {
-            asset_row(ui, "Picture", asset.as_deref(), names, want, LessonAsset::Image, "Choose picture…");
-            changed |= crop_row(ui, asset.as_deref(), crop, dims);
-            changed |= ui.checkbox(decorative, "Decorative (screen readers skip it)").changed();
-            if !*decorative { changed |= single(ui, "Alt text (describe the picture)", alt); }
-            changed |= single(ui, "Caption", caption);
-            ui.horizontal(|ui| {
-                ui.label("Width");
-                for (w, label) in [(ImageWidth::Full, "Full"), (ImageWidth::Medium, "Medium"), (ImageWidth::Small, "Small")] { if ui.selectable_label(*width == w, label).clicked() { *width = w; changed = true; } }
+            sec(ui, "picture", "Picture", true, |ui| {
+                asset_row(ui, "Picture", asset.as_deref(), names, want, LessonAsset::Image, "Choose picture…");
+                changed |= crop_row(ui, asset.as_deref(), crop, dims);
+            });
+            sec(ui, "content", "Caption", false, |ui| { changed |= single(ui, "Caption", caption); });
+            sec(ui, "appearance", "Appearance", false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Width");
+                    for (w, label) in [(ImageWidth::Full, "Full"), (ImageWidth::Medium, "Medium"), (ImageWidth::Small, "Small")] { if ui.selectable_label(*width == w, label).clicked() { *width = w; changed = true; } }
+                });
+            });
+            sec(ui, "access", "Accessibility", false, |ui| {
+                changed |= ui.checkbox(decorative, "Decorative (screen readers skip it)").changed();
+                if !*decorative { changed |= single(ui, "Alt text (describe the picture)", alt); }
             });
         }
         BlockKind::ImageText { asset, alt, text, image_right, crop } => {
-            asset_row(ui, "Picture", asset.as_deref(), names, want, LessonAsset::Image, "Choose picture…");
-            changed |= crop_row(ui, asset.as_deref(), crop, dims);
-            changed |= single(ui, "Alt text (describe the picture)", alt);
-            changed |= ui.checkbox(image_right, "Picture on the right").changed();
-            ui.label("Text");
-            changed |= md_edit(ui, id, text, 8);
+            sec(ui, "picture", "Picture", true, |ui| {
+                asset_row(ui, "Picture", asset.as_deref(), names, want, LessonAsset::Image, "Choose picture…");
+                changed |= crop_row(ui, asset.as_deref(), crop, dims);
+            });
+            sec(ui, "content", "Text", false, |ui| { changed |= md_edit(ui, id, text, 8); });
+            sec(ui, "appearance", "Layout", false, |ui| { changed |= ui.checkbox(image_right, "Picture on the right").changed(); });
+            sec(ui, "access", "Accessibility", false, |ui| { changed |= single(ui, "Alt text (describe the picture)", alt); });
         }
         BlockKind::Video { asset, captions, caption } => {
-            asset_row(ui, "Video", asset.as_deref(), names, want, LessonAsset::Video, "Choose video…");
-            asset_row(ui, "Captions", captions.as_deref(), names, want, LessonAsset::Captions, "Choose captions (.vtt)…");
-            if captions.is_some() && ui.small_button("Remove captions").clicked() { *captions = None; changed = true; }
-            changed |= single(ui, "Caption", caption);
+            sec(ui, "picture", "Video", true, |ui| { asset_row(ui, "Video", asset.as_deref(), names, want, LessonAsset::Video, "Choose video…"); });
+            sec(ui, "content", "Caption", false, |ui| { changed |= single(ui, "Caption", caption); });
+            sec(ui, "access", "Accessibility", false, |ui| {
+                asset_row(ui, "Captions", captions.as_deref(), names, want, LessonAsset::Captions, "Choose captions (.vtt)…");
+                if captions.is_some() && ui.small_button("Remove captions").clicked() { *captions = None; changed = true; }
+            });
         }
         BlockKind::Audio { asset, caption } => {
-            asset_row(ui, "Audio", asset.as_deref(), names, want, LessonAsset::Audio, "Choose audio…");
-            changed |= single(ui, "Caption", caption);
+            sec(ui, "picture", "Audio", true, |ui| { asset_row(ui, "Audio", asset.as_deref(), names, want, LessonAsset::Audio, "Choose audio…"); });
+            sec(ui, "content", "Caption", false, |ui| { changed |= single(ui, "Caption", caption); });
         }
         BlockKind::Button { label, url } => {
-            changed |= single(ui, "Label", label);
-            changed |= single(ui, "Address (https:// or mailto:)", url);
-            if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) { ui.colored_label(egui::Color32::from_rgb(200, 60, 40), "The address must start with https://, http:// or mailto:."); }
+            sec(ui, "content", "Content", true, |ui| { changed |= single(ui, "Label", label); });
+            sec(ui, "link", "Link", true, |ui| {
+                changed |= single(ui, "Address (https:// or mailto:)", url);
+                if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) { ui.colored_label(egui::Color32::from_rgb(200, 60, 40), "The address must start with https://, http:// or mailto:."); }
+            });
         }
         BlockKind::Continue { label } => {
-            changed |= single(ui, "Button label", label);
-            ui.weak("Hides everything below until the learner presses the button.");
+            sec(ui, "content", "Content", true, |ui| {
+                changed |= single(ui, "Button label", label);
+                ui.weak("Hides everything below until the learner presses the button.");
+            });
         }
         BlockKind::Quote { text, by } => {
-            ui.label("Quote");
-            changed |= ui.add(egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY)).changed();
-            changed |= single(ui, "Said by", by);
+            sec(ui, "content", "Content", true, |ui| {
+                ui.label("Quote");
+                changed |= ui.add(egui::TextEdit::multiline(text).desired_rows(4).desired_width(f32::INFINITY)).changed();
+                changed |= single(ui, "Said by", by);
+            });
         }
         BlockKind::Statement { text } => {
-            ui.label("Statement");
-            changed |= ui.add(egui::TextEdit::multiline(text).desired_rows(3).desired_width(f32::INFINITY)).changed();
+            sec(ui, "content", "Content", true, |ui| {
+                ui.label("Statement");
+                changed |= ui.add(egui::TextEdit::multiline(text).desired_rows(3).desired_width(f32::INFINITY)).changed();
+            });
         }
         BlockKind::Items { style, items } => {
-            ui.horizontal(|ui| {
-                ui.label("Layout");
-                combo(("items-style", id)).selected_text(style.label()).show_ui(ui, |ui| {
-                    for s in ItemsStyle::ALL { if ui.selectable_label(*style == s, s.label()).clicked() { *style = s; changed = true; } }
+            sec(ui, "appearance", "Layout", false, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Layout");
+                    combo(("items-style", id)).selected_text(style.label()).show_ui(ui, |ui| {
+                        for s in ItemsStyle::ALL { if ui.selectable_label(*style == s, s.label()).clicked() { *style = s; changed = true; } }
+                    });
                 });
             });
             let (title_label, body_label) = match style { ItemsStyle::Timeline => ("Date or label", "Details"), ItemsStyle::Flashcards => ("Front of card", "Back of card"), _ => ("Title", "Content") };
-            let mut remove = None;
-            let mut swap: Option<(usize, usize)> = None;
-            let n = items.len();
-            for (i, it) in items.iter_mut().enumerate() {
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.strong(format!("Item {}", i + 1));
-                    if ui.add_enabled(i > 0, egui::Button::new("↑").small()).clicked() { swap = Some((i, i - 1)); }
-                    if ui.add_enabled(i + 1 < n, egui::Button::new("↓").small()).clicked() { swap = Some((i, i + 1)); }
-                    if ui.small_button("Remove").clicked() { remove = Some(i); }
-                });
-                changed |= single(ui, title_label, &mut it.title);
-                ui.label(body_label);
-                changed |= md_edit(ui, (id, i), &mut it.body, 4);
-            }
-            if let Some(i) = remove { items.remove(i); changed = true; }
-            if let Some((a, b)) = swap { items.swap(a, b); changed = true; }
-            if ui.button("+ Add item").clicked() { items.push(Item { title: format!("Item {}", items.len() + 1), body: String::new() }); changed = true; }
+            sec(ui, "content", "Items", true, |ui| {
+                let mut remove = None;
+                let mut swap: Option<(usize, usize)> = None;
+                let n = items.len();
+                for (i, it) in items.iter_mut().enumerate() {
+                    if i > 0 { ui.separator(); }
+                    ui.horizontal(|ui| {
+                        ui.strong(format!("Item {}", i + 1));
+                        if ui.add_enabled(i > 0, egui::Button::new("↑").small()).clicked() { swap = Some((i, i - 1)); }
+                        if ui.add_enabled(i + 1 < n, egui::Button::new("↓").small()).clicked() { swap = Some((i, i + 1)); }
+                        if ui.small_button("Remove").clicked() { remove = Some(i); }
+                    });
+                    changed |= single(ui, title_label, &mut it.title);
+                    ui.label(body_label);
+                    changed |= md_edit(ui, (id, i), &mut it.body, 4);
+                }
+                if let Some(i) = remove { items.remove(i); changed = true; }
+                if let Some((a, b)) = swap { items.swap(a, b); changed = true; }
+                if ui.button("+ Add item").clicked() { items.push(Item { title: format!("Item {}", items.len() + 1), body: String::new() }); changed = true; }
+            });
         }
         BlockKind::KnowledgeCheck(q) => {
             let mut qwant: Option<AssetWant> = None;
-            changed |= question_editor(ui, q, gen, &mut qwant, number_vars);
+            sec(ui, "content", "Question", true, |ui| { changed |= question_editor(ui, q, gen, &mut qwant, number_vars); });
             match qwant {
                 Some(AssetWant::Image) => *want = Some(LessonAsset::QuestionImage),
                 Some(AssetWant::Audio) => *want = Some(LessonAsset::QuestionAudio),
@@ -739,15 +776,22 @@ impl App {
             let Some(s) = lesson.sections.get_mut(sec) else { return };
             match blk.and_then(|b| s.blocks.get_mut(b)) {
                 None => {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 9u8));
                     ui.strong(format!("Section {}", sec + 1));
-                    changed |= single(ui, "Title (shown in the menu)", &mut s.title);
-                    ui.label("Summary (shown on the title page)");
-                    changed |= ui.add(egui::TextEdit::multiline(&mut s.summary).desired_rows(3).desired_width(f32::INFINITY)).changed();
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(sec > 0, egui::Button::new("Move up")).clicked() { section_action = Some(0); }
-                        if ui.add_enabled(sec + 1 < n_sections, egui::Button::new("Move down")).clicked() { section_action = Some(1); }
-                        if ui.add_enabled(n_sections > 1, egui::Button::new("Delete section")).clicked() { section_action = Some(2); }
+                    ui.add_space(4.0);
+                    self::sec(ui, "content", "Content", true, |ui| {
+                        changed |= single(ui, "Title (shown in the menu)", &mut s.title);
+                        ui.label("Summary (shown on the title page)");
+                        changed |= ui.add(egui::TextEdit::multiline(&mut s.summary).desired_rows(3).desired_width(f32::INFINITY)).changed();
                     });
+                    self::sec(ui, "arrange", "Arrange", false, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.add_enabled(sec > 0, egui::Button::new("Move up")).clicked() { section_action = Some(0); }
+                            if ui.add_enabled(sec + 1 < n_sections, egui::Button::new("Move down")).clicked() { section_action = Some(1); }
+                            if ui.add_enabled(n_sections > 1, egui::Button::new("Delete section")).clicked() { section_action = Some(2); }
+                        });
+                    });
+                    ui.add_space(4.0);
                     ui.weak(format!("{} block{}. Select a block to edit it, or use + Add block.", s.blocks.len(), if s.blocks.len() == 1 { "" } else { "s" }));
                 }
                 Some(b) => {
