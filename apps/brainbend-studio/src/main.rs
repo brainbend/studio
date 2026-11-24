@@ -3507,6 +3507,9 @@ impl App {
         let slides = self.project.as_ref().unwrap().scene_slides(si);
         let (mut select, mut open) = (None, None);
         ui.spacing_mut().item_spacing.y = 2.0;
+        let drag_id = egui::Id::new("slides-drag");
+        let mut dragging: Option<usize> = ui.data(|d| d.get_temp(drag_id));
+        let mut rects: Vec<(egui::Rect, usize)> = vec![];
         for i in slides {
             let sl = self.project.as_ref().unwrap().slide(i).clone();
             let in_selection = i == self.view.slide || self.slide_multi.contains(&sl.id);
@@ -3539,6 +3542,8 @@ impl App {
                 }
             });
             let resp = out.resp;
+            rects.push((resp.rect, i));
+            if resp.drag_started() { dragging = Some(i); }
             // Pressing on a slide gives the slide list the keyboard.
             if resp.hovered() && ctx.input(|inp| inp.pointer.any_pressed()) { self.slides_focus = true; self.slide_hit = true; }
             if resp.secondary_clicked() && !in_selection && !self.scene_view {
@@ -3567,7 +3572,43 @@ impl App {
                 }
             }
         }
+        // A drag in progress: the line where the slide (or the selected slides) would land, and the move when the pointer is let go.
+        if let Some(from) = dragging {
+            let over = ctx.input(|i| i.pointer.interact_pos()).and_then(|p| rects.iter().find(|(r, _)| r.contains(p)).map(|(r, t)| (*r, *t, p.y > r.center().y)));
+            if let Some((r, _, below)) = over { list_view::drop_line(ui, r, below); }
+            if ctx.input(|i| i.pointer.any_released()) {
+                if let Some((_, target, below)) = over { self.move_slides_to(from, target, below); }
+                dragging = None;
+            }
+        }
+        ui.data_mut(|d| match dragging { Some(v) => { d.insert_temp(drag_id, v); } None => d.remove::<usize>(drag_id) });
         (select, open)
+    }
+
+    /// Drop slide `from` (with the rest of the selection, when it is part of it) just above or below slide `target`, in the same scene.
+    fn move_slides_to(&mut self, from: usize, target: usize, below: bool) {
+        let Some(p) = &self.project else { return };
+        let scene = p.slide(target).scene.clone();
+        let mut sel = self.slide_selection();
+        if !sel.contains(&from) { sel = vec![from]; }
+        sel.retain(|&i| p.slide(i).scene == scene);
+        sel.sort_unstable();
+        if sel.is_empty() || sel.contains(&target) { return; }
+        // Dropped where it already is.
+        let (first, last) = (sel[0], *sel.last().unwrap());
+        if (!below && target == last + 1) || (below && target + 1 == first) { return; }
+        let ids: Vec<String> = sel.iter().map(|&i| p.slide(i).id.clone()).collect();
+        let target_id = p.slide(target).id.clone();
+        let keep = p.slide(self.view.slide).id.clone();
+        let before: Vec<String> = p.slides.iter().map(|s| s.id.clone()).collect();
+        self.snapshot();
+        let p = self.project.as_mut().unwrap();
+        let mut moving = vec![];
+        for id in &ids { if let Some(k) = p.slides.iter().position(|s| s.id == *id) { moving.push(p.slides.remove(k)); } }
+        let at = p.slides.iter().position(|s| s.id == target_id).map(|k| if below { k + 1 } else { k }).unwrap_or(p.slides.len());
+        for (n, s) in moving.into_iter().enumerate() { p.slides.insert(at + n, s); }
+        self.view.slide = p.slides.iter().position(|s| s.id == keep).unwrap_or(0);
+        if p.slides.iter().map(|s| &s.id).ne(before.iter()) { self.dirty = true; }
     }
 
     /// Draw one scene as a flow of slide thumbnails `tw` wide. Returns the slide clicked and the slide double-clicked.
@@ -12788,6 +12829,35 @@ mod tests {
         h.key_press(egui::Key::Delete);
         h.run_steps(3);
         assert_eq!(h.state().lesson_ref().sections.len(), 1, "Delete removes the chosen section");
+    }
+
+    #[test]
+    fn gui_slides_can_be_dragged_to_a_new_place_in_the_slide_list() {
+        let mut a = app();
+        a.add_slide(SlideKind::Normal);
+        a.add_slide(SlideKind::Normal);
+        let names = |a: &App| a.project.as_ref().unwrap().slides.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+        let start = names(&a);
+        assert!(start.len() >= 3);
+        // The first slide to the end, then back to the front.
+        a.move_slides_to(0, 2, true);
+        assert_eq!(names(&a), vec![start[1].clone(), start[2].clone(), start[0].clone()]);
+        a.move_slides_to(2, 0, false);
+        assert_eq!(names(&a), start);
+        // Dropped where it already is: nothing to undo.
+        let undo = a.undo.len();
+        a.move_slides_to(0, 1, false);
+        a.move_slides_to(1, 0, true);
+        assert_eq!(a.undo.len(), undo);
+        // A selection moves as one, and the slide being edited stays the one being edited.
+        a.view.slide = 0;
+        a.slide_multi = vec![a.project.as_ref().unwrap().slides[1].id.clone()];
+        a.move_slides_to(0, 2, true);
+        assert_eq!(names(&a), vec![start[2].clone(), start[0].clone(), start[1].clone()]);
+        assert_eq!(a.view.slide, 1);
+        // The list draws in the modes that take the drag.
+        let mut h = harness(a);
+        for m in [list_view::ListMode::Icon, list_view::ListMode::Text] { h.state_mut().slides_list = m; h.state_mut().right_tab = P_SLIDES; h.run_steps(3); }
     }
 
     #[test]
