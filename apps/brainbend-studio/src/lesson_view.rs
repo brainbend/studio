@@ -107,7 +107,7 @@ fn short(text: &str, n: usize) -> String {
 }
 
 impl App {
-    fn lesson_ref(&self) -> &WebLesson {
+    pub(super) fn lesson_ref(&self) -> &WebLesson {
         self.project.as_ref().and_then(|p| p.lesson.as_ref()).expect("a Web Lesson project has lesson content")
     }
 
@@ -310,6 +310,8 @@ impl App {
         let drag_id = egui::Id::new("outline-drag");
         let mut dragging: Option<(usize, Option<usize>)> = ui.data(|d| d.get_temp(drag_id));
         let mut rects: Vec<(egui::Rect, (usize, Option<usize>))> = vec![];
+        let mut row_ids: Vec<egui::Id> = vec![];
+        let over_panel = ui.ui_contains_pointer();
         let accent = { let c = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255)); egui::Color32::from_rgb(c.0, c.1, c.2) };
         egui::ScrollArea::vertical().id_salt("outline-scroll").auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
@@ -331,16 +333,17 @@ impl App {
                     p.text(r.center(), egui::Align2::CENTER_CENTER, format!("{}", si + 1), egui::FontId::proportional(r.height() * 0.5), egui::Color32::WHITE);
                 });
                 rects.push((out.resp.rect, (si, None)));
+                row_ids.push(out.resp.id);
                 if out.caret_clicked { ui.data_mut(|d| d.insert_temp(closed_id, !closed)); }
                 else if out.resp.double_clicked() { pick = Some((si, None)); renaming = Some(si); }
                 else if out.resp.clicked() { pick = Some((si, None)); }
                 if out.resp.drag_started() { dragging = Some((si, None)); }
                 out.resp.context_menu(|ui| {
-                    if ui.button("Rename").clicked() { act = Some(((si, None), Do::Rename(si))); ui.close(); }
+                    if ui.add(egui::Button::new("Rename").shortcut_text("F2")).clicked() { act = Some(((si, None), Do::Rename(si))); ui.close(); }
                     if ui.add_enabled(si > 0, egui::Button::new("Move up")).clicked() { act = Some(((si, None), Do::MoveSec(-1))); ui.close(); }
                     if ui.add_enabled(si + 1 < lesson.sections.len(), egui::Button::new("Move down")).clicked() { act = Some(((si, None), Do::MoveSec(1))); ui.close(); }
                     ui.separator();
-                    if ui.add_enabled(lesson.sections.len() > 1, egui::Button::new("Delete section")).clicked() { act = Some(((si, None), Do::DeleteSec)); ui.close(); }
+                    if ui.add_enabled(lesson.sections.len() > 1, egui::Button::new("Delete section").shortcut_text("Del")).clicked() { act = Some(((si, None), Do::DeleteSec)); ui.close(); }
                 });
                 if closed { continue; }
                 for (bi, b) in s.blocks.iter().enumerate() {
@@ -374,6 +377,7 @@ impl App {
                         }
                     });
                     rects.push((out.resp.rect, (si, Some(bi))));
+                    row_ids.push(out.resp.id);
                     if out.resp.clicked() { pick = Some((si, Some(bi))); }
                     if out.resp.drag_started() { dragging = Some((si, Some(bi))); }
                     out.resp.context_menu(|ui| {
@@ -381,11 +385,19 @@ impl App {
                         if ui.add_enabled(bi + 1 < s.blocks.len(), egui::Button::new("Move down")).clicked() { act = Some(((si, Some(bi)), Do::MoveBlk(1))); ui.close(); }
                         if ui.button("Duplicate").clicked() { act = Some(((si, Some(bi)), Do::Duplicate)); ui.close(); }
                         ui.separator();
-                        if ui.button("Delete").clicked() { act = Some(((si, Some(bi)), Do::DeleteBlk)); ui.close(); }
+                        if ui.add(egui::Button::new("Delete").shortcut_text("Del")).clicked() { act = Some(((si, Some(bi)), Do::DeleteBlk)); ui.close(); }
                     });
                 }
             }
         });
+        // F2 and Delete work on the chosen row while the list has the keyboard: one of its rows is in focus, or no field is and the pointer is over it.
+        let has_keys = row_ids.iter().any(|id| ctx.memory(|m| m.has_focus(*id))) || (over_panel && ctx.memory(|m| m.focused().is_none()));
+        if has_keys && act.is_none() && renaming.is_none() {
+            let (f2, del) = ctx.input(|i| (i.key_pressed(egui::Key::F2), i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)));
+            let here = (self.sec, self.blk);
+            if f2 && here.1.is_none() { act = Some((here, Do::Rename(here.0))); }
+            else if del { act = Some((here, if here.1.is_some() { Do::DeleteBlk } else { Do::DeleteSec })); }
+        }
         // A drag in progress: the line where it would land, and the move when the pointer is let go.
         if let Some(d) = dragging {
             let pos = ctx.input(|i| i.pointer.interact_pos());

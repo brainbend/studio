@@ -12753,6 +12753,44 @@ mod tests {
     }
 
     #[test]
+    fn gui_f2_renames_and_delete_removes_in_the_web_outline() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.add_block(brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).next().unwrap());
+        a.add_section();
+        let mut h = harness(a);
+        h.run_steps(3);
+        let at = h.query_all_by_label("Outline").last().unwrap().rect().center();
+        h.hover_at(at);
+        h.run_steps(2);
+        let rename = egui::Id::new("outline-rename");
+        // F2 on a section starts renaming it.
+        h.state_mut().sec = 1; h.state_mut().blk = None;
+        h.run_steps(2);
+        h.key_press(egui::Key::F2);
+        h.run_steps(3);
+        assert_eq!(h.ctx.data(|d| d.get_temp::<usize>(rename)), Some(1), "F2 renames the chosen section");
+        h.key_press(egui::Key::Escape);
+        h.run_steps(2);
+        // Delete on a block removes the block; on a section, the section. Undo brings each back.
+        h.ctx.data_mut(|d| d.remove::<usize>(rename));
+        h.state_mut().sec = 0; h.state_mut().blk = Some(0);
+        h.run_steps(2);
+        h.hover_at(at);
+        let before = h.state().lesson_ref().sections[0].blocks.len();
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(h.state().lesson_ref().sections[0].blocks.len(), before - 1, "Delete removes the chosen block");
+        h.state_mut().sec = 1; h.state_mut().blk = None;
+        h.run_steps(2);
+        h.hover_at(at);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(3);
+        assert_eq!(h.state().lesson_ref().sections.len(), 1, "Delete removes the chosen section");
+    }
+
+    #[test]
     fn shot_list_modes() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
         let mk = |a: App| {
