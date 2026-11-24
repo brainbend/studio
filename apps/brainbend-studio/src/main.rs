@@ -2887,11 +2887,19 @@ impl App {
             self.status_issues = (now, self.project.as_ref().map(|p| p.check().len()).unwrap_or(0));
         }
         let info = self.project.as_ref().map(|p| {
+            // A web lesson counts its sections and blocks; a media lesson its slides, with their size.
+            if let Some(l) = p.lesson.as_ref().filter(|_| p.is_web()) {
+                let sec = self.sec.min(l.sections.len().saturating_sub(1));
+                let n = l.sections.get(sec).map(|s| s.blocks.len()).unwrap_or(0);
+                let plural = |n: usize| if n == 1 { "block" } else { "blocks" };
+                let blocks = match self.blk.filter(|b| *b < n) { Some(b) => format!("Block {} of {n}", b + 1), None => format!("{n} {}", plural(n)) };
+                return (format!("Section {} of {}", sec + 1, l.sections.len()), blocks, p.theme.name.clone());
+            }
             let i = self.view.slide.min(p.slide_count().saturating_sub(1));
             let s = p.slide(i);
             // A layout (in the Layout Builder) is named; a slide is counted.
             let label = if i >= p.slides.len() { s.name.clone() } else { format!("Slide {} of {}", i + 1, p.slides.len()) };
-            (label, s.width as i32, s.height as i32, p.theme.name.clone())
+            (label, format!("{} × {}", s.width as i32, s.height as i32), p.theme.name.clone())
         });
         let editing_slide = self.project.is_some() && !self.file_view && !self.scene_view && self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web());
         let mut open_checker = false;
@@ -2899,10 +2907,10 @@ impl App {
         let mut fit = false;
         egui::Panel::bottom("status").show(root, |ui| {
             ui.horizontal(|ui| {
-                if let Some((label, w, h, theme)) = &info {
+                if let Some((label, size, theme)) = &info {
                     ui.label(label.clone());
                     ui.separator();
-                    ui.label(format!("{w} × {h}"));
+                    ui.label(size.clone());
                     ui.separator();
                     ui.label(format!("\"{theme}\""));
                     ui.separator();
@@ -12901,6 +12909,27 @@ mod tests {
         h.run_steps(4);
         assert!(h.query_by_label("More").is_some());
         assert!(h.query_by_label("Text Box").is_some(), "the first buttons stay in the row");
+    }
+
+    #[test]
+    fn gui_the_status_bar_of_a_web_lesson_counts_sections_and_blocks() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        let kinds: Vec<_> = brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3).collect();
+        for k in kinds { a.add_block(k); }
+        a.add_section();
+        a.sec = 0;
+        a.blk = None;
+        let mut h = harness(a);
+        h.run_steps(3);
+        let blocks = h.state().project.as_ref().unwrap().lesson.as_ref().unwrap().sections[0].blocks.len();
+        assert!(h.query_by_label("Section 1 of 2").is_some(), "the section is counted");
+        assert!(h.query_by_label(&format!("{blocks} blocks")).is_some(), "with its blocks");
+        assert!(h.query_by_label_contains("Slide ").is_none() && h.query_by_label_contains("1920").is_none(), "nothing of a slide");
+        h.state_mut().blk = Some(1);
+        h.run_steps(3);
+        assert!(h.query_by_label(&format!("Block 2 of {blocks}")).is_some(), "a chosen block is placed in its section");
     }
 
     #[test]
