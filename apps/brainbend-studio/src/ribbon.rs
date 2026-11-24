@@ -413,7 +413,7 @@ fn menu_job(ui: &egui::Ui, icon: char, text: &str) -> egui::text::LayoutJob {
 }
 
 /// One row in a dropdown: small icon, then text.
-fn menu_item(ui: &mut egui::Ui, icon: char, text: &str) -> egui::Response {
+pub(crate) fn menu_item(ui: &mut egui::Ui, icon: char, text: &str) -> egui::Response {
     let job = menu_job(ui, icon, text);
     ui.add(egui::Button::new(job).frame(false).min_size(egui::vec2(ui.available_width().min(300.0), 24.0)))
 }
@@ -1081,6 +1081,59 @@ fn blocked_in_state(label: &str) -> bool {
 
 const BLOCKED_TIP: &str = "A state can hold shapes, icons, pictures, text and equations. Press Done to add this to the slide.";
 
+/// How big a button of a toolbar band is, and the room a divider takes.
+pub(crate) const BAR_BTN: f32 = 30.0;
+pub(crate) const BAR_H: f32 = 28.0;
+const BAR_GAP: f32 = 2.0;
+const BAR_DIV: f32 = 13.0;
+
+/// A row of icon buttons that stays one row. `dividers[i]` says item `i` is a divider line, not a button. The items are centered when they all fit; when
+/// they do not, the ones that do not go in a "…" menu at the end of the row. `draw(ui, i, in_menu)` draws item `i`: as a button in the row, or as a menu entry.
+pub(crate) fn overflow_row(ui: &mut egui::Ui, dividers: &[bool], draw: &mut dyn FnMut(&mut egui::Ui, usize, bool)) {
+    let width = |i: usize| (if dividers[i] { BAR_DIV } else { BAR_BTN }) + BAR_GAP;
+    let total: f32 = (0..dividers.len()).map(width).sum();
+    let avail = ui.available_width();
+    let fits = total <= avail;
+    // How many items show: all of them, or as many as leave room for the menu button (never ending on a divider).
+    let mut shown = dividers.len();
+    if !fits {
+        let (mut used, room) = (0.0, avail - (BAR_BTN + BAR_GAP));
+        shown = 0;
+        while shown < dividers.len() && used + width(shown) <= room { used += width(shown); shown += 1; }
+        while shown > 0 && dividers[shown - 1] { shown -= 1; }
+    }
+    let used: f32 = (0..shown).map(width).sum::<f32>() + if fits { 0.0 } else { BAR_BTN + BAR_GAP };
+    ui.horizontal(|ui| {
+        ui.set_height(BAR_H);
+        ui.spacing_mut().item_spacing = egui::vec2(BAR_GAP, 2.0);
+        ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
+        ui.add_space(((avail - used) / 2.0).max(0.0));
+        for i in 0..shown {
+            if dividers[i] {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(BAR_DIV, BAR_H), egui::Sense::hover());
+                let line = ui.visuals().text_color().gamma_multiply(if ui.visuals().dark_mode { 0.30 } else { 0.25 });
+                ui.painter().line_segment([rect.center_top() + egui::vec2(0.0, 4.0), rect.center_bottom() - egui::vec2(0.0, 4.0)], egui::Stroke::new(1.0, line));
+            } else {
+                draw(ui, i, false);
+            }
+        }
+        if !fits {
+            let more = egui::Button::new("").frame(false).min_size(egui::vec2(BAR_BTN, BAR_H));
+            let (resp, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                ui.set_min_width(200.0);
+                for i in shown..dividers.len() {
+                    if dividers[i] { if i > shown { ui.separator(); } } else { draw(ui, i, true); }
+                }
+            });
+            // (the three dots are drawn: they are not in the icon font under a name to rely on)
+            let ink = text_col(ui);
+            for dx in [-6.0, 0.0, 6.0] { ui.painter().circle_filled(resp.rect.center() + egui::vec2(dx, 0.0), 1.9, ink); }
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "More"));
+            resp.on_hover_text("More");
+        }
+    });
+}
+
 fn insert_sections() -> [(&'static str, Vec<InsertEntry>); 3] {
     use InsertEntry::{Leaf as L, Sub as S};
     [
@@ -1233,7 +1286,7 @@ impl App {
         // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
-        if self.project.as_ref().is_some_and(|p| p.is_web()) { self.lesson_toolbar(root, ctx); return; }
+        if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
         if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
         self.doc_tabs(root);
     }
@@ -1998,45 +2051,34 @@ impl App {
         egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| self.insert_bar_row(ui));
     }
 
-    /// The buttons of the insert bar, centered in the room there is.
+    /// The buttons of the insert bar, centered in the room there is. What does not fit goes in the menu at its end, so the bar is one row.
     fn insert_bar_row(&mut self, ui: &mut egui::Ui) {
-            // The buttons sit in the middle of the bar. How wide they come to is known from the frame before, so they start that far in.
-            let width_id = ui.id().with("insert-bar-width");
-            let avail = ui.available_width();
-            let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
-            let pad = ((avail - known) / 2.0).max(0.0);
-            let (mut left, mut right, mut first_top, mut wrapped) = (f32::MAX, 0.0f32, None::<f32>, false);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
-                ui.add_space(pad);
-                for (n, (_, entries)) in insert_sections().into_iter().enumerate() {
-                    if n > 0 { ui.add_space(6.0); ui.separator(); ui.add_space(6.0); }
-                    for entry in entries {
-                        let (label, tip) = (entry.label(), entry.tip());
-                        let button = egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons())).color(text_col(ui))).frame(false).min_size(egui::vec2(30.0, 28.0));
-                        let named = |r: egui::Response| { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); r.on_hover_ui(|ui| { ui.strong(label); ui.weak(tip); }) };
-                        let blocked = self.view.state_editing && self.swap.is_some() && blocked_in_state(label);
-                        if blocked {
-                            let r = ui.add_enabled(false, button).on_disabled_hover_text(BLOCKED_TIP);
-                            left = left.min(r.rect.left());
-                            right = right.max(r.rect.right());
-                            match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
-                            continue;
-                        }
-                        let r = match entry {
-                            InsertEntry::Leaf((_, _, _, act)) => { let r = named(ui.add(button)); if r.clicked() { act(self); } r }
-                            InsertEntry::Sub((_, _, _, content)) => named(egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| content(self, ui)).0),
-                        };
-                        left = left.min(r.rect.left());
-                        right = right.max(r.rect.right());
-                        match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
-                    }
+        let mut items: Vec<Option<InsertEntry>> = vec![];
+        for (n, (_, entries)) in insert_sections().into_iter().enumerate() {
+            if n > 0 { items.push(None); }
+            items.extend(entries.into_iter().map(Some));
+        }
+        let dividers: Vec<bool> = items.iter().map(|e| e.is_none()).collect();
+        overflow_row(ui, &dividers, &mut |ui, i, in_menu| {
+            let Some(entry) = items[i].as_ref() else { return };
+            let (label, tip) = (entry.label(), entry.tip());
+            let blocked = self.view.state_editing && self.swap.is_some() && blocked_in_state(label);
+            if in_menu {
+                if blocked { ui.add_enabled(false, egui::Label::new(egui::RichText::new(label).weak())).on_disabled_hover_text(BLOCKED_TIP); return; }
+                match entry {
+                    InsertEntry::Leaf((icon, _, _, act)) => { if menu_item(ui, *icon, label).on_hover_text(tip).clicked() { act(self); ui.close(); } }
+                    InsertEntry::Sub((icon, _, _, content)) => { ui.menu_button(menu_job(ui, *icon, label), |ui| content(self, ui)).response.on_hover_text(tip); }
                 }
-            });
-            // Wrapped onto two rows, the bar is as wide as it can be; otherwise it is as wide as the buttons (without the padding in front).
-            let width = if wrapped || right <= left { avail } else { right - left };
-            if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
+                return;
+            }
+            let button = egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons())).color(text_col(ui))).frame(false);
+            let named = |r: egui::Response| { r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)); r.on_hover_ui(|ui| { ui.strong(label); ui.weak(tip); }) };
+            if blocked { ui.add_enabled(false, egui::Button::new(egui::RichText::new(entry.icon().to_string()).font(egui::FontId::new(18.0, icons()))).frame(false).min_size(egui::vec2(BAR_BTN, BAR_H))).on_disabled_hover_text(BLOCKED_TIP); return; }
+            match entry {
+                InsertEntry::Leaf((_, _, _, act)) => { let r = named(ui.add_sized([BAR_BTN, BAR_H], button)); if r.clicked() { act(self); } }
+                InsertEntry::Sub((_, _, _, content)) => { named(egui::containers::menu::MenuButton::from_button(button.min_size(egui::vec2(BAR_BTN, BAR_H))).ui(ui, |ui| content(self, ui)).0); }
+            }
+        });
     }
 
     /// The names of the things that are added by one click (the ones with no choices to make), in the order `insert_leaf_act` takes.

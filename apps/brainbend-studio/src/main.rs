@@ -12845,8 +12845,12 @@ mod tests {
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
         a.show_insert_bar = true;
+        // With the panels off the bar has the whole window, so every button shows.
+        a.panels.slides = false;
+        a.panels.properties = false;
         let mut h = harness(a);
         h.run_steps(4);
+        assert!(h.query_by_label("More").is_none(), "everything fits");
         let count = |h: &egui_kittest::Harness<'_, App>| h.state().project.as_ref().unwrap().lesson.as_ref().unwrap().sections[0].blocks.len();
         let start = count(&h);
         assert!(h.query_by_label("Move up").is_some() && h.query_by_label("Lesson settings").is_some(), "the bar has its buttons");
@@ -12867,6 +12871,36 @@ mod tests {
         h.state_mut().show_insert_bar = false;
         h.run_steps(3);
         assert!(h.query_by_label("Move up").is_none());
+    }
+
+    #[test]
+    fn gui_an_insert_bar_that_is_too_narrow_keeps_one_row_and_puts_the_rest_in_a_menu() {
+        use egui_kittest::kittest::Queryable;
+        // A web lesson between its two panels.
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.show_insert_bar = true;
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.query_by_label("More").is_some(), "what does not fit goes in a menu");
+        assert!(h.query_by_label("Lesson settings").is_none(), "the last button is in the menu, not the row");
+        h.get_by_label("More").click();
+        h.run_steps(3);
+        assert!(h.query_by_label_contains("Lesson settings").is_some(), "the menu holds it");
+        h.get_by_label_contains("Lesson settings").click();
+        h.run_steps(3);
+        assert!(h.state().lesson_settings, "and it works from there");
+        // A media lesson's bar too, in a narrow window.
+        let mut a = app();
+        a.show_insert_bar = true;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(700.0, 800.0)).build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+        install_fonts(&h.ctx);
+        install_theme(&h.ctx);
+        h.run_steps(2);
+        *h.state_mut() = a;
+        h.run_steps(4);
+        assert!(h.query_by_label("More").is_some());
+        assert!(h.query_by_label("Text Box").is_some(), "the first buttons stay in the row");
     }
 
     #[test]

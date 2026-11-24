@@ -194,87 +194,70 @@ impl App {
         self.blk = None;
     }
 
-    /// The insert bar of a Web Lesson, the same slim band as a media lesson's: a button for each kind of block, grouped as in the Add block
-    /// menu, then the buttons that arrange blocks, then the tools. Preview and Publish are in the title bar with the other buttons there.
+    /// The insert bar of a Web Lesson, the same slim band as a media lesson's and in the same place, between the panels: a button for each
+    /// kind of block, grouped as in the Add block menu, then the buttons that arrange blocks, then the tools. What does not fit goes in the "…"
+    /// menu at its end. Preview and Publish are in the title bar with the other buttons there.
     pub(super) fn lesson_toolbar(&mut self, root: &mut egui::Ui, _ctx: &egui::Context) {
         if !self.show_insert_bar { return; }
         let band = if root.visuals().dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(246) };
+        let has = self.blk.is_some();
+        let n_sections = self.project.as_ref().and_then(|p| p.lesson.as_ref()).map(|l| l.sections.len()).unwrap_or(1);
+        // (icon, name, tip, enabled, what it does) with None for a divider. An action is 0 move up, 1 move down, 2 duplicate, 3 delete,
+        // 4 section, 5 find, 6 spelling, 7 check, 8 settings.
+        enum Do { Add(BlockKind), Act(u8) }
+        let mut items: Vec<Option<(char, &str, String, bool, Do)>> = vec![];
+        for (n, (group, kinds)) in BlockKind::catalog().into_iter().enumerate() {
+            if n > 0 { items.push(None); }
+            for k in kinds { items.push(Some((block_icon(&k), k.label(), group.to_string(), true, Do::Add(k)))); }
+        }
+        items.push(None);
+        for (i, icon, label, tip, enabled) in [
+            (0u8, ribbon::ARROW_UP, "Move up", "Move the chosen block up", has),
+            (1, ribbon::ARROW_DOWN, "Move down", "Move the chosen block down", has),
+            (2, ribbon::COPY, "Duplicate", "Copy the chosen block below itself", has),
+            (3, ribbon::TRASH, "Delete", "Delete the chosen block", has),
+            (4, ribbon::FILE_PLUS, "+ Section", "Add a section after this one", n_sections > 0),
+        ] { items.push(Some((icon, label, tip.to_string(), enabled, Do::Act(i)))); }
+        items.push(None);
+        for (i, icon, label, tip) in [
+            (5u8, ribbon::MAGNIFY, "Find", "Find and replace"),
+            (6, ribbon::TEXT_AA, "Spelling", "Check spelling (F7)"),
+            (7, ribbon::CHECK, "Check", "Check the lesson for problems"),
+            (8, ribbon::GEAR, "Lesson settings", "The lesson's title, theme and options"),
+        ] { items.push(Some((icon, label, tip.to_string(), true, Do::Act(i)))); }
+        let dividers: Vec<bool> = items.iter().map(|e| e.is_none()).collect();
+        let mut chosen: Option<usize> = None;
         egui::Panel::top("lessonbar").frame(egui::Frame::new().fill(band).inner_margin(egui::Margin::symmetric(8, 3))).show_separator_line(false).show(root, |ui| {
-            // The buttons sit in the middle of the bar; how wide they come to is known from the frame before.
-            let width_id = ui.id().with("lesson-bar-width");
-            let avail = ui.available_width();
-            let known: f32 = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(avail);
-            let pad = ((avail - known) / 2.0).max(0.0);
-            let (mut left, mut right, mut first_top, mut wrapped) = (f32::MAX, 0.0f32, None::<f32>, false);
-            let has = self.blk.is_some();
-            let n_sections = self.project.as_ref().and_then(|p| p.lesson.as_ref()).map(|l| l.sections.len()).unwrap_or(1);
-            let mut add: Option<BlockKind> = None;
-            // 0 move up, 1 move down, 2 duplicate, 3 delete, 4 section, 5 find, 6 spelling, 7 check, 8 settings
-            let mut act: Option<u8> = None;
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                ui.spacing_mut().button_padding = egui::vec2(5.0, 4.0);
-                ui.add_space(pad);
-                let mut seen = |r: &egui::Response| {
-                    left = left.min(r.rect.left());
-                    right = right.max(r.rect.right());
-                    match first_top { None => first_top = Some(r.rect.top()), Some(t) => if (r.rect.top() - t).abs() > 4.0 { wrapped = true; } }
-                };
-                let button = |ui: &mut egui::Ui, icon: char, label: &str, tip: &str, enabled: bool| -> egui::Response {
-                    let b = egui::Button::new(egui::RichText::new(icon.to_string()).font(egui::FontId::new(18.0, ribbon::icons())).color(ui.visuals().text_color())).frame(false).min_size(egui::vec2(30.0, 28.0));
-                    let r = ui.add_enabled(enabled, b);
-                    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-                    r.on_hover_ui(|ui| { ui.strong(label); if !tip.is_empty() { ui.weak(tip); } })
-                };
-                let divide = |ui: &mut egui::Ui| { ui.add_space(6.0); ui.separator(); ui.add_space(6.0); };
-                for (n, (group, kinds)) in BlockKind::catalog().into_iter().enumerate() {
-                    if n > 0 { divide(ui); }
-                    for k in kinds {
-                        let r = button(ui, block_icon(&k), k.label(), group, true);
-                        seen(&r);
-                        if r.clicked() { add = Some(k); }
-                    }
+            ribbon::overflow_row(ui, &dividers, &mut |ui, i, in_menu| {
+                let Some((icon, label, tip, enabled, _)) = items[i].as_ref() else { return };
+                if in_menu {
+                    let r = ui.add_enabled_ui(*enabled, |ui| ribbon::menu_item(ui, *icon, label)).inner;
+                    if r.on_hover_text(tip).clicked() { chosen = Some(i); ui.close(); }
+                    return;
                 }
-                divide(ui);
-                for (i, icon, label, tip, enabled) in [
-                    (0u8, ribbon::ARROW_UP, "Move up", "Move the chosen block up", has),
-                    (1, ribbon::ARROW_DOWN, "Move down", "Move the chosen block down", has),
-                    (2, ribbon::COPY, "Duplicate", "Copy the chosen block below itself", has),
-                    (3, ribbon::TRASH, "Delete", "Delete the chosen block", has),
-                    (4, ribbon::FILE_PLUS, "+ Section", "Add a section after this one", n_sections > 0),
-                ] {
-                    let r = button(ui, icon, label, tip, enabled);
-                    seen(&r);
-                    if r.clicked() { act = Some(i); }
-                }
-                divide(ui);
-                for (i, icon, label, tip) in [
-                    (5u8, ribbon::MAGNIFY, "Find", "Find and replace"),
-                    (6, ribbon::TEXT_AA, "Spelling", "Check spelling (F7)"),
-                    (7, ribbon::CHECK, "Check", "Check the lesson for problems"),
-                    (8, ribbon::GEAR, "Lesson settings", "The lesson's title, theme and options"),
-                ] {
-                    let r = button(ui, icon, label, tip, true);
-                    seen(&r);
-                    if r.clicked() { act = Some(i); }
-                }
+                let b = egui::Button::new(egui::RichText::new(icon.to_string()).font(egui::FontId::new(18.0, ribbon::icons())).color(ui.visuals().text_color())).frame(false);
+                let r = ui.add_enabled(*enabled, b.min_size(egui::vec2(ribbon::BAR_BTN, ribbon::BAR_H)));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, *enabled, *label));
+                let r = r.on_hover_ui(|ui| { ui.strong(*label); if !tip.is_empty() { ui.weak(tip); } });
+                if r.clicked() { chosen = Some(i); }
             });
-            let width = if wrapped || right <= left { avail } else { right - left };
-            if (width - known).abs() > 0.5 { ui.ctx().data_mut(|d| d.insert_temp(width_id, width)); ui.ctx().request_repaint(); }
-            if let Some(k) = add { self.add_block(k); }
-            match act {
-                Some(0) => self.move_block(-1),
-                Some(1) => self.move_block(1),
-                Some(2) => self.duplicate_block(),
-                Some(3) => self.delete_block(),
-                Some(4) => self.add_section(),
-                Some(5) => { self.find.get_or_insert_with(Default::default).focus = true; }
-                Some(6) => self.open_spelling(),
-                Some(7) => { self.check_results = self.project.as_ref().map(|p| p.check()); }
-                Some(8) => self.lesson_settings = true,
-                _ => {}
-            }
         });
+        let Some(i) = chosen else { return };
+        match items.swap_remove(i) {
+            Some((_, _, _, _, Do::Add(k))) => self.add_block(k),
+            Some((_, _, _, _, Do::Act(a))) => match a {
+                0 => self.move_block(-1),
+                1 => self.move_block(1),
+                2 => self.duplicate_block(),
+                3 => self.delete_block(),
+                4 => self.add_section(),
+                5 => { self.find.get_or_insert_with(Default::default).focus = true; }
+                6 => self.open_spelling(),
+                7 => { self.check_results = self.project.as_ref().map(|p| p.check()); }
+                _ => self.lesson_settings = true,
+            },
+            None => {}
+        }
     }
 
     /// Move a block to a place in the lesson: before or after another block, or to the start of a section.
@@ -444,6 +427,8 @@ impl App {
 
         // The Outline and Properties are tabs of the same dock as in a media lesson: pinned to any side, or windows of their own.
         self.lesson_panels(root, ctx);
+        // The insert bar sits at the top of what is left, between the panels, as it does for a slide.
+        self.lesson_toolbar(root, ctx);
         // The preview is the working area: the drop strips for the left and top edges run along it, as they do along a slide.
         egui::CentralPanel::default().show(root, |ui| {
             let area = ui.max_rect();
