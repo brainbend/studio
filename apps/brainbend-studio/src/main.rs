@@ -1038,8 +1038,8 @@ impl App {
     fn tab_visible(&self, g: usize) -> bool {
         match Self::tool_of(g) {
             Some(t) => self.tool_open(t) && self.can_dock_here(),
-            // A web lesson has two panels of its own: the Outline (in the Slide List's place) and Properties.
-            None if self.is_web_lesson() => (g == 0 || g == P_SLIDES) && self.panel_shown(g),
+            // A web lesson has the Outline (in the Slide List's place), Properties and AI; the rest belong to slides.
+            None if self.is_web_lesson() => (g == 0 || g == 2 || g == P_SLIDES) && self.panel_shown(g),
             None => self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
     }
@@ -1229,7 +1229,7 @@ impl App {
     /// What a tab shows: its panel's body, or its tool.
     fn panel_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, g: usize, wants: &mut SideWants) {
         if self.is_web_lesson() {
-            match g { 0 => self.lesson_properties(ui, ctx), P_SLIDES => self.lesson_outline(ui, ctx), _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); } }
+            match g { 0 => self.lesson_properties(ui, ctx), 2 => self.ai_panel(ui), P_SLIDES => self.lesson_outline(ui, ctx), _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); } }
             return;
         }
         match g {
@@ -12821,6 +12821,8 @@ mod tests {
         assert!(h.state().tab_visible(P_SLIDES) && h.state().tab_visible(0));
         assert!(!h.state().tab_visible(P_TIMELINE) && !h.state().tab_visible(dock::LAYERS), "the media panels stay out of a web lesson");
         assert_eq!(h.state().tab_labels(&[P_SLIDES], 0)[0].1, "Outline");
+        assert!(h.state().tab_visible(2), "AI is there too");
+        assert_eq!(h.state().area_of(2), Area::Side, "AI starts beside Properties at the right");
         for area in [Area::Bottom, Area::Top, Area::Side, Area::Window, Area::Left] {
             h.state_mut().set_area(P_SLIDES, area);
             h.run_steps(4);
