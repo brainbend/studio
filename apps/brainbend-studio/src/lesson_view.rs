@@ -454,6 +454,8 @@ impl App {
     /// The dock's edges and the panels that are windows, drawn around the working area (a section's preview, the Table of Contents, the Scene View).
     pub(crate) fn dock_panels(&mut self, root: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) {
         let mut wants = SideWants::default();
+        // Arriving on the Scene View or the Table of Contents, the Project Settings are what shows first, with AI beside them.
+        if self.project_view() && !self.tab_visible(self.right_tab) { self.right_tab = P_PROJECT; }
         self.sync_current_in();
         let window = ctx.content_rect();
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });

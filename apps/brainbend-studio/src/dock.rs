@@ -128,7 +128,9 @@ impl Layout {
     }
 
     /// The slide list on its own at the left, as it has always been.
-    fn slide_list(&mut self) -> Vec<Lane> { let g = self.group(vec![SLIDES], 1.0); vec![self.lane(vec![g])] }
+    /// The left edge starts with the slide list, and the Project Settings behind it: they never show together (the slide list belongs to a slide's view,
+    /// the Project Settings to the Scene View and the Table of Contents), so the one group serves both.
+    fn slide_list(&mut self) -> Vec<Lane> { let g = self.group(vec![SLIDES, PROJECT], 1.0); vec![self.lane(vec![g])] }
 
     fn id(&mut self) -> u32 { self.next += 1; self.next }
     fn group(&mut self, tabs: Vec<usize>, share: f32) -> Group { let current = tabs.first().copied().unwrap_or(0); Group { id: self.id(), tabs, current, share } }

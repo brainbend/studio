@@ -318,10 +318,8 @@ impl App {
         });
         ribbon::format_panel::section(ui, "scoring", "Scoring", false, |ui| {
             let proj = self.project.as_mut().unwrap();
-            ui.horizontal(|ui| {
-                changed |= ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed();
-                ui.weak("Pass mark: the score a learner needs to pass.");
-            });
+            changed |= ui.add(egui::DragValue::new(&mut proj.pass_mark).range(0..=100).suffix(" %")).changed();
+            ui.weak("Pass mark: the score a learner needs to pass the lesson.");
         });
         ribbon::format_panel::section(ui, "brand", "Brand", false, |ui| {
             let proj = self.project.as_mut().unwrap();

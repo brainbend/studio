@@ -809,7 +809,7 @@ fn load_dock() -> dock::Layout {
     let mut l = prefs::get_str("dock_layout").and_then(|s| dock::Layout::from_json(&s)).unwrap_or_default();
     let mut start = HashMap::new();
     for t in TOOLS { if prefs::get_bool(t.key()).unwrap_or(false) { start.insert(TOOL_TAB + t.index(), dock::Edge::Right); } }
-    for g in PANEL_IDS { start.insert(g, if g == P_SLIDES { dock::Edge::Left } else if g == P_PROJECT { dock::Edge::Right } else if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
+    for g in PANEL_IDS { start.insert(g, if g == P_SLIDES { dock::Edge::Left } else if g == P_PROJECT { dock::Edge::Left } else if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
     start.insert(dock::LAYERS, dock::Edge::Right);
     let all: Vec<usize> = PANEL_IDS.iter().copied().chain([dock::LAYERS]).chain(TOOLS.iter().map(|t| TOOL_TAB + t.index())).collect();
     l.include(&all, &start);
@@ -1046,11 +1046,11 @@ impl App {
         match Self::tool_of(g) {
             Some(t) => self.tool_open(t) && self.can_dock_here(),
             // A web lesson has the Outline (in the Slide List's place), Properties and AI; the rest belong to slides. The Table of Contents has the
-            // Project settings, and Properties for a chosen card.
-            None if self.is_web_lesson() && self.toc_showing() => g == 0 && self.toc_pick == web_tabs::TocPick::Card && self.panel_shown(g),
+            // Project settings and AI, and Properties for a chosen card.
+            None if self.is_web_lesson() && self.toc_showing() => ((g == 0 && self.toc_pick == web_tabs::TocPick::Card) || g == 2) && self.panel_shown(g),
             None if self.is_web_lesson() => (g == 0 || g == 2 || g == P_SLIDES) && self.panel_shown(g),
-            // The Scene View has the Project settings and nothing about a slide.
-            None => !self.scene_view && self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
+            // The Scene View has the Project settings and AI, and nothing about a slide.
+            None => (!self.scene_view || g == 2) && self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
     }
 
@@ -11340,8 +11340,8 @@ mod tests {
         assert_eq!(p.scene_slides(1).len(), 2, "it joined the second scene");
         let mut h = harness(a);
         h.run_steps(3);
-        // Right-click the empty part of the slide list: the menu offers a new scene.
-        let at = egui::pos2(130.0, 700.0);
+        // Right-click the empty part of the Scene View (the Project Settings panel is at its left): the menu offers a new scene.
+        let at = egui::pos2(700.0, 700.0);
         h.event(egui::Event::PointerMoved(at));
         h.run_steps(1);
         h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() });
@@ -12912,7 +12912,7 @@ mod tests {
         h.run_steps(4);
         h.run_steps(8);
         assert!(h.state().toc_showing());
-        assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(2), "the dock's panels are not on the Table of Contents");
+        assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && h.state().tab_visible(2), "the Table of Contents has AI, not the Outline or Properties");
         // Its side panel holds the Project settings, and the chosen card's Properties too.
         assert!(h.query_by_label("Project Settings").is_some(), "the Project Settings tab is there");
         assert!(h.query_by_label("Properties").is_none());
@@ -13042,7 +13042,9 @@ mod tests {
         h.run_steps(4);
         assert!(h.state().tab_visible(P_PROJECT), "the Scene View has the Project panel");
         assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(P_TIMELINE), "and none of the slide's panels");
-        assert_eq!(h.state().area_of(P_PROJECT), Area::Side, "it starts at the right");
+        assert!(h.state().tab_visible(2) && h.query_by_label("AI").is_some(), "AI is there to use at once");
+        assert_eq!(h.state().area_of(P_PROJECT), Area::Left, "it starts at the left, so AI is the tab at the right");
+        assert_eq!(h.state().area_of(2), Area::Side);
         for area in [Area::Bottom, Area::Top, Area::Left, Area::Window, Area::Side] {
             h.state_mut().set_area(P_PROJECT, area);
             h.run_steps(4);
@@ -13059,7 +13061,7 @@ mod tests {
         a.new_lesson_project(ProjectKind::WebLesson);
         let mut h = harness(a);
         h.run_steps(4);
-        assert!(h.state().tab_visible(P_PROJECT));
+        assert!(h.state().tab_visible(P_PROJECT) && h.state().tab_visible(2), "the Table of Contents has AI too");
         for area in [Area::Bottom, Area::Left, Area::Window, Area::Side] {
             h.state_mut().set_area(P_PROJECT, area);
             h.run_steps(4);
