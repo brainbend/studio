@@ -459,7 +459,7 @@ impl App {
                     let _ = label;
                     if resp.clicked() { select = Some(i); e.view = (it.yaw, it.pitch, e.view.2); }
                 }
-                if pano.pins.is_empty() { ui.weak("Add a marker or a hotspot from the ribbon."); }
+                if pano.pins.is_empty() { ui.weak("Use Add marker or Draw hotspot above the picture."); }
             });
             if let Some(i) = select.filter(|i| *i < pano.pins.len()) {
                 ui.horizontal(|ui| {

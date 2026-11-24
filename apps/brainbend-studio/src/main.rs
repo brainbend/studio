@@ -7577,6 +7577,15 @@ impl App {
         self.frame_layouts = self.project.as_ref().map(|p| p.layout_slides.clone()).unwrap_or_default();
         // A press in the main window makes it the one the panels and the keys act on.
         if root.ctx().input(|i| i.pointer.any_pressed()) { self.focus_window = None; }
+        // The main window coming to the front (no click in it) is the active editor again.
+        {
+            let ctx = root.ctx().clone();
+            let key = egui::Id::new("main-window-focused");
+            let now = ctx.input(|i| i.viewport().focused);
+            let was: Option<bool> = ctx.data(|d| d.get_temp(key));
+            if let Some(now) = now { ctx.data_mut(|d| d.insert_temp(key, now)); }
+            if was == Some(false) && now == Some(true) { self.focus_window = None; }
+        }
         self.drive_tear(&root.ctx().clone());
         self.show_frame(root);
         // The editor windows are drawn whatever the main window is showing (the Scene View, say, once its only slide tab has been popped out).
@@ -13725,6 +13734,24 @@ mod tests {
         h.key_press(egui::Key::Delete);
         h.run_steps(4);
         assert_eq!(objects(&h), before, "Delete removed the state that was in view, not the button");
+    }
+
+    /// The main window coming to the front, with no click in it, is the active editor again (issue #74).
+    #[test]
+    fn gui_the_main_window_gaining_the_focus_becomes_the_active_editor() {
+        let mut a = app();
+        let mut h = harness(a);
+        h.run_steps(3);
+        let focus = |h: &mut egui_kittest::Harness<'_, App>, on: bool| {
+            h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().focused = Some(on);
+            h.step();
+        };
+        focus(&mut h, false);
+        h.state_mut().focus_window = Some(1);
+        focus(&mut h, false);
+        assert_eq!(h.state().focus_window, Some(1), "an unfocused window changes nothing");
+        focus(&mut h, true);
+        assert!(h.state().focus_window.is_none(), "the main window is the active editor once it has the focus");
     }
 
     /// Clicking an empty place on the slide while a non-starting state is open lets go of the object: the States panel stops showing its states.

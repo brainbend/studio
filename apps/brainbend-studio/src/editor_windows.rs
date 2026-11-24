@@ -193,6 +193,12 @@ impl App {
                 dropped = crate::drag_window(ui.ctx(), &tab, "editor-drag-pos");
                 // A press in the window makes it the one the panels and the keys act on.
                 if !is_pano && ui.input(|i| i.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect()) { self.focus_window = Some(id); }
+                // So does the window coming to the front (the system gave it the focus without a click in it).
+                let key = egui::Id::new(("window-focused", id));
+                let now = ui.ctx().input(|i| i.viewport().focused);
+                let was: Option<bool> = ui.ctx().data(|d| d.get_temp(key));
+                if let Some(now) = now { ui.ctx().data_mut(|d| d.insert_temp(key, now)); }
+                if !is_pano && was == Some(false) && now == Some(true) { self.focus_window = Some(id); }
                 let ctx = ui.ctx().clone();
                 if is_pano { if !self.pano_window_ui(ui, &ctx, id) { closed_here = true; } return; }
                 // The layouts' window has the list of them at its left, then the same bar and canvas as a slide's window.
