@@ -12818,6 +12818,17 @@ mod tests {
             h.run_steps(4);
             assert_eq!(h.state().area_of(P_SLIDES), area);
         }
+        // Dropping a popped-out tab on the left or top strip of the preview docks it there.
+        h.state_mut().set_area(P_SLIDES, Area::Window);
+        h.run_steps(4);
+        let canvas = h.ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("canvas-rect"))).expect("the preview is the working area");
+        for (edge, at) in [(dock::Edge::Left, canvas.left_center() + egui::vec2(8.0, 0.0)), (dock::Edge::Top, canvas.center_top() + egui::vec2(0.0, 8.0))] {
+            let (spot, _) = spot_at(&h.ctx, at).expect("a strip");
+            assert_eq!(spot, dock::Spot::EdgeEnd(edge));
+            h.state_mut().place_tab(P_SLIDES, spot);
+            h.run_steps(4);
+            assert_eq!(h.state().area_of(P_SLIDES), Area::of(Some(edge)));
+        }
         h.state_mut().set_area(0, Area::Bottom);
         h.run_steps(4);
         assert_eq!(h.state().area_of(0), Area::Bottom);

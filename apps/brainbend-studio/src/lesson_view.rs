@@ -398,7 +398,12 @@ impl App {
 
         // The Outline and Properties are tabs of the same dock as in a media lesson: pinned to any side, or windows of their own.
         self.lesson_panels(root, ctx);
-        egui::CentralPanel::default().show(root, |ui| self.lesson_preview(ui, ctx));
+        // The preview is the working area: the drop strips for the left and top edges run along it, as they do along a slide.
+        egui::CentralPanel::default().show(root, |ui| {
+            let area = ui.max_rect();
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("canvas-rect"), area));
+            self.lesson_preview(ui, ctx);
+        });
         self.lesson_settings_window(ctx);
     }
 
