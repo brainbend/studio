@@ -175,7 +175,7 @@ impl App {
         self.blk = None;
     }
 
-    fn move_section(&mut self, delta: i32) {
+    pub(super) fn move_section(&mut self, delta: i32) {
         let len = self.lesson_ref().sections.len();
         let to = self.sec as i32 + delta;
         if to < 0 || to as usize >= len { return; }
@@ -474,13 +474,17 @@ impl App {
     /// The Table of Contents: the title page of the lesson with a card for each section. Clicking the banner chooses the page itself
     /// (Properties shows its settings); clicking a card chooses its section; double-clicking a card, or its Open button, opens the section in a tab.
     fn lesson_toc(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let _ = ctx;
-        let lesson = self.lesson_ref().clone();
+                let lesson = self.lesson_ref().clone();
         let (name, theme) = { let p = self.project.as_ref().unwrap(); (p.name.clone(), p.theme.clone()) };
         let accent = { let c = theme.color(4); egui::Color32::from_rgb(c.0, c.1, c.2) };
         let dark = { let d = theme.color(2); egui::Color32::from_rgb(d.0, d.1, d.2) };
         let mut open: Option<usize> = None;
         let mut pick: Option<usize> = None;
+        // Edits made on the cards (section, title, summary), what was asked of a card's menu (section, 0 up, 1 down, 2 delete) and the + Add section button.
+        let mut edits: Vec<(usize, String, String)> = vec![];
+        let mut act: Option<(usize, u8)> = None;
+        let mut add = false;
+        let before = Snap::of(self.project.as_ref().unwrap());
         let mut pick_toc = false;
         let mut turn_on = false;
         let mut settings = false;
@@ -495,7 +499,7 @@ impl App {
                     ui.set_width(w);
                     ui.add_space(12.0);
                     if !lesson.show_toc {
-                        egui::Frame::new().stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color)).corner_radius(8).inner_margin(10).show(ui, |ui| {
+                        egui::Frame::new().stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color)).corner_radius(4).inner_margin(10).show(ui, |ui| {
                             ui.set_width(w - 22.0);
                             ui.label("The table of contents is off, so learners start in the first section. It stays here so you can turn it back on.");
                             if ui.button("Turn it on").clicked() { turn_on = true; }
@@ -503,7 +507,7 @@ impl App {
                         ui.add_space(12.0);
                     }
                     let c = lesson.cover.clone().unwrap_or_default();
-                    let banner = egui::Frame::new().fill(dark).corner_radius(12).inner_margin(24).stroke(if self.toc_pick == web_tabs::TocPick::Header { egui::Stroke::new(2.0, accent) } else { egui::Stroke::NONE }).show(ui, |ui| {
+                    let banner = egui::Frame::new().fill(dark).corner_radius(4).inner_margin(24).stroke(if self.toc_pick == web_tabs::TocPick::Header { egui::Stroke::new(2.0, accent) } else { egui::Stroke::NONE }).show(ui, |ui| {
                         ui.set_width(w - 48.0);
                         let on = egui::Color32::WHITE;
                         ui.label(egui::RichText::new(&name).size(30.0).strong().color(on));
@@ -517,26 +521,48 @@ impl App {
                     for (si, s) in lesson.sections.iter().enumerate() {
                         let selected = self.toc_pick == web_tabs::TocPick::Card && self.sec == si;
                         let stroke = if selected { egui::Stroke::new(2.0, accent) } else { egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color) };
-                        let card = egui::Frame::new().stroke(stroke).corner_radius(8).inner_margin(12).show(ui, |ui| {
+                        let (mut title, mut summary) = (s.title.clone(), s.summary.clone());
+                        let card = egui::Frame::new().stroke(stroke).corner_radius(4).inner_margin(12).show(ui, |ui| {
                             ui.set_width(w - 26.0);
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(format!("Module {}", si + 1)).size(12.0).color(accent));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.small_button("Open").clicked() { open = Some(si); }
+                                    ui.menu_button("...", |ui| {
+                                        if ui.add_enabled(si > 0, egui::Button::new("Move up")).clicked() { act = Some((si, 0)); ui.close(); }
+                                        if ui.add_enabled(si + 1 < lesson.sections.len(), egui::Button::new("Move down")).clicked() { act = Some((si, 1)); ui.close(); }
+                                        ui.separator();
+                                        if ui.add_enabled(lesson.sections.len() > 1, egui::Button::new("Delete section")).clicked() { act = Some((si, 2)); ui.close(); }
+                                    }).response.on_hover_text("Move or delete this section");
+                                    if ui.small_button("Open").on_hover_text("Open this section in a tab").clicked() { open = Some(si); }
                                 });
                             });
-                            ui.label(egui::RichText::new(if s.title.trim().is_empty() { "(untitled section)" } else { s.title.as_str() }).size(18.0).strong());
-                            if !s.summary.is_empty() { ui.label(s.summary.as_str()); }
+                            let t = ui.add(egui::TextEdit::singleline(&mut title).font(egui::FontId::proportional(18.0)).hint_text("Section title").desired_width(f32::INFINITY));
+                            let u = ui.add(egui::TextEdit::multiline(&mut summary).hint_text("Summary shown on this card").desired_rows(2).desired_width(f32::INFINITY));
+                            if t.changed() || u.changed() { edits.push((si, title.clone(), summary.clone())); }
                             ui.weak(format!("{} block{}", s.blocks.len(), if s.blocks.len() == 1 { "" } else { "s" }));
                         });
-                        let resp = ui.interact(card.response.rect, egui::Id::new(("toc-card", si)), egui::Sense::click());
-                        if resp.double_clicked() { open = Some(si); } else if resp.clicked() { pick = Some(si); }
+                        // Pressing anywhere on a card, its fields included, chooses it.
+                        let r = card.response.rect;
+                        if ui.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| r.contains(p))) && ui.rect_contains_pointer(r) { pick = Some(si); }
                         ui.add_space(8.0);
                     }
+                    if ui.button("+ Add section").clicked() { add = true; }
                     ui.add_space(24.0);
                 });
             });
         });
+        if !edits.is_empty() {
+            let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
+            if !(self.edit_open && editing) { self.undo.push(before); self.redo.clear(); }
+            self.edit_open = true;
+            self.dirty = true;
+            for (si, t, u) in edits { if let Some(s) = self.lesson_mut().sections.get_mut(si) { s.title = t; s.summary = u; } }
+        }
+        if let Some((si, what)) = act {
+            self.sec = si; self.blk = None; self.toc_pick = web_tabs::TocPick::Card;
+            match what { 0 => self.move_section(-1), 1 => self.move_section(1), _ => self.delete_section() }
+        }
+        if add { self.add_section(); self.toc_pick = web_tabs::TocPick::Card; }
         if settings { self.lesson_settings = true; }
         if turn_on { self.snapshot(); self.lesson_mut().show_toc = true; }
         if pick_toc { self.toc_pick = web_tabs::TocPick::Header; self.blk = None; }
@@ -569,7 +595,7 @@ impl App {
                         for (bi, b) in s.blocks.iter().enumerate() {
                             let selected = self.sec == si && self.blk == Some(bi);
                             let stroke = if selected { egui::Stroke::new(2.0, accent) } else { egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color) };
-                            let frame = egui::Frame::new().stroke(stroke).corner_radius(8).inner_margin(10).show(ui, |ui| {
+                            let frame = egui::Frame::new().stroke(stroke).corner_radius(4).inner_margin(10).show(ui, |ui| {
                                 ui.set_width(w - 22.0);
                                 self.block_preview(ui, ctx, &b.kind, accent);
                             });
@@ -653,9 +679,9 @@ impl App {
                     let (nw, nh) = (tw * cw, th * ch);
                     let k = (max_w.min(ui.available_width()) / nw.max(1.0)).min(1.0);
                     let uv = egui::Rect::from_min_max(egui::pos2(c[0], c[1]), egui::pos2(1.0 - c[2], 1.0 - c[3]));
-                    ui.add(egui::Image::new(&tex).uv(uv).fit_to_exact_size(egui::vec2(nw * k, nh * k)).corner_radius(6));
+                    ui.add(egui::Image::new(&tex).uv(uv).fit_to_exact_size(egui::vec2(nw * k, nh * k)).corner_radius(4));
                 }
-                None => { ui.add(egui::Image::new(&tex).max_width(max_w.min(ui.available_width())).corner_radius(6)); }
+                None => { ui.add(egui::Image::new(&tex).max_width(max_w.min(ui.available_width())).corner_radius(4)); }
             },
             None => { ui.label(egui::RichText::new(empty).italics().color(ui.visuals().weak_text_color())); }
         }

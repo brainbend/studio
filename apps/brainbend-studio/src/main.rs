@@ -11842,6 +11842,8 @@ mod tests {
     fn lesson_app(kind: ProjectKind) -> egui_kittest::Harness<'static, App> {
         let mut a = App::default();
         a.new_lesson_project(kind);
+        // (A lesson opens on its Table of Contents; these tests write in the first section.)
+        a.web_open_section(0);
         let mut h = harness(a);
         h.run_steps(2);
         h
@@ -12752,6 +12754,7 @@ mod tests {
     fn web_outline_blocks_and_sections_move_to_where_they_are_dropped() {
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         a.add_section();
         for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3) { a.add_block(k); }
         a.sec = 0; a.blk = None;
@@ -12786,6 +12789,7 @@ mod tests {
         // The web outline.
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3) { a.add_block(k); }
         let mut h = harness(a);
         h.run_steps(3);
@@ -12814,6 +12818,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         a.add_block(brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).next().unwrap());
         a.add_section();
         let mut h = harness(a);
@@ -12887,10 +12892,14 @@ mod tests {
         let ids: Vec<String> = a.lesson_ref().sections.iter().map(|s| s.id.clone()).collect();
         let mut h = harness(a);
         h.run_steps(4);
-        // A lesson opens with the Table of Contents and the section being written, which is the one showing.
+        // A lesson opens on its Table of Contents, alone in the strip, with nothing chosen.
+        assert_eq!(h.state().web_tabs, vec![WebTab::Toc]);
+        assert!(h.state().toc_showing());
+        assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES));
+        h.state_mut().web_open_section(0);
+        h.run_steps(3);
+        assert!(!h.state().toc_showing(), "opening a section shows it beside the Table of Contents");
         assert_eq!(h.state().web_tabs.len(), 2);
-        assert_eq!(h.state().web_tabs[0], WebTab::Toc);
-        assert!(!h.state().toc_showing());
         assert!(h.query_by_label_contains("TABLE OF CONTENTS").is_some(), "the strip names the Table of Contents");
         assert!(h.query_by_label("New tab").is_some(), "and has a +");
         // The Table of Contents tab shows the cards, and the insert bar has nothing to add to there.
@@ -12954,6 +12963,39 @@ mod tests {
     }
 
     #[test]
+    fn gui_the_cards_of_the_table_of_contents_edit_add_move_and_delete_sections() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.get_by_label_contains("TABLE OF CONTENTS").click();
+        h.run_steps(4);
+        // A new section, with a card to write in.
+        h.get_by_label("+ Add section").click();
+        h.run_steps(3);
+        assert_eq!(h.state().lesson_ref().sections.len(), 2);
+        assert!(h.state().tab_visible(0), "choosing a card brings Properties");
+        // Typing in a card's title changes the section, and Undo takes it back.
+        // (Properties has the title too, and the tab shows it; the card's field is the one in the middle of the page.)
+        let title = h.query_all_by_value("Section 2").filter(|n| { let r = n.rect(); r.center().x > 400.0 && r.center().x < 1100.0 && r.top() > 100.0 }).next().expect("the card's title field");
+        title.click();
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.event(egui::Event::Text("Hazards".into()));
+        h.run_steps(3);
+        assert_eq!(h.state().lesson_ref().sections[1].title, "Hazards");
+        // Move up and delete from the card's menu.
+        h.state_mut().sec = 1;
+        h.state_mut().move_section(-1);
+        h.run_steps(2);
+        assert_eq!(h.state().lesson_ref().sections[0].title, "Hazards");
+        h.state_mut().delete_section();
+        h.run_steps(2);
+        assert_eq!(h.state().lesson_ref().sections.len(), 1);
+    }
+
+    #[test]
     fn shot_list_modes() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
         let mk = |a: App| {
@@ -13010,6 +13052,7 @@ mod tests {
     fn gui_web_lesson_panels_dock_to_any_side_and_pop_out() {
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         a.add_block(brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).next().unwrap());
         let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 830.0)).build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
         install_fonts(&h.ctx);
@@ -13055,6 +13098,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         a.show_insert_bar = true;
         // With the panels off the bar has the whole window, so every button shows.
         a.panels.slides = false;
@@ -13090,6 +13134,7 @@ mod tests {
         // A web lesson between its two panels.
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         a.show_insert_bar = true;
         let mut h = harness(a);
         h.run_steps(4);
@@ -13119,6 +13164,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut a = App::default();
         a.new_lesson_project(ProjectKind::WebLesson);
+        a.web_open_section(0);
         let kinds: Vec<_> = brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3).collect();
         for k in kinds { a.add_block(k); }
         a.add_section();

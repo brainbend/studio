@@ -1,7 +1,7 @@
 //! The tab strip of a web lesson: the Table of Contents (the title page with a card for each section) and a tab for each section
 //! that is open, the way a media lesson has the Scene View and a tab for each slide.
 //!
-//! - The first tab is the Table of Contents. The "+" adds another one; opening a section from an extra one turns it into the
+//! - A lesson opens on its Table of Contents, the first tab. The "+" adds another one; opening a section from an extra one turns it into the
 //!   section's tab. Opening a section from the only Table of Contents tab leaves that tab where it is and opens the section beside it.
 //! - A section's tab shows that section alone. The Outline, the cards and the insert bar all work on the chosen section (`App::sec`).
 //! - The strip is kept for the session; the file does not remember which tabs were open.
@@ -37,9 +37,10 @@ impl App {
         let ids = self.web_section_ids();
         if ids.is_empty() { return; }
         if self.web_tabs.is_empty() {
-            // A lesson opens with its first section beside the Table of Contents, ready to write in.
-            self.web_tabs = vec![WebTab::Toc, WebTab::Section(ids[0].clone())];
-            self.web_active = 1;
+            // A lesson opens on its Table of Contents: the author adds sections there and opens one to write in it.
+            self.web_tabs = vec![WebTab::Toc];
+            self.web_active = 0;
+            self.toc_pick = TocPick::Nothing;
             self.sec = 0;
             self.blk = None;
         }
