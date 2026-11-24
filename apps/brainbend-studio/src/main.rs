@@ -1038,6 +1038,8 @@ impl App {
     fn tab_visible(&self, g: usize) -> bool {
         match Self::tool_of(g) {
             Some(t) => self.tool_open(t) && self.can_dock_here(),
+            // A web lesson has two panels of its own: the Outline (in the Slide List's place) and Properties.
+            None if self.is_web_lesson() => (g == 0 || g == P_SLIDES) && self.panel_shown(g),
             None => self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
     }
@@ -1133,6 +1135,7 @@ impl App {
             1 => { let n = self.trigger_count(slide_idx); if n > 0 { format!("Triggers ({n})") } else { "Triggers".to_string() } }
             2 => if self.mcp.running() { "AI •".to_string() } else { "AI".to_string() },
             // In the Layout Builder the slide list's place holds the layouts.
+            P_SLIDES if self.is_web_lesson() => "Outline".to_string(),
             P_SLIDES if self.in_master_view() => "Layouts".to_string(),
             _ => match Self::tool_of(g) { Some(t) => t.title().to_string(), None => Self::panel_title(g).to_string() },
         })).collect()
@@ -1225,6 +1228,10 @@ impl App {
 
     /// What a tab shows: its panel's body, or its tool.
     fn panel_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, g: usize, wants: &mut SideWants) {
+        if self.is_web_lesson() {
+            match g { 0 => self.lesson_properties(ui, ctx), P_SLIDES => self.lesson_outline(ui, ctx), _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); } }
+            return;
+        }
         match g {
             0 => self.properties_body(ui, ctx, slide_idx, wants),
             1 => self.triggers_panel(ui, ctx, slide_idx),
@@ -1276,7 +1283,9 @@ impl App {
     }
 
     /// Docking needs the side panel: the 360° editor and a web lesson have their own.
-    fn can_dock_here(&self) -> bool { self.pano.edit.is_none() && !self.project.as_ref().is_some_and(|p| p.is_web()) }
+    fn can_dock_here(&self) -> bool { self.pano.edit.is_none() }
+
+    fn is_web_lesson(&self) -> bool { self.project.as_ref().is_some_and(|p| p.is_web()) }
 
     /// The tools that are open and docked in the side panel, in the order they were docked.
     fn docked_open(&self) -> Vec<Tool> { self.docked.iter().copied().filter(|t| self.tool_open(*t) && self.can_dock_here() && self.area_of(TOOL_TAB + t.index()) == Area::Side).collect() }
@@ -1372,7 +1381,7 @@ impl App {
         if self.file_view || self.project.is_none() { return; }
         let editable = !self.try_mode;
         for g in self.tabs_in(Area::Window) {
-            let title = Self::panel_title(g);
+            let title = if g == P_SLIDES && self.is_web_lesson() { "Outline" } else { Self::panel_title(g) };
             let size = if g >= P_TIMELINE && g != dock::LAYERS { [760.0, 300.0] } else { [380.0, 640.0] };
             let mut open = true;
             let mut closed_here = false;
@@ -12718,7 +12727,7 @@ mod tests {
         for m in list_view::ListMode::ALL {
             h.state_mut().outline_list = m;
             h.run_steps(3);
-            assert!(h.query_by_label("Outline").is_some(), "{} mode draws", m.label());
+            assert!(h.query_all_by_label("Outline").count() >= 1, "{} mode draws", m.label());
         }
         for label in ["Large", "Icons", "Text"] { assert!(h.query_by_label(label).is_some(), "the {label} button is there"); }
         // The media lesson's slide list, with a second slide to click.
@@ -12786,6 +12795,37 @@ mod tests {
             h.run_steps(8);
             h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(name)).unwrap();
         }
+    }
+
+    #[test]
+    fn gui_web_lesson_panels_dock_to_any_side_and_pop_out() {
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.add_block(brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).next().unwrap());
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 830.0)).build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+        install_fonts(&h.ctx);
+        install_theme(&h.ctx);
+        h.run_steps(2);
+        *h.state_mut() = a;
+        h.run_steps(4);
+        assert_eq!(h.state().area_of(P_SLIDES), Area::Left, "the Outline starts at the left");
+        assert_eq!(h.state().area_of(0), Area::Side, "Properties starts at the right");
+        assert!(h.state().tab_visible(P_SLIDES) && h.state().tab_visible(0));
+        assert!(!h.state().tab_visible(P_TIMELINE) && !h.state().tab_visible(dock::LAYERS), "the media panels stay out of a web lesson");
+        assert_eq!(h.state().tab_labels(&[P_SLIDES], 0)[0].1, "Outline");
+        for area in [Area::Bottom, Area::Top, Area::Side, Area::Window, Area::Left] {
+            h.state_mut().set_area(P_SLIDES, area);
+            h.run_steps(4);
+            assert_eq!(h.state().area_of(P_SLIDES), area);
+        }
+        h.state_mut().set_area(0, Area::Bottom);
+        h.run_steps(4);
+        assert_eq!(h.state().area_of(0), Area::Bottom);
+        h.state_mut().set_area(0, Area::Window);
+        h.run_steps(4);
+        assert!(h.state().tabs_in(Area::Window).contains(&0));
+        h.state_mut().apply_preset(dock::Preset::Standard);
+        h.run_steps(2);
     }
 
     #[test]

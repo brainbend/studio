@@ -260,7 +260,7 @@ impl App {
 
     /// The Outline: the sections and their blocks in the order of the page, in the mode the panel was left in. A section opens and closes;
     /// double-click renames it; drag moves a block or a section; right-click has the rest.
-    fn lesson_outline(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(super) fn lesson_outline(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         use list_view::{drop_line, mode_bar, row, RowSpec};
         ui.horizontal(|ui| {
             ui.strong("Outline");
@@ -396,17 +396,24 @@ impl App {
     pub(super) fn lesson_ui(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         self.clamp_lesson_selection();
 
-        // ---- outline ----
-        egui::Panel::left("lesson-outline").default_size(270.0).show(root, |ui| { self.lesson_outline(ui, ctx); });
-
-        // ---- properties ----
-        egui::Panel::right("lesson-props").default_size(330.0).show(root, |ui| {
-            self.lesson_properties(ui, ctx);
-        });
-
-        // ---- preview ----
+        // The Outline and Properties are tabs of the same dock as in a media lesson: pinned to any side, or windows of their own.
+        self.lesson_panels(root, ctx);
         egui::CentralPanel::default().show(root, |ui| self.lesson_preview(ui, ctx));
         self.lesson_settings_window(ctx);
+    }
+
+    /// The dock's edges and the panels that are windows, drawn around the preview.
+    fn lesson_panels(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
+        let mut wants = SideWants::default();
+        self.sync_current_in();
+        let window = ctx.content_rect();
+        ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
+        for edge in [dock::Edge::Left, dock::Edge::Right] { self.dock_edge(root, ctx, edge, 0, &mut wants); }
+        self.panel_windows(ctx, 0, &mut wants);
+        for edge in [dock::Edge::Top, dock::Edge::Bottom] { self.dock_edge(root, ctx, edge, 0, &mut wants); }
+        ctx.data_mut(|d| { let next: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); d.insert_temp(egui::Id::new("group-rects"), next); });
+        dock_drag_overlay(ctx);
+        self.sync_current_out();
     }
 
     /// A close-enough picture of the published lesson; the real page is one click away in Preview.
@@ -704,7 +711,7 @@ fn block_editor(ui: &mut egui::Ui, id: &str, kind: &mut BlockKind, names: &std::
 }
 
 impl App {
-    fn lesson_properties(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    pub(super) fn lesson_properties(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let before = Snap::of(self.project.as_ref().unwrap());
         let mut ctr = self.id_counter;
         let t0 = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
