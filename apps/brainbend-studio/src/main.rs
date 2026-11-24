@@ -1036,7 +1036,7 @@ impl App {
     }
 
     fn panel_title(g: usize) -> &'static str {
-        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", P_SLIDES => "Slide List", P_PROJECT => "Project", _ => "States" }
+        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", P_SLIDES => "Slide List", P_PROJECT => "Project Settings", _ => "States" }
     }
 
     /// Whether a tab shows where it is: a panel that is on in Studio Settings (Slide Layers is not part of the Layout Builder), or a
@@ -12914,7 +12914,7 @@ mod tests {
         assert!(h.state().toc_showing());
         assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(2), "the dock's panels are not on the Table of Contents");
         // Its side panel holds the Project settings, and the chosen card's Properties too.
-        assert!(h.query_by_label("Project").is_some(), "the Project tab is there");
+        assert!(h.query_by_label("Project Settings").is_some(), "the Project Settings tab is there");
         assert!(h.query_by_label("Properties").is_none());
         assert!(h.query_by_label("Lesson").is_some() && h.query_by_label("Title banner").is_some() && h.query_by_label("Colors and fonts").is_some(), "with the lesson's settings in groups");
         open_bars(&h, 10, &["toc"]);
@@ -13020,7 +13020,7 @@ mod tests {
         assert!(a.scene_view, "a new project opens on its Scene View");
         let mut h = harness(a);
         h.run_steps(4);
-        assert!(h.query_by_label("Project").is_some(), "the side panel has a Project tab");
+        assert!(h.query_by_label("Project Settings").is_some(), "the side panel has a Project Settings tab");
         assert!(h.query_by_label("Slide size").is_some() && h.query_by_label("Scoring").is_some() && h.query_by_label("Brand").is_some(), "with the project's settings in groups");
         open_bars(&h, 10, &["scoring"]);
         h.run_steps(12);

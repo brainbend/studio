@@ -1230,7 +1230,7 @@ pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
             ui.checkbox(&mut d.panels.layers, "Slide Layers");
         });
         ui.label("Scene View and Table of Contents");
-        ui.checkbox(&mut d.panels.project, "Project").on_hover_text("The project's settings, beside the Scene View and the Table of Contents");
+        ui.checkbox(&mut d.panels.project, "Project Settings").on_hover_text("The project's settings, beside the Scene View and the Table of Contents");
 }
 
 impl App {
