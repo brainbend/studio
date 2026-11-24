@@ -453,8 +453,9 @@ impl App {
 
     /// The dock's edges and the panels that are windows, drawn around the preview.
     fn lesson_panels(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
-        // The Table of Contents has no panels until a card or the banner is chosen (Properties then has its settings).
-        if self.toc_showing() && self.toc_pick == web_tabs::TocPick::Nothing && !TOOLS.iter().any(|t| self.tool_open(*t)) {
+        // The Table of Contents has one side panel: the Project settings (and the chosen card's Properties), as the Scene View has.
+        if self.toc_showing() {
+            self.project_side_panel(root, ctx);
             let window = ctx.content_rect();
             ctx.data_mut(|d| { d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects")); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); d.insert_temp(egui::Id::new("root-rect"), window); });
             return;
@@ -471,8 +472,8 @@ impl App {
         self.sync_current_out();
     }
 
-    /// The Table of Contents: the title page of the lesson with a card for each section. Clicking the banner chooses the page itself
-    /// (Properties shows its settings); clicking a card chooses its section; double-clicking a card, or its Open button, opens the section in a tab.
+    /// The Table of Contents: the title page of the lesson with a card for each section. The cards are written in here; choosing one shows its
+    /// Properties beside the Project settings, and its Open button opens the section in a tab.
     fn lesson_toc(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
                 let lesson = self.lesson_ref().clone();
         let (name, theme) = { let p = self.project.as_ref().unwrap(); (p.name.clone(), p.theme.clone()) };
@@ -485,11 +486,7 @@ impl App {
         let mut act: Option<(usize, u8)> = None;
         let mut add = false;
         let before = Snap::of(self.project.as_ref().unwrap());
-        let mut pick_toc = false;
         let mut turn_on = false;
-        let mut settings = false;
-        // Clicking the page between the cards chooses the page itself.
-        let cleared = ui.interact(ui.max_rect(), egui::Id::new("toc-bg"), egui::Sense::click()).clicked();
         egui::ScrollArea::vertical().id_salt("lesson-toc").auto_shrink([false, false]).show(ui, |ui| {
             let w = ui.available_width().min(760.0);
             let pad = ((ui.available_width() - w) / 2.0).max(0.0);
@@ -507,16 +504,13 @@ impl App {
                         ui.add_space(12.0);
                     }
                     let c = lesson.cover.clone().unwrap_or_default();
-                    let banner = egui::Frame::new().fill(dark).corner_radius(4).inner_margin(24).stroke(if self.toc_pick == web_tabs::TocPick::Header { egui::Stroke::new(2.0, accent) } else { egui::Stroke::NONE }).show(ui, |ui| {
+                    egui::Frame::new().fill(dark).corner_radius(4).inner_margin(24).show(ui, |ui| {
                         ui.set_width(w - 48.0);
                         let on = egui::Color32::WHITE;
                         ui.label(egui::RichText::new(&name).size(30.0).strong().color(on));
                         if !c.subtitle.is_empty() { ui.label(egui::RichText::new(&c.subtitle).size(16.0).color(on)); }
                         if !c.description.is_empty() { ui.label(egui::RichText::new(&c.description).size(14.0).color(on)); }
                     });
-                    let b = ui.interact(banner.response.rect, egui::Id::new("toc-banner"), egui::Sense::click());
-                    if b.double_clicked() { settings = true; } else if b.clicked() { pick_toc = true; }
-                    b.on_hover_text("Double-click for the lesson's settings");
                     ui.add_space(16.0);
                     for (si, s) in lesson.sections.iter().enumerate() {
                         let selected = self.toc_pick == web_tabs::TocPick::Card && self.sec == si;
@@ -563,11 +557,8 @@ impl App {
             match what { 0 => self.move_section(-1), 1 => self.move_section(1), _ => self.delete_section() }
         }
         if add { self.add_section(); self.toc_pick = web_tabs::TocPick::Card; }
-        if settings { self.lesson_settings = true; }
         if turn_on { self.snapshot(); self.lesson_mut().show_toc = true; }
-        if pick_toc { self.toc_pick = web_tabs::TocPick::Header; self.blk = None; }
         if let Some(si) = pick { self.sec = si; self.blk = None; self.toc_pick = web_tabs::TocPick::Card; }
-        else if cleared && !pick_toc && open.is_none() { self.toc_pick = web_tabs::TocPick::Page; self.blk = None; }
         if let Some(si) = open { self.web_open_section(si); }
     }
 
@@ -915,42 +906,12 @@ impl App {
             }).collect()
         };
         let dims = |k: &str| sizes.get(k).copied();
-        let toc = if self.toc_showing() { self.toc_pick } else { web_tabs::TocPick::Nothing };
-        let toc_page = toc == web_tabs::TocPick::Page;
-        let toc = matches!(toc, web_tabs::TocPick::Page | web_tabs::TocPick::Header);
         let mut lesson = self.project.as_mut().unwrap().lesson.take().unwrap();
         let mut changed = false;
         let mut want: Option<LessonAsset> = None;
         let mut section_action: Option<u8> = None; // 0 up, 1 down, 2 delete
-        let mut title = self.project.as_ref().unwrap().name.clone();
         let n_sections = lesson.sections.len();
         egui::ScrollArea::vertical().id_salt("lesson-props-scroll").show(ui, |ui| {
-            if toc {
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("format-bar-scope"), 8u8));
-                ui.strong(if toc_page { "Table of contents" } else { "Lesson header" });
-                ui.add_space(4.0);
-                if toc_page {
-                    self::sec(ui, "toc", "Table of contents", true, |ui| {
-                        changed |= ui.checkbox(&mut lesson.show_toc, "Open on the table of contents").changed();
-                        ui.weak("Off, learners start in the first section.");
-                        changed |= ui.checkbox(&mut lesson.show_menu, "Show the section menu").changed();
-                    });
-                } else {
-                    self::sec(ui, "banner", "Title banner", true, |ui| {
-                        changed |= single(ui, "Lesson title", &mut title);
-                        let mut has_cover = lesson.cover.is_some();
-                        if ui.checkbox(&mut has_cover, "Show a title banner").changed() { lesson.cover = has_cover.then(Cover::default); changed = true; }
-                        if let Some(c) = lesson.cover.as_mut() {
-                            changed |= single(ui, "Subtitle", &mut c.subtitle);
-                            ui.label("Description (under the title)");
-                            changed |= ui.add(egui::TextEdit::multiline(&mut c.description).desired_rows(3).desired_width(f32::INFINITY)).changed();
-                            asset_row(ui, "Picture", c.image.as_deref(), &names, &mut want, LessonAsset::CoverImage, "Choose picture…");
-                            if c.image.is_some() && ui.small_button("Remove picture").clicked() { c.image = None; changed = true; }
-                        }
-                    });
-                }
-                return;
-            }
             let Some(s) = lesson.sections.get_mut(sec) else { return };
             match blk.and_then(|b| s.blocks.get_mut(b)) {
                 None => {
@@ -981,7 +942,6 @@ impl App {
             }
         });
         self.project.as_mut().unwrap().lesson = Some(lesson);
-        if title != self.project.as_ref().unwrap().name { self.project.as_mut().unwrap().name = title; }
         self.id_counter = ctr;
         if changed {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.memory(|m| m.focused().is_some());
@@ -1029,10 +989,17 @@ impl App {
     pub(super) fn lesson_settings_window(&mut self, ctx: &egui::Context) {
         if !self.lesson_settings { return; }
         let mut open = true;
+        crate::dialog_window(ctx, "Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| self.lesson_settings_ui(ui, ctx));
+        if !open { self.lesson_settings = false; }
+    }
+
+    /// The settings of the whole lesson, in the Lesson settings window, the Project Settings page and the Project panel.
+    pub(super) fn lesson_settings_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let _ = ctx;
         let before = Snap::of(self.project.as_ref().unwrap());
         let mut want_cover = false;
         let mut changed = false;
-        crate::dialog_window(ctx, "Lesson settings").open(&mut open).default_width(420.0).show(ctx, |ui| {
+        {
             let p = self.project.as_mut().unwrap();
             changed |= single(ui, "Lesson title", &mut p.name);
             ui.separator();
@@ -1047,6 +1014,7 @@ impl App {
             ui.separator();
             if let Some(l) = p.lesson.as_mut() {
                 changed |= ui.checkbox(&mut l.show_toc, "Open on the table of contents").changed();
+                ui.weak("Off, learners start in the first section.");
                 changed |= ui.checkbox(&mut l.show_menu, "Show the section menu").changed();
                 let mut has_cover = l.cover.is_some();
                 if ui.checkbox(&mut has_cover, "Show a title banner").changed() { l.cover = has_cover.then(Cover::default); changed = true; }
@@ -1079,10 +1047,9 @@ impl App {
                     });
                 }
             }
-        });
+        }
         if changed { self.undo.push(before); self.redo.clear(); self.dirty = true; }
         if want_cover { self.pick_lesson_asset(LessonAsset::CoverImage); }
-        if !open { self.lesson_settings = false; }
     }
 }
 

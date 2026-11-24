@@ -306,6 +306,12 @@ impl App {
     fn project_page(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Project Settings");
         ui.add_space(6.0);
+        self.project_settings_body(ui, ctx);
+    }
+
+    /// What the Project Settings page and the Project panel (beside the Scene View and the Table of Contents) both show.
+    pub(super) fn project_settings_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.is_web_lesson() { self.lesson_settings_ui(ui, ctx); return; }
         ui.weak("These apply to every slide of the project.");
         ui.add_space(14.0);
         ui.label(egui::RichText::new("Slide size").strong());

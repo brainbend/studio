@@ -8,9 +8,9 @@
 use super::*;
 use crate::doc_tabs::{drag_reorder, open_under_active_tab, tab_chip, tab_chip_sized};
 
-/// What is chosen on the Table of Contents: nothing, the lesson's header (the banner), the page itself, or a card (a section).
+/// What is chosen on the Table of Contents: nothing, or a card (a section).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) enum TocPick { #[default] Nothing, Header, Page, Card }
+pub(crate) enum TocPick { #[default] Nothing, Card }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) enum WebTab {
