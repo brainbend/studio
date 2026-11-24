@@ -374,7 +374,7 @@ impl App {
 /// One tab: flat, so the active one is a block that meets the border line under the strip. The others have no fill
 /// and muted text, with a faint fill on hover. The × shows on the active tab and on hover. Returns the tab and
 /// whether its × was pressed.
-fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32) -> (egui::Response, bool) {
+pub(crate) fn tab_chip(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32) -> (egui::Response, bool) {
     tab_chip_ex(ui, icon, label, active, closable, width, if closable { 12.5 } else { 11.5 }, true)
 }
 
@@ -460,7 +460,7 @@ fn window_tab_styled(ui: &mut egui::Ui, label: &str, inset: f32, document: bool)
 
 /// Dragging a tab to a new place: while it is dragged a line shows where it will go, and when it is let go the move is returned as
 /// (place it was, place it goes to). `chips` are the tabs in order.
-fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(usize, usize)> {
+pub(crate) fn drag_reorder(ui: &egui::Ui, salt: &str, chips: &[egui::Response]) -> Option<(usize, usize)> {
     let key = egui::Id::new(("tab-drag", salt));
     if let Some(k) = chips.iter().position(|r| r.drag_started()) { ui.ctx().data_mut(|d| d.insert_temp(key, k)); }
     let from: usize = ui.ctx().data(|d| d.get_temp(key))?;
@@ -518,7 +518,7 @@ pub(super) fn tabbed_panel_frame(style: &egui::Style, nested: bool) -> egui::Fra
     egui::Frame::side_top_panel(style).inner_margin(egui::Margin { left: side, right: side, top: 0, bottom: 8 })
 }
 
-fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32) -> (egui::Response, bool) {
+pub(crate) fn tab_chip_sized(ui: &mut egui::Ui, icon: Option<char>, label: &str, active: bool, closable: bool, width: f32, size: f32) -> (egui::Response, bool) {
     tab_chip_ex(ui, icon, label, active, closable, width, size, false)
 }
 
@@ -590,7 +590,7 @@ fn open_bottom_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
 }
 
 /// The line under the strip stops under the tab that is showing, so the tab and what it shows are one piece. `line` is where the line was drawn.
-fn open_under_active_tab(ui: &egui::Ui, line: egui::Rect) {
+pub(crate) fn open_under_active_tab(ui: &egui::Ui, line: egui::Rect) {
     let Some(Some((tab, fill))) = ui.ctx().data_mut(|d| d.remove_temp::<Option<(egui::Rect, egui::Color32)>>(egui::Id::new("doc-tab-active"))) else { return };
     let gap = egui::Rect::from_min_max(egui::pos2(tab.left() + 1.6, line.top() - 0.5), egui::pos2(tab.right() - 1.6, line.bottom() + 0.5));
     ui.painter().rect_filled(gap, 0.0, fill);

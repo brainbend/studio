@@ -1286,7 +1286,7 @@ impl App {
         // The Quick Styles are built from the theme's colors.
         if let Some(p) = &self.project { ctx.data_mut(|d| d.insert_temp(egui::Id::new("theme-colors"), p.theme.colors.clone())); }
         if self.project.is_none() || self.file_view { return; }
-        if self.project.as_ref().is_some_and(|p| p.is_web()) { return; }
+        if self.project.as_ref().is_some_and(|p| p.is_web()) { self.web_tab_strip(root); return; }
         if !ctx.input(|i| i.pointer.any_down()) && ctx.memory(|m| m.focused().is_none()) { self.edit_open = false; }
         self.doc_tabs(root);
     }

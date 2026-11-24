@@ -24,6 +24,7 @@ mod publish_dialog;
 mod word_export;
 mod controls;
 mod doc_tabs;
+mod web_tabs;
 mod font_store;
 mod crop;
 mod outline;
@@ -226,6 +227,10 @@ struct App {
     player_pane: usize,
     /// Open slide tabs (see `doc_tabs`), and which one is being edited (`None` = the Scene View).
     tabs: Vec<doc_tabs::SlideTab>,
+    /// A web lesson's tab strip (see `web_tabs`), the one showing, and what is chosen on the Table of Contents.
+    web_tabs: Vec<web_tabs::WebTab>,
+    web_active: usize,
+    toc_pick: web_tabs::TocPick,
     active_tab: Option<usize>,
     /// Open a project into the Scene View (the app turns this on; tests keep the slide view).
     open_to_scene_view: bool,
@@ -540,7 +545,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], outline_list: list_view::ListMode::load("outline"), slides_list: list_view::ListMode::load("slides"), slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, web_tabs: vec![], web_active: 0, toc_pick: Default::default(), open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], outline_list: list_view::ListMode::load("outline"), slides_list: list_view::ListMode::load("slides"), slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -1039,6 +1044,8 @@ impl App {
         match Self::tool_of(g) {
             Some(t) => self.tool_open(t) && self.can_dock_here(),
             // A web lesson has the Outline (in the Slide List's place), Properties and AI; the rest belong to slides.
+            // On the Table of Contents only Properties, and only when a card or the banner is chosen: there is nothing else to apply settings to.
+            None if self.is_web_lesson() && self.toc_showing() => g == 0 && self.toc_pick != web_tabs::TocPick::Nothing && self.panel_shown(g),
             None if self.is_web_lesson() => (g == 0 || g == 2 || g == P_SLIDES) && self.panel_shown(g),
             None => self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
@@ -2649,6 +2656,7 @@ impl App {
                 self.import_report = report;
                 self.scene_view = self.open_to_scene_view;
                 self.tabs.clear();
+                self.web_tabs.clear();
                 self.active_tab = None;
                 self.editor_windows.clear();
                 self.focus_window = None;
@@ -2893,6 +2901,7 @@ impl App {
                 let n = l.sections.get(sec).map(|s| s.blocks.len()).unwrap_or(0);
                 let plural = |n: usize| if n == 1 { "block" } else { "blocks" };
                 let blocks = match self.blk.filter(|b| *b < n) { Some(b) => format!("Block {} of {n}", b + 1), None => format!("{n} {}", plural(n)) };
+                if self.toc_showing() { return ("Table of contents".to_string(), format!("{} section{}", l.sections.len(), if l.sections.len() == 1 { "" } else { "s" }), p.theme.name.clone()); }
                 return (format!("Section {} of {}", sec + 1, l.sections.len()), blocks, p.theme.name.clone());
             }
             let i = self.view.slide.min(p.slide_count().saturating_sub(1));
@@ -3007,6 +3016,7 @@ impl App {
             for b in l.sections[0].blocks.iter_mut() { b.id = self.new_id("block"); }
         }
         self.project = Some(p);
+        self.web_tabs.clear();
         self.scene_view = false;
         self.file_view = false;
         self.file_page = backstage::FilePage::Info;
@@ -11952,6 +11962,12 @@ mod tests {
         h.state_mut().lesson_settings = true;
         h.run_steps(3);
         h.render().expect("renderer").save(dir.join("6c-lesson-settings.png")).unwrap();
+        // The Table of Contents tab, with a second section open beside it.
+        h.state_mut().lesson_settings = false;
+        h.state_mut().add_section();
+        h.state_mut().web_new_toc_tab();
+        h.run_steps(4);
+        h.render().expect("renderer").save(dir.join("6d-lesson-toc.png")).unwrap();
     }
 
     #[test]
@@ -12858,6 +12874,83 @@ mod tests {
         // The list draws in the modes that take the drag.
         let mut h = harness(a);
         for m in [list_view::ListMode::Icon, list_view::ListMode::Text] { h.state_mut().slides_list = m; h.state_mut().right_tab = P_SLIDES; h.run_steps(3); }
+    }
+
+    #[test]
+    fn gui_a_web_lesson_has_a_table_of_contents_tab_and_a_tab_for_each_section_that_is_open() {
+        use egui_kittest::kittest::Queryable;
+        use web_tabs::WebTab;
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.add_section();
+        a.add_section();
+        let ids: Vec<String> = a.lesson_ref().sections.iter().map(|s| s.id.clone()).collect();
+        let mut h = harness(a);
+        h.run_steps(4);
+        // A lesson opens with the Table of Contents and the section being written, which is the one showing.
+        assert_eq!(h.state().web_tabs.len(), 2);
+        assert_eq!(h.state().web_tabs[0], WebTab::Toc);
+        assert!(!h.state().toc_showing());
+        assert!(h.query_by_label_contains("TABLE OF CONTENTS").is_some(), "the strip names the Table of Contents");
+        assert!(h.query_by_label("New tab").is_some(), "and has a +");
+        // The Table of Contents tab shows the cards, and the insert bar has nothing to add to there.
+        h.get_by_label_contains("TABLE OF CONTENTS").click();
+        h.run_steps(4);
+        h.run_steps(8);
+        assert!(h.state().toc_showing());
+        assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(2), "nothing chosen: no tabs");
+        h.state_mut().toc_pick = web_tabs::TocPick::Card;
+        h.run_steps(4);
+        assert!(h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(2), "a card chosen: Properties only");
+        for pick in [web_tabs::TocPick::Header, web_tabs::TocPick::Page] {
+            h.state_mut().toc_pick = pick;
+            h.run_steps(4);
+            assert!(h.state().tab_visible(0), "{pick:?} chosen: Properties too");
+        }
+        h.state_mut().toc_pick = web_tabs::TocPick::Nothing;
+        h.run_steps(4);
+        // A card opens its section beside the Table of Contents, which stays.
+        h.state_mut().web_open_section(2);
+        h.run_steps(3);
+        assert_eq!(h.state().web_tabs.len(), 3);
+        assert_eq!(h.state().web_tabs[h.state().web_active], WebTab::Section(ids[2].clone()));
+        assert_eq!(h.state().sec, 2);
+        // The + adds a Table of Contents tab, and a section opened from it takes its place.
+        h.state_mut().web_new_toc_tab();
+        h.run_steps(3);
+        assert_eq!(h.state().web_tabs.len(), 4);
+        assert!(h.state().toc_showing());
+        h.state_mut().web_open_section(1);
+        h.run_steps(3);
+        assert_eq!(h.state().web_tabs.iter().filter(|t| **t == WebTab::Toc).count(), 1, "the extra Table of Contents became the section");
+        assert_eq!(h.state().web_tabs.len(), 4);
+        assert_eq!(h.state().web_tabs[h.state().web_active], WebTab::Section(ids[1].clone()));
+        // A section that has a tab is shown there again, not opened twice.
+        h.state_mut().web_open_section(2);
+        h.run_steps(3);
+        assert_eq!(h.state().web_tabs.len(), 4);
+        // The Outline picks the section for the tab showing; a deleted section loses its tab; the last tab closed leaves the Table of Contents.
+        h.state_mut().sec = 2;
+        h.state_mut().delete_section();
+        h.run_steps(3);
+        assert!(!h.state().web_tabs.contains(&WebTab::Section(ids[2].clone())));
+        for _ in 0..6 { let k = h.state().web_active; h.state_mut().web_close_tab(k); h.run_steps(2); }
+        assert_eq!(h.state().web_tabs, vec![WebTab::Toc]);
+        assert!(h.state().toc_showing());
+    }
+
+    #[test]
+    fn gui_the_table_of_contents_can_be_turned_off_and_back_on() {
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        assert!(a.lesson_ref().show_toc);
+        a.lesson_mut().show_toc = false;
+        let json = serde_json::to_string(a.lesson_ref()).unwrap();
+        assert!(json.contains("\"show_toc\":false"));
+        // A lesson saved before the setting existed opens with it on.
+        let old = json.replace("\"show_toc\":false,", "");
+        let back: brainbend_doc::lesson::WebLesson = serde_json::from_str(&old).unwrap();
+        assert!(back.show_toc);
     }
 
     #[test]

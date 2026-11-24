@@ -202,6 +202,7 @@
   var bar = document.getElementById('bar'), barText = document.getElementById('bar-text');
   var done = document.getElementById('done');
   var single = L.sections.length === 1;     // a one-section lesson: no title page, no menu
+  var noToc = single || L.show_toc === false;   // no title page: the lesson opens in its first module
   var cur = -1;                             // the module on screen, or -1 for the title page
   var menuItems = [], cards = [], secNodes = [], nexts = [];
   var io = 'IntersectionObserver' in window ? new IntersectionObserver(function (entries) {
@@ -249,9 +250,9 @@
       ntext.appendChild(el('span', null, 'Up next')); ntext.appendChild(el('strong', null, L.sections[si + 1].title));
       nb.textContent = 'Next module'; nb.addEventListener('click', function () { go(si + 1); });
     } else {
-      ntext.appendChild(el('span', null, single ? 'Finished' : 'You reached the end')); ntext.appendChild(el('strong', null, single ? 'Nothing more in this lesson' : 'Back to the overview'));
+      ntext.appendChild(el('span', null, noToc ? 'Finished' : 'You reached the end')); ntext.appendChild(el('strong', null, noToc ? 'Nothing more in this lesson' : 'Back to the overview'));
       nb.textContent = 'Overview'; nb.addEventListener('click', function () { go(-1); });
-      if (single) nin.hidden = true;
+      if (noToc) nin.hidden = true;
     }
     nin.appendChild(ntext); nin.appendChild(nb); nx.appendChild(nin); sec.appendChild(nx);
     main.appendChild(sec);
@@ -274,7 +275,7 @@
     cards.push({ chip: chip, cnt: cnt, fill: cfill, card: card });
   });
   if (single || !L.show_menu) { menu.hidden = true; menuBtn.hidden = true; }
-  if (single) { document.getElementById('back-btn').hidden = true; }
+  if (noToc) { document.getElementById('back-btn').hidden = true; }
   function setMenu(open) {
     menu.classList.toggle('open', open); menuBtn.setAttribute('aria-expanded', String(open));
     scrim.hidden = !(open && window.matchMedia && window.matchMedia('(max-width:1000px)').matches);
@@ -283,7 +284,7 @@
   scrim.addEventListener('click', function () { setMenu(false); });
   document.getElementById('menu-home').addEventListener('click', function () { go(-1); });
   document.getElementById('back-btn').addEventListener('click', function () { go(-1); });
-  if (single) document.getElementById('menu-home').hidden = true;
+  if (noToc) document.getElementById('menu-home').hidden = true;
   document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && menu.classList.contains('open')) { setMenu(false); menuBtn.focus(); } });
 
   // ---- routing: #/ is the title page, #/m/N is module N (so the back button works) -----------------
@@ -296,10 +297,11 @@
     var m = /^#\/m\/(\d+)$/.exec(location.hash), si = m ? parseInt(m[1], 10) : -1;
     if (single) si = 0;
     if (si >= L.sections.length) si = -1;
+    if (noToc && si < 0) si = 0;
     show(si);
   }
   function show(si) {
-    if (single) si = 0;
+    if (single || (noToc && si < 0)) si = 0;
     var changed = si !== cur;
     cur = si;
     home.hidden = si >= 0; view.hidden = si < 0;

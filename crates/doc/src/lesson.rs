@@ -226,6 +226,9 @@ pub struct WebLesson {
     /// Show the section menu (a sidebar on wide screens, a drawer on phones).
     #[serde(default = "default_true")]
     pub show_menu: bool,
+    /// Open on the table of contents (the title page with a card for each section). Off, learners start in the first section.
+    #[serde(default = "default_true")]
+    pub show_toc: bool,
     #[serde(default)]
     pub cover: Option<Cover>,
     /// Overrides the theme's primary (buttons, progress, highlights) and secondary colors.
@@ -250,6 +253,7 @@ impl WebLesson {
             }],
             completion: Completion::default(),
             show_menu: true,
+            show_toc: true,
             cover: Some(Cover::default()),
             primary: None,
             secondary: None,
