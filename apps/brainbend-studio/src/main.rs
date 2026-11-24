@@ -50,6 +50,7 @@ mod mcp;
 mod assistant;
 mod terminal;
 mod lesson_view;
+mod list_view;
 
 /// The smallest window the layout is designed for: the ribbon, the slide list and the inspector all fit.
 const MIN_WINDOW: [f32; 2] = [1000.0, 640.0];
@@ -260,6 +261,9 @@ struct App {
     slide_rename: Option<usize>,
     /// Ids of further selected slides (besides the current one): ⌘-click toggles, ⇧-click selects a range.
     slide_multi: Vec<String>,
+    /// How the Outline of a web lesson and the Slide List of a media lesson show their items (Large, Icons or Text).
+    outline_list: list_view::ListMode,
+    slides_list: list_view::ListMode,
     /// The last click was on a slide in the slide list, so the keys act on slides (the Scene View always counts).
     slides_focus: bool,
     /// The States panel has the keyboard (a press landed in it): the keys are about its states, and `state_cmd` carries one to it.
@@ -536,7 +540,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], outline_list: list_view::ListMode::load("outline"), slides_list: list_view::ListMode::load("slides"), slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -1178,14 +1182,18 @@ impl App {
         }
         if new_scene { self.add_scene(); self.scene_view = false; }
         ui.add_space(4.0);
+        list_view::mode_bar(ui, &mut self.slides_list, "slides");
+        ui.add_space(4.0);
         let mut clicked: Option<usize> = None;
         let fit_w = ui.available_width() - 6.0;
         let list_h = (ui.available_height() - if self.slide_multi.is_empty() { 44.0 } else { 64.0 }).max(80.0);
         // Right-clicking between the slides adds one (or a scene); the thumbnails above this take their own clicks.
         let list_bg = ui.interact(egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), list_h)), egui::Id::new("slides-bg"), egui::Sense::click());
         list_bg.context_menu(|ui| self.new_slide_items(ui, Some(cur_scene)));
+        let mode = self.slides_list;
         egui::ScrollArea::both().id_salt("slides").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
-            let (sel, opn) = self.scene_flow(ui, ctx, cur_scene, 64.0, Some(fit_w));
+            // Large keeps the flow, with its arrows between the slides; the other two list the slides in order.
+            let (sel, opn) = if mode == list_view::ListMode::Large { self.scene_flow(ui, ctx, cur_scene, 64.0, Some(fit_w)) } else { self.scene_rows(ui, ctx, cur_scene, mode) };
             clicked = sel.or(opn);
         });
         if let Some(i) = clicked {
@@ -3474,6 +3482,75 @@ impl App {
         let mut cells = self.scene_layout(si).0;
         cells.sort_by(|a, b| (a.1, a.2).partial_cmp(&(b.1, b.2)).unwrap_or(std::cmp::Ordering::Equal));
         cells.iter().enumerate().map(|(n, c)| (c.0, n + 1)).collect()
+    }
+
+    /// One scene as rows in the order of its slides (the Icons and Text modes of the Slide List): the same clicks as the flow's thumbnails.
+    /// Returns the slide clicked and the slide double-clicked.
+    fn scene_rows(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, si: usize, mode: list_view::ListMode) -> (Option<usize>, Option<usize>) {
+        let slides = self.project.as_ref().unwrap().scene_slides(si);
+        let (mut select, mut open) = (None, None);
+        ui.spacing_mut().item_spacing.y = 2.0;
+        for i in slides {
+            let sl = self.project.as_ref().unwrap().slide(i).clone();
+            let in_selection = i == self.view.slide || self.slide_multi.contains(&sl.id);
+            let marked = in_selection || self.menu_pick.as_ref().is_some_and(|mp| mp.picked == sl.id);
+            if self.slide_rename == Some(i) {
+                let mut name = sl.name.clone();
+                let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(ui.available_width()));
+                if !r.has_focus() && !r.lost_focus() { r.request_focus(); }
+                if r.changed() && !name.trim().is_empty() { self.project.as_mut().unwrap().slide_mut(i).name = name; self.dirty = true; }
+                if r.lost_focus() {
+                    self.slide_rename = None;
+                    let t = self.project.as_ref().unwrap().slide(i).name.trim().to_string();
+                    self.project.as_mut().unwrap().slide_mut(i).name = t;
+                }
+                continue;
+            }
+            let kind = match &sl.kind { SlideKind::Normal => "Slide", SlideKind::Question(_) => "Question", SlideKind::Results => "Results" };
+            let icon = match &sl.kind { SlideKind::Normal => ribbon::FRAME, SlideKind::Question(_) => ribbon::QUESTION, SlideKind::Results => ribbon::CHECK };
+            let objects: usize = sl.layers.iter().map(|l| l.objects.len()).sum();
+            let detail = format!("{kind}, {objects} object{}", if objects == 1 { "" } else { "s" });
+            let spec = list_view::RowSpec { icon, title: &sl.name, detail: &detail, number: Some(self.slide_number(i)), depth: 0, selected: marked, bold: false, caret: None };
+            let out = list_view::row(ui, mode, &spec, &mut |p, r| {
+                if matches!(sl.kind, SlideKind::Normal) {
+                    self.paint_backdrop(ctx, p, r.min, r.width() / sl.width, &sl);
+                    let layers = start_layers(&sl);
+                    self.paint_slide(ctx, p, r.min, r.width() / sl.width, &sl, &layers, None);
+                } else {
+                    p.rect_filled(r, 1.0, egui::Color32::from_rgb(244, 246, 249));
+                    p.text(r.center(), egui::Align2::CENTER_CENTER, kind, egui::FontId::proportional(11.0), egui::Color32::from_rgb(3, 83, 158));
+                }
+            });
+            let resp = out.resp;
+            // Pressing on a slide gives the slide list the keyboard.
+            if resp.hovered() && ctx.input(|inp| inp.pointer.any_pressed()) { self.slides_focus = true; self.slide_hit = true; }
+            if resp.secondary_clicked() && !in_selection && !self.scene_view {
+                self.menu_pick = Some(MenuPick { picked: sl.id.clone(), pass: ctx.cumulative_pass_nr() });
+            } else if resp.secondary_clicked() && !in_selection {
+                self.slide_multi.clear();
+                select = Some(i);
+                self.view.slide = i;
+            }
+            resp.context_menu(|ui| {
+                if !in_selection && !self.scene_view { self.with_menu_target(i, |a| a.slide_context_menu(ui)); } else { self.slide_context_menu(ui); }
+            });
+            if resp.double_clicked() || resp.middle_clicked() { open = Some(i); }
+            else if resp.clicked() {
+                let (cmd, shift) = ctx.input(|inp| (inp.modifiers.command, inp.modifiers.shift));
+                if cmd && i != self.view.slide {
+                    if let Some(k) = self.slide_multi.iter().position(|m| *m == sl.id) { self.slide_multi.remove(k); } else { self.slide_multi.push(sl.id.clone()); }
+                } else if shift {
+                    let (a, b) = (self.view.slide.min(i), self.view.slide.max(i));
+                    let ids: Vec<String> = self.project.as_ref().unwrap().slides[a..=b].iter().map(|s| s.id.clone()).collect();
+                    let cur_id = self.project.as_ref().unwrap().slide(self.view.slide).id.clone();
+                    self.slide_multi = ids.into_iter().filter(|x| *x != cur_id).collect();
+                } else {
+                    self.slide_multi.clear();
+                    select = Some(i);
+                }
+            }
+        }
+        (select, open)
     }
 
     /// Draw one scene as a flow of slide thumbnails `tw` wide. Returns the slide clicked and the slide double-clicked.
@@ -11745,6 +11822,8 @@ mod tests {
         h.state_mut().add_block(BlockKind::Image { asset: Some("pic".into()), alt: "A wide picture".into(), caption: String::new(), width: brainbend_doc::lesson::ImageWidth::Full, decorative: false, crop: None });
         h.run_steps(2);
         let last = h.state().project.as_ref().unwrap().lesson.as_ref().unwrap().sections[0].blocks.len() - 1;
+        // The Outline's Large mode would show the picture too; this test counts the colors of the preview alone.
+        h.state_mut().outline_list = list_view::ListMode::Text;
         h.state_mut().blk = Some(last);
         h.run_steps(3);
         let crop_of = |h: &egui_kittest::Harness<'static, App>| match &h.state().project.as_ref().unwrap().lesson.as_ref().unwrap().sections[0].blocks[last].kind { BlockKind::Image { crop, .. } => *crop, _ => panic!("an image block") };
@@ -12580,6 +12659,121 @@ mod tests {
             // The bars as a new install shows them: the menu bar and the row of things to insert.
             a.show_menu_bar = true;
             a.show_insert_bar = true;
+            let mut h = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(1280.0, 830.0))
+                .with_pixels_per_point(1.5)
+                .build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+            install_fonts(&h.ctx);
+            install_theme(&h.ctx);
+            h.run_steps(2);
+            *h.state_mut() = a;
+            h.ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+            h.run_steps(8);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(name)).unwrap();
+        }
+    }
+
+    /// The Outline of a web lesson: blocks move to other places and sections move, in every mode, with one undo step each.
+    #[test]
+    fn web_outline_blocks_and_sections_move_to_where_they_are_dropped() {
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        a.add_section();
+        for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3) { a.add_block(k); }
+        a.sec = 0; a.blk = None;
+        let names = |a: &App| -> Vec<Vec<String>> { a.project.as_ref().unwrap().lesson.as_ref().unwrap().sections.iter().map(|s| s.blocks.iter().map(|b| b.id.clone()).collect()).collect() };
+        let before = names(&a);
+        let moved = before[0][0].clone();
+        // Block 0 of section 0 goes to the end of section 1.
+        let end = before[1].len();
+        a.move_block_to((0, 0), 1, end);
+        let after = names(&a);
+        assert_eq!(after[1].last(), Some(&moved));
+        assert_eq!(after[0].len(), before[0].len() - 1);
+        a.undo();
+        assert_eq!(names(&a), before, "one undo puts it back");
+        // Within a section: dropped below the last block, it is last.
+        let n0 = before[0].len();
+        a.move_block_to((0, 0), 0, n0);
+        assert_eq!(names(&a)[0].last(), Some(&moved));
+        a.undo();
+        // Sections swap places; the selection follows.
+        let titles = |a: &App| -> Vec<String> { a.project.as_ref().unwrap().lesson.as_ref().unwrap().sections.iter().map(|s| s.id.clone()).collect() };
+        let t0 = titles(&a);
+        a.move_section_to(0, 2);
+        assert_eq!(titles(&a), vec![t0[1].clone(), t0[0].clone()]);
+        assert_eq!(a.sec, 1);
+    }
+
+    /// Both list panels have the three modes, and each mode shows its items and takes a click.
+    #[test]
+    fn gui_the_outline_and_the_slide_list_show_in_all_three_modes() {
+        use egui_kittest::kittest::Queryable;
+        // The web outline.
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(3) { a.add_block(k); }
+        let mut h = harness(a);
+        h.run_steps(3);
+        for m in list_view::ListMode::ALL {
+            h.state_mut().outline_list = m;
+            h.run_steps(3);
+            assert!(h.query_by_label("Outline").is_some(), "{} mode draws", m.label());
+        }
+        for label in ["Large", "Icons", "Text"] { assert!(h.query_by_label(label).is_some(), "the {label} button is there"); }
+        // The media lesson's slide list, with a second slide to click.
+        let mut a = app();
+        a.add_slide(SlideKind::Normal);
+        a.view.slide = 0;
+        a.right_tab = P_SLIDES;
+        let mut h = harness(a);
+        h.run_steps(3);
+        for m in [list_view::ListMode::Icon, list_view::ListMode::Text, list_view::ListMode::Large] {
+            h.state_mut().slides_list = m;
+            h.run_steps(3);
+        }
+        for label in ["Large", "Icons", "Text"] { assert!(h.query_by_label(label).is_some(), "the {label} button is there in the slide list"); }
+    }
+
+    #[test]
+    fn shot_list_modes() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        let mk = |a: App| {
+            let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 830.0)).with_pixels_per_point(1.0).build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+            install_fonts(&h.ctx); install_theme(&h.ctx); h.run_steps(2);
+            *h.state_mut() = a;
+            h
+        };
+        for m in list_view::ListMode::ALL {
+            let mut a = App::default();
+            a.new_lesson_project(ProjectKind::WebLesson);
+            for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(5) { a.add_block(k); }
+            a.add_section();
+            a.outline_list = m;
+            let mut h = mk(a);
+            h.run_steps(6);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("outline-{}.png", m.label().to_lowercase()))).unwrap();
+            let mut a = app();
+            a.add_slide(SlideKind::Normal);
+            a.add_slide(SlideKind::Normal);
+            a.slides_list = m;
+            let mut h = mk(a);
+            h.run_steps(6);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(format!("slides-{}.png", m.label().to_lowercase()))).unwrap();
+        }
+    }
+
+    /// What a new Web Lesson looks like in the editor, with a few of every kind of block added, next to the media lesson's editor.
+    #[test]
+    fn shot_web_lesson_editor() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        for (name, light) in [("web-lesson-dark.png", false), ("web-lesson-light.png", true)] {
+            let mut a = App::default();
+            a.new_lesson_project(ProjectKind::WebLesson);
+            a.show_menu_bar = true;
+            a.show_insert_bar = true;
+            for k in brainbend_doc::lesson::BlockKind::catalog().into_iter().flat_map(|(_, v)| v).take(6) { a.add_block(k); }
+            a.blk = Some(1);
             let mut h = egui_kittest::Harness::builder()
                 .with_size(egui::vec2(1280.0, 830.0))
                 .with_pixels_per_point(1.5)

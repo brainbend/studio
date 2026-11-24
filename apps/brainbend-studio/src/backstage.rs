@@ -84,8 +84,7 @@ enum OpenAction {
     Forget(std::path::PathBuf),
 }
 
-/// What the New page offers. Only the media lesson can be created today; web lessons are marked Coming soon until their
-/// editor is finished.
+/// What the New page offers. A tile that is not `available` is marked Coming soon.
 struct Template {
     kind: ProjectKind,
     icon: char,
@@ -94,7 +93,7 @@ struct Template {
 }
 
 const TEMPLATES: [Template; 2] = [
-    Template { kind: ProjectKind::WebLesson, icon: WEB, blurb: "A scrolling, mobile-friendly lesson built from content blocks: text, images, lists and knowledge checks.", available: false },
+    Template { kind: ProjectKind::WebLesson, icon: WEB, blurb: "A scrolling, mobile-friendly lesson built from content blocks: text, images, lists and knowledge checks.", available: true },
     Template { kind: ProjectKind::MediaLesson, icon: MEDIA, blurb: "A deck-style lesson: slides with layers, triggers, variables, animation, video and graded quizzes. Publishes to the web and SCORM.", available: true },
 ];
 
@@ -479,9 +478,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_media_lesson_can_be_created_until_web_lessons_are_finished() {
+    fn both_kinds_of_lesson_can_be_created() {
         for t in &TEMPLATES {
-            assert_eq!(t.available, matches!(t.kind, ProjectKind::MediaLesson), "{} availability", t.kind.label());
+            assert!(t.available, "{} is on offer", t.kind.label());
         }
     }
 }

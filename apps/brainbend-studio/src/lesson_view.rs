@@ -75,6 +75,32 @@ fn show_markdown(ui: &mut egui::Ui, text: &str, size: f32) {
     }
 }
 
+/// The icon of a kind of block, in the lists.
+fn block_icon(kind: &BlockKind) -> char {
+    match kind {
+        BlockKind::Heading { .. } => ribbon::TEXT_T,
+        BlockKind::Text { .. } => ribbon::TEXTBOX,
+        BlockKind::Image { .. } => ribbon::IMAGE,
+        BlockKind::ImageText { .. } => ribbon::FRAME,
+        BlockKind::Video { .. } => ribbon::VIDEO,
+        BlockKind::Audio { .. } => ribbon::SPEAKER,
+        BlockKind::Button { .. } => ribbon::CLICK,
+        BlockKind::Divider => ribbon::LINE,
+        BlockKind::Spacer => ribbon::DIST_V,
+        BlockKind::Quote { .. } => ribbon::CHAT,
+        BlockKind::Statement { .. } => ribbon::STAR,
+        BlockKind::Items { style, .. } => match style {
+            brainbend_doc::lesson::ItemsStyle::Process => ribbon::LIST_NUM,
+            brainbend_doc::lesson::ItemsStyle::Timeline => ribbon::TIMER,
+            brainbend_doc::lesson::ItemsStyle::Flashcards => ribbon::STACK,
+            brainbend_doc::lesson::ItemsStyle::Tabs => ribbon::TABLE,
+            _ => ribbon::LIST_BULLETS,
+        },
+        BlockKind::KnowledgeCheck(_) => ribbon::QUESTION,
+        BlockKind::Continue { .. } => ribbon::ARROW_DOWN,
+    }
+}
+
 fn short(text: &str, n: usize) -> String {
     let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if one.chars().count() > n { format!("{}…", one.chars().take(n).collect::<String>()) } else { one }
@@ -205,38 +231,173 @@ impl App {
         });
     }
 
+    /// Move a block to a place in the lesson: before or after another block, or to the start of a section.
+    pub(super) fn move_block_to(&mut self, from: (usize, usize), to_sec: usize, to_at: usize) {
+        let l = self.lesson_ref();
+        if from.0 >= l.sections.len() || from.1 >= l.sections[from.0].blocks.len() || to_sec >= l.sections.len() { return; }
+        self.snapshot();
+        let l = self.lesson_mut();
+        let b = l.sections[from.0].blocks.remove(from.1);
+        // Taking it out shifted what came after it in its own section.
+        let at = if to_sec == from.0 && to_at > from.1 { to_at - 1 } else { to_at }.min(l.sections[to_sec].blocks.len());
+        l.sections[to_sec].blocks.insert(at, b);
+        self.sec = to_sec;
+        self.blk = Some(at);
+    }
+
+    /// Move a section so that it sits at place `to` (counted before it is taken out).
+    pub(super) fn move_section_to(&mut self, from: usize, to: usize) {
+        let n = self.lesson_ref().sections.len();
+        if from >= n || to > n { return; }
+        self.snapshot();
+        let l = self.lesson_mut();
+        let s = l.sections.remove(from);
+        let at = if to > from { to - 1 } else { to }.min(l.sections.len());
+        l.sections.insert(at, s);
+        self.sec = at;
+        self.blk = None;
+    }
+
+    /// The Outline: the sections and their blocks in the order of the page, in the mode the panel was left in. A section opens and closes;
+    /// double-click renames it; drag moves a block or a section; right-click has the rest.
+    fn lesson_outline(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        use list_view::{drop_line, mode_bar, row, RowSpec};
+        ui.horizontal(|ui| {
+            ui.strong("Outline");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("+ Section").clicked() { self.add_section(); }
+            });
+        });
+        mode_bar(ui, &mut self.outline_list, "outline");
+        ui.separator();
+        let mode = self.outline_list;
+        let lesson = self.lesson_ref().clone();
+        let mut pick: Option<(usize, Option<usize>)> = None;
+        // What was asked of a row by its menu or a double-click.
+        enum Do { Rename(usize), MoveSec(i32), DeleteSec, MoveBlk(i32), Duplicate, DeleteBlk }
+        let mut act: Option<((usize, Option<usize>), Do)> = None;
+        let rename_id = egui::Id::new("outline-rename");
+        let mut renaming: Option<usize> = ui.data(|d| d.get_temp(rename_id));
+        let drag_id = egui::Id::new("outline-drag");
+        let mut dragging: Option<(usize, Option<usize>)> = ui.data(|d| d.get_temp(drag_id));
+        let mut rects: Vec<(egui::Rect, (usize, Option<usize>))> = vec![];
+        let accent = { let c = self.project.as_ref().map(|p| p.theme.color(4)).unwrap_or(Rgba(3, 83, 158, 255)); egui::Color32::from_rgb(c.0, c.1, c.2) };
+        egui::ScrollArea::vertical().id_salt("outline-scroll").auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for (si, s) in lesson.sections.iter().enumerate() {
+                let title = if s.title.trim().is_empty() { "(untitled section)" } else { s.title.as_str() };
+                let closed_id = egui::Id::new(("outline-closed", &s.id));
+                let closed: bool = ui.data(|d| d.get_temp(closed_id)).unwrap_or(false);
+                if renaming == Some(si) {
+                    let mut text = s.title.clone();
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(ui.available_width()));
+                    if !r.has_focus() && !r.lost_focus() { r.request_focus(); }
+                    if r.changed() { self.lesson_mut().sections[si].title = text; self.dirty = true; }
+                    if r.lost_focus() { renaming = None; }
+                    continue;
+                }
+                let spec = RowSpec { icon: ribbon::BOOK_OPEN, title, detail: &format!("{} block{}", s.blocks.len(), if s.blocks.len() == 1 { "" } else { "s" }), number: if mode == list_view::ListMode::Large { None } else { Some(format!("{}.", si + 1)) }, depth: 0, selected: self.sec == si && self.blk.is_none(), bold: true, caret: Some(!closed) };
+                let out = row(ui, mode, &spec, &mut |p, r| {
+                    p.rect_filled(r, 3.0, accent);
+                    p.text(r.center(), egui::Align2::CENTER_CENTER, format!("{}", si + 1), egui::FontId::proportional(r.height() * 0.5), egui::Color32::WHITE);
+                });
+                rects.push((out.resp.rect, (si, None)));
+                if out.caret_clicked { ui.data_mut(|d| d.insert_temp(closed_id, !closed)); }
+                else if out.resp.double_clicked() { pick = Some((si, None)); renaming = Some(si); }
+                else if out.resp.clicked() { pick = Some((si, None)); }
+                if out.resp.drag_started() { dragging = Some((si, None)); }
+                out.resp.context_menu(|ui| {
+                    if ui.button("Rename").clicked() { act = Some(((si, None), Do::Rename(si))); ui.close(); }
+                    if ui.add_enabled(si > 0, egui::Button::new("Move up")).clicked() { act = Some(((si, None), Do::MoveSec(-1))); ui.close(); }
+                    if ui.add_enabled(si + 1 < lesson.sections.len(), egui::Button::new("Move down")).clicked() { act = Some(((si, None), Do::MoveSec(1))); ui.close(); }
+                    ui.separator();
+                    if ui.add_enabled(lesson.sections.len() > 1, egui::Button::new("Delete section")).clicked() { act = Some(((si, None), Do::DeleteSec)); ui.close(); }
+                });
+                if closed { continue; }
+                for (bi, b) in s.blocks.iter().enumerate() {
+                    let first = b.kind.texts().into_iter().find(|t| !t.trim().is_empty()).unwrap_or_default();
+                    let name = b.kind.label();
+                    let picture = match &b.kind {
+                        BlockKind::Image { asset, .. } | BlockKind::ImageText { asset, .. } => asset.clone(),
+                        _ => None,
+                    };
+                    let tex = if mode == list_view::ListMode::Large { picture.as_deref().and_then(|k| self.texture(ctx, k)) } else { None };
+                    let (icon, detail) = (block_icon(&b.kind), short(&first, 60));
+                    let title = if mode == list_view::ListMode::Text && !first.is_empty() { format!("{name}: {}", short(&first, 26)) } else { name.to_string() };
+                    let spec = RowSpec { icon, title: &title, detail: &detail, number: None, depth: 1, selected: self.sec == si && self.blk == Some(bi), bold: false, caret: None };
+                    let fill = ui.visuals().extreme_bg_color;
+                    let weak = ui.visuals().weak_text_color();
+                    let out = row(ui, mode, &spec, &mut |p, r| {
+                        if let Some(t) = &tex {
+                            let [w, h] = t.size().map(|v| v as f32);
+                            // Fill the thumbnail, cropping what does not fit.
+                            let k = (r.width() / w).max(r.height() / h);
+                            let (sw, sh) = (r.width() / (w * k), r.height() / (h * k));
+                            let uv = egui::Rect::from_center_size(egui::pos2(0.5, 0.5), egui::vec2(sw, sh));
+                            p.image(t.id(), r, uv, egui::Color32::WHITE);
+                        } else {
+                            p.rect_filled(r, 3.0, fill);
+                            p.text(egui::pos2(r.center().x, r.top() + 12.0), egui::Align2::CENTER_CENTER, icon.to_string(), egui::FontId::new(14.0, ribbon::icons()), accent);
+                            if !first.is_empty() {
+                                let g = p.layout(short(&first, 40), egui::FontId::proportional(8.0), weak, r.width() - 8.0);
+                                p.galley(egui::pos2(r.left() + 4.0, r.top() + 24.0), g, weak);
+                            }
+                        }
+                    });
+                    rects.push((out.resp.rect, (si, Some(bi))));
+                    if out.resp.clicked() { pick = Some((si, Some(bi))); }
+                    if out.resp.drag_started() { dragging = Some((si, Some(bi))); }
+                    out.resp.context_menu(|ui| {
+                        if ui.add_enabled(bi > 0, egui::Button::new("Move up")).clicked() { act = Some(((si, Some(bi)), Do::MoveBlk(-1))); ui.close(); }
+                        if ui.add_enabled(bi + 1 < s.blocks.len(), egui::Button::new("Move down")).clicked() { act = Some(((si, Some(bi)), Do::MoveBlk(1))); ui.close(); }
+                        if ui.button("Duplicate").clicked() { act = Some(((si, Some(bi)), Do::Duplicate)); ui.close(); }
+                        ui.separator();
+                        if ui.button("Delete").clicked() { act = Some(((si, Some(bi)), Do::DeleteBlk)); ui.close(); }
+                    });
+                }
+            }
+        });
+        // A drag in progress: the line where it would land, and the move when the pointer is let go.
+        if let Some(d) = dragging {
+            let pos = ctx.input(|i| i.pointer.interact_pos());
+            let over = pos.and_then(|p| rects.iter().find(|(r, _)| r.contains(p)).map(|(r, it)| (*r, *it, p.y > r.center().y)));
+            if let Some((r, _, below)) = over { drop_line(ui, r, below); }
+            if ctx.input(|i| i.pointer.any_released()) {
+                if let Some((_, target, below)) = over {
+                    match (d, target) {
+                        ((fs, None), (ts, _)) => { let to = if below { ts + 1 } else { ts }; if to != fs && to != fs + 1 { self.move_section_to(fs, to); } }
+                        // On a section's heading: just under it is the start of that section, just over it the end of the one before.
+                        ((fs, Some(fb)), (ts, None)) => {
+                            if !below && ts > 0 { let end = self.lesson_ref().sections[ts - 1].blocks.len(); self.move_block_to((fs, fb), ts - 1, end); }
+                            else { self.move_block_to((fs, fb), ts, 0); }
+                        }
+                        ((fs, Some(fb)), (ts, Some(tb))) => { let at = if below { tb + 1 } else { tb }; if (ts, at) != (fs, fb) && (ts, at) != (fs, fb + 1) { self.move_block_to((fs, fb), ts, at); } }
+                    }
+                }
+                dragging = None;
+            }
+        }
+        ui.data_mut(|d| { match dragging { Some(v) => { d.insert_temp(drag_id, v); } None => d.remove::<(usize, Option<usize>)>(drag_id) }; match renaming { Some(v) => { d.insert_temp(rename_id, v); } None => d.remove::<usize>(rename_id) } });
+        if let Some((s, b)) = pick { self.sec = s; self.blk = b; }
+        if let Some(((s, b), what)) = act {
+            self.sec = s; self.blk = b;
+            match what {
+                Do::Rename(i) => ui.data_mut(|d| { d.insert_temp(rename_id, i); }),
+                Do::MoveSec(d) => self.move_section(d),
+                Do::DeleteSec => self.delete_section(),
+                Do::MoveBlk(d) => self.move_block(d),
+                Do::Duplicate => self.duplicate_block(),
+                Do::DeleteBlk => self.delete_block(),
+            }
+        }
+    }
+
     /// The whole Web Lesson editor: outline, preview and properties.
     pub(super) fn lesson_ui(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
         self.clamp_lesson_selection();
 
         // ---- outline ----
-        egui::Panel::left("lesson-outline").default_size(250.0).show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.strong("Outline");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("+ Section").clicked() { self.add_section(); }
-                });
-            });
-            ui.separator();
-            let lesson = self.lesson_ref().clone();
-            let mut pick: Option<(usize, Option<usize>)> = None;
-            egui::ScrollArea::vertical().id_salt("outline-scroll").show(ui, |ui| {
-                for (si, s) in lesson.sections.iter().enumerate() {
-                    let title = if s.title.trim().is_empty() { "(untitled section)".to_string() } else { s.title.clone() };
-                    if ui.selectable_label(self.sec == si && self.blk.is_none(), egui::RichText::new(format!("{}. {}", si + 1, title)).strong()).clicked() { pick = Some((si, None)); }
-                    for (bi, b) in s.blocks.iter().enumerate() {
-                        let first = b.kind.texts().into_iter().find(|t| !t.trim().is_empty()).unwrap_or_default();
-                        let label = if first.is_empty() { b.kind.label().to_string() } else { format!("{}: {}", b.kind.label(), short(&first, 26)) };
-                        ui.horizontal(|ui| {
-                            ui.add_space(14.0);
-                            if ui.selectable_label(self.sec == si && self.blk == Some(bi), label).clicked() { pick = Some((si, Some(bi))); }
-                        });
-                    }
-                    ui.add_space(6.0);
-                }
-            });
-            if let Some((s, b)) = pick { self.sec = s; self.blk = b; }
-        });
+        egui::Panel::left("lesson-outline").default_size(270.0).show(root, |ui| { self.lesson_outline(ui, ctx); });
 
         // ---- properties ----
         egui::Panel::right("lesson-props").default_size(330.0).show(root, |ui| {
