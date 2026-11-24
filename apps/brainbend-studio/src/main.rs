@@ -12528,6 +12528,63 @@ mod tests {
         assert!(magenta > 50, "the shape of the starting state is drawn ({magenta} pixels)");
     }
 
+    /// The README's screenshots of the editor (issue #68): `BRAINBEND_SHOT_DIR=docs/images cargo test -p brainbend-studio shot_readme`.
+    /// The editor with a lesson whose first slide is the BrainBend logo, large; one picture for a dark reader, one for a light one.
+    #[test]
+    fn shot_readme() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        let navy = Rgba(18, 38, 82, 255);
+        for (name, light) in [("screenshot-dark.png", false), ("screenshot-light.png", true)] {
+            let mut a = App::default();
+            a.new_project();
+            let key = "logo".to_string();
+            let logo_bytes = include_bytes!("../../../assets/brainbend-logo.png").to_vec();
+            a.project.as_mut().unwrap().assets.insert(key.clone(), Asset { name: "brainbend-logo.png".into(), mime: "image/png".into(), bytes: logo_bytes, file: None });
+            let titles = ["BrainBend Studio", "Why it matters", "Check your knowledge", "What to remember"];
+            for _ in 1..titles.len() { a.add_slide(SlideKind::Normal); }
+            for (i, title) in titles.iter().enumerate() {
+                let p = a.project.as_mut().unwrap();
+                p.slides[i].name = title.to_string();
+                if i == 0 {
+                    // The first slide is the logo, large, with the name under it, and nothing else.
+                    let mut logo = blank_object("logo".into(), "BrainBend logo", Kind::Image, 590.0, 30.0, 740.0, 740.0);
+                    logo.asset = Some(key.clone());
+                    logo.alt = "BrainBend Studio logo: a brain struck by lightning".into();
+                    let mut word = blank_object("word".into(), "BrainBend Studio", Kind::Text, 260.0, 800.0, 1400.0, 190.0);
+                    word.text = "BrainBend Studio".into();
+                    word.style = plain_style(130.0, navy, true, Align::Center);
+                    p.slides[0].layers[0].objects.extend([logo, word]);
+                } else {
+                    let mut head = blank_object(format!("title{i}"), "Title", Kind::Text, 200.0, 360.0, 1520.0, 200.0);
+                    head.text = title.to_string();
+                    head.style = plain_style(96.0, navy, true, Align::Center);
+                    let mut sub = blank_object(format!("sub{i}"), "Subtitle", Kind::Text, 200.0, 580.0, 1520.0, 120.0);
+                    sub.text = ["Three reasons to keep learning", "Three questions to find out what stuck", "The four steps, in the order you use them"][i - 1].into();
+                    sub.style = plain_style(44.0, Rgba(90, 100, 120, 255), false, Align::Center);
+                    p.slides[i].layers[0].objects.extend([head, sub]);
+                }
+            }
+            a.view.slide = 0;
+            a.view.layer = 0;
+            // Nothing is selected, so the logo has no frame around it.
+            a.view.selected = None;
+            // The bars as a new install shows them: the menu bar and the row of things to insert.
+            a.show_menu_bar = true;
+            a.show_insert_bar = true;
+            let mut h = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(1280.0, 830.0))
+                .with_pixels_per_point(1.5)
+                .build_ui_state(|ui, app: &mut App| app.show(ui), App::default());
+            install_fonts(&h.ctx);
+            install_theme(&h.ctx);
+            h.run_steps(2);
+            *h.state_mut() = a;
+            h.ctx.set_theme(if light { egui::ThemePreference::Light } else { egui::ThemePreference::Dark });
+            h.run_steps(8);
+            h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join(name)).unwrap();
+        }
+    }
+
     #[test]
     fn shot_state_rename() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };

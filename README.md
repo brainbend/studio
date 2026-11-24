@@ -25,7 +25,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/screenshot.png" alt="BrainBend Studio: the slide editor with the ribbon, slide list, canvas, Properties panel, slide layers and timeline" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/screenshot-dark.png">
+    <img src="docs/images/screenshot-light.png" alt="BrainBend Studio editing a fire safety lesson: the menu bar and insert bar, the tab strip, the slide list, the canvas with a selected button, the Properties panel, the slide layers and the timeline" width="100%">
+  </picture>
 </p>
 
 > [!NOTE]
