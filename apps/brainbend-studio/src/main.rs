@@ -262,6 +262,10 @@ struct App {
     slide_multi: Vec<String>,
     /// The last click was on a slide in the slide list, so the keys act on slides (the Scene View always counts).
     slides_focus: bool,
+    /// The States panel has the keyboard (a press landed in it): the keys are about its states, and `state_cmd` carries one to it.
+    states_focus: bool,
+    states_hit: bool,
+    state_cmd: Option<states_panel::Cmd>,
     /// Slide tabs that were popped out into windows of their own, and the one the panels act on (None: the main window's view).
     editor_windows: Vec<editor_windows::EditorWindow>,
     editor_window_next: u32,
@@ -532,7 +536,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -4377,7 +4381,8 @@ impl App {
             _ => obj.initial_state.clone(),
         };
         let id = obj.id.clone();
-        let out = states_panel::editor(ui, obj, &mut viewed, &mut self.state_dim, self.view.state_editing);
+        let out = states_panel::editor(ui, obj, &mut viewed, &mut self.state_dim, self.view.state_editing, self.state_cmd.take());
+        if out.focus { self.states_focus = true; self.states_hit = true; }
         self.view.state_view = Some((id, viewed.clone()));
         if out.changed {
             let mut before = before;
@@ -4386,13 +4391,6 @@ impl App {
             self.dirty = true;
         }
         if let (Some((from, to)), Some(sw)) = (&out.renamed, self.swap.as_mut()) { sw.renamed(from, to); }
-        if out.toggle_edit {
-            // Edit puts the state's shapes on the slide from the next frame on; Done takes them back into the state at the end of this one.
-            self.view.state_editing = !self.view.state_editing;
-            self.view.layer = li;
-            self.view.selected = Some((li, oi));
-            self.view.multi.clear();
-        }
         if out.want_picture {
             if let Some((key, _, _, _)) = self.load_image_asset() {
                 self.snapshot();
@@ -5272,6 +5270,15 @@ impl App {
     }
 
     /// Put the States tab's viewed state on its object for this frame.
+    /// A press outside the States panel that leaves nothing selected is a click away from the object: the next time it is chosen it
+    /// opens in the state it starts in, not the one that was last viewed.
+    fn click_away_from_states(&mut self) {
+        if self.view.selected.is_none() {
+            self.view.state_view = None;
+            self.view.state_editing = false;
+        }
+    }
+
     fn begin_state_swap(&mut self) {
         self.swap = None;
         if !self.states_showing() || self.try_mode { self.view.state_editing = false; return; }
@@ -5295,8 +5302,9 @@ impl App {
             _ => init,
         };
         self.view.state_view = Some((id.clone(), viewed.clone()));
-        // Normal, while it is the starting state, is the object on the slide itself, so it has no shapes of its own to edit.
-        if viewed == "Normal" && o.initial_state == "Normal" { self.view.state_editing = false; }
+        // Choosing a state is editing it: what is added goes into it. The state the object starts in under the name Normal is the object on the
+        // slide itself, so what is added there goes onto the slide.
+        self.view.state_editing = !(viewed == "Normal" && o.initial_state == "Normal");
         self.swap = states_panel::begin(&mut proj.slides, slide_idx, &id, &viewed, self.view.state_editing);
         if self.swap.is_none() { self.view.state_editing = false; }
     }
@@ -7579,6 +7587,11 @@ impl App {
         // A press anywhere but on a slide takes the keys back to the canvas.
         if root.ctx().input(|i| i.pointer.any_pressed()) && !self.slide_hit { self.slides_focus = false; }
         self.slide_hit = false;
+        // A click (the press, or the release that selects) outside the States panel takes the keys back; if it left nothing selected, the object is let go of.
+        let (pressed, released) = root.ctx().input(|i| (i.pointer.any_pressed(), i.pointer.any_released()));
+        if pressed && !self.states_hit { self.states_focus = false; }
+        if (pressed || released) && !self.states_hit { self.click_away_from_states(); }
+        self.states_hit = false;
         if font_store::has_pending() { root.ctx().request_repaint(); }
         if let Some(sel) = self.pending_delete.take() { self.delete_slides(sel); }
         self.end_state_swap();
@@ -7700,6 +7713,18 @@ impl App {
                 if enter {
                     if self.scene_view { let i = self.view.slide; self.scene_open(i); } else { self.slides_focus = false; }
                 }
+            } else if self.states_focus && self.states_showing() && !self.try_mode {
+                // With the States panel in front, the keys are about its states and not about the objects on the canvas.
+                use states_panel::Cmd;
+                let key = ctx.input(|i| {
+                    if i.key_pressed(egui::Key::F2) { Some(Cmd::Rename) }
+                    else if i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace) { Some(Cmd::Delete) }
+                    else if i.modifiers.command && i.key_pressed(egui::Key::D) { Some(Cmd::Duplicate) }
+                    else if i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowUp) { Some(Cmd::Prev) }
+                    else if i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowDown) { Some(Cmd::Next) }
+                    else { None }
+                });
+                if key.is_some() { self.state_cmd = key; ctx.request_repaint(); }
             } else {
             if copy { self.run_cmd(commands::Cmd::Copy); }
             if cut { self.run_cmd(commands::Cmd::Cut); }
@@ -12504,6 +12529,22 @@ mod tests {
     }
 
     #[test]
+    fn shot_state_rename() {
+        let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Normal".into()));
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Rename);
+        h.run_steps(4);
+        h.render().expect("renderer").save(std::path::PathBuf::from(&dir).join("state-rename.png")).unwrap();
+    }
+
+    #[test]
     fn shot_state_edit_mode() {
         let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") else { return };
         for editing in [false, true] {
@@ -13563,6 +13604,157 @@ mod tests {
         let mut h = harness(a);
         h.run_steps(4);
         h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("button-gallery-real.png")).unwrap();
+    }
+
+    /// The States panel's keys: new (a copy), arrows, rename and delete, on the state being viewed.
+    #[test]
+    fn gui_states_panel_keys_duplicate_move_rename_and_delete() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Hover".into()));
+        let names = |h: &egui_kittest::Harness<'_, App>| -> Vec<String> { h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().map(|s| s.name.clone()).collect() };
+        let viewed = |h: &egui_kittest::Harness<'_, App>| h.state().view.state_view.as_ref().unwrap().1.clone();
+        let mut h = harness(a);
+        h.run_steps(3);
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Duplicate);
+        h.run_steps(3);
+        assert_eq!(names(&h).len(), 7, "a copy was added");
+        assert_eq!(viewed(&h), "State 7", "and it is the one being viewed");
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Prev);
+        h.run_steps(3);
+        assert_eq!(viewed(&h), "Selected", "the arrow moved to the one before it");
+        // Delete takes the one in view away, and the starting state is kept.
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Delete);
+        h.run_steps(3);
+        assert_eq!(names(&h).len(), 6);
+        assert!(!names(&h).contains(&"Selected".to_string()));
+        h.state_mut().view.state_view = Some((h.state().view.state_view.as_ref().unwrap().0.clone(), "Normal".into()));
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Delete);
+        h.run_steps(3);
+        assert_eq!(names(&h).len(), 6, "the state the object starts in cannot be deleted");
+        // Rename: the name is edited where it is written; Enter keeps it.
+        h.state_mut().view.state_view = Some((h.state().view.state_view.as_ref().unwrap().0.clone(), "Hover".into()));
+        h.state_mut().state_cmd = Some(states_panel::Cmd::Rename);
+        h.run_steps(3);
+        h.key_press(egui::Key::A); // focus is in the field; select all first so typing replaces
+        h.event(egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND });
+        h.event(egui::Event::Text("Over".into()));
+        h.run_steps(2);
+        h.key_press(egui::Key::Enter);
+        h.run_steps(3);
+        assert!(names(&h).contains(&"Over".to_string()), "renamed: {:?}", names(&h));
+    }
+
+    /// With a press in the States panel, Delete and Cmd+D are about its states, and never delete or copy the object on the canvas.
+    #[test]
+    fn gui_with_the_states_panel_in_front_delete_and_duplicate_leave_the_object_alone() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Hover".into()));
+        a.states_focus = true;
+        let mut h = harness(a);
+        h.run_steps(3);
+        let objects = |h: &egui_kittest::Harness<'_, App>| (h.state().project.as_ref().unwrap().slides[0].layers[li].objects.len(), h.state().project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.len());
+        let before = objects(&h);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+        h.run_steps(4);
+        assert_eq!(objects(&h), (before.0, before.1 + 1), "Cmd+D made a state, not a second button");
+        h.key_press(egui::Key::Delete);
+        h.run_steps(4);
+        assert_eq!(objects(&h), before, "Delete removed the state that was in view, not the button");
+    }
+
+    /// Clicking an empty place on the slide while a non-starting state is open lets go of the object: the States panel stops showing its states.
+    #[test]
+    fn gui_clicking_off_a_button_lets_go_of_its_states() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.insert_button();
+        let id = a.selected_object().unwrap().id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Hover".into()));
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().view.state_editing && h.query_by_label("Select an object to see its states.").is_none());
+        let at = egui::pos2(1000.0, 560.0);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
+        h.run_steps(4);
+        assert!(h.state().view.selected.is_none(), "the click left nothing selected");
+        assert!(h.query_by_label("Select an object to see its states.").is_some(), "so no states are shown");
+    }
+
+    /// Clicking away from the object and back opens it in the state it starts in.
+    #[test]
+    fn clicking_away_and_back_opens_the_starting_state() {
+        let mut a = app();
+        a.insert_button();
+        let id = a.selected_object().unwrap().id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id.clone(), "Hover".into()));
+        a.begin_state_swap();
+        a.end_state_swap();
+        assert!(a.view.state_editing);
+        // Still selected: a press elsewhere changes nothing.
+        a.click_away_from_states();
+        assert_eq!(a.view.state_view.as_ref().map(|v| v.1.as_str()), Some("Hover"));
+        // Nothing selected after the press: the next choice starts from the default.
+        a.view.selected = None;
+        a.click_away_from_states();
+        assert!(a.view.state_view.is_none() && !a.view.state_editing);
+        let (li, oi) = a.project.as_ref().unwrap().slides[0].layers.iter().enumerate().find_map(|(l, ly)| ly.objects.iter().position(|o| o.id == id).map(|o| (l, o))).unwrap();
+        a.view.selected = Some((li, oi));
+        a.begin_state_swap();
+        assert_eq!(a.view.state_view.as_ref().map(|v| v.1.as_str()), Some("Normal"));
+        a.end_state_swap();
+    }
+
+    /// Choosing a state is editing it: what is inserted goes into it, with no Edit button. The starting Normal is the slide's own object.
+    #[test]
+    fn choosing_a_state_edits_it_and_the_starting_normal_is_the_slide() {
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        let count = |a: &App| a.project.as_ref().unwrap().slides[0].layers[li].objects.len();
+        let hover = |a: &App| a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].states.iter().find(|s| s.name == "Hover").unwrap().extras.len();
+        a.view.state_view = Some((id.clone(), "Normal".into()));
+        a.begin_state_swap();
+        assert!(!a.view.state_editing, "the starting Normal is the object on the slide");
+        a.end_state_swap();
+        a.view.state_view = Some((id, "Hover".into()));
+        a.begin_state_swap();
+        assert!(a.view.state_editing, "choosing Hover is editing it");
+        a.insert_rect();
+        a.end_state_swap();
+        assert_eq!((count(&a), hover(&a)), (1, 1), "the shape went into Hover");
+    }
+
+    /// Shine is set in Properties, for the state being viewed in the States tab.
+    #[test]
+    fn gui_shine_is_set_in_properties_for_the_viewed_state() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = app();
+        a.insert_button();
+        let (li, oi) = a.view.selected.unwrap();
+        let id = a.project.as_ref().unwrap().slides[0].layers[li].objects[oi].id.clone();
+        a.bottom_tab = P_STATES;
+        a.view.state_view = Some((id, "Down".into()));
+        let mut h = harness(a);
+        h.run_steps(4);
+        open_bars(&h, 0, &["Button Styles"]);
+        h.run_steps(8);
+        assert!(h.query_by_label("Shine").is_some(), "Properties has a Shine control for a button");
     }
 
     #[test]

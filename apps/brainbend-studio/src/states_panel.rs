@@ -342,10 +342,10 @@ pub fn not_run_note(parts: &[String]) -> Option<String> {
 pub struct Outcome {
     pub changed: bool,
     pub want_picture: bool,
-    /// The Edit or Done button was pressed.
-    pub toggle_edit: bool,
     /// A state was renamed: (from, to).
     pub renamed: Option<(String, String)>,
+    /// A press landed in the panel, so the keys are about its states.
+    pub focus: bool,
 }
 
 /// One card: the state drawn small, its name under it, a flag on the starting state.
@@ -402,8 +402,13 @@ fn card(ui: &mut egui::Ui, o: &Object, st: &ObjectState, selected: bool, starts:
     resp
 }
 
-/// The panel body. `viewed` is the state on the canvas; `dim` dims the other objects while it is open.
-pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut bool, editing: bool) -> Outcome {
+/// What the keyboard (or the menus) ask of the panel: acts on the state being viewed.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Cmd { Rename, Delete, Duplicate, Prev, Next }
+
+/// The panel body: the state cards, and under them the buttons (as the other panels have them). `viewed` is the state on the canvas;
+/// `dim` dims the other objects while it is open; `cmd` is a key the app took for the panel.
+pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut bool, editing: bool, cmd: Option<Cmd>) -> Outcome {
     let mut out = Outcome::default();
     if o.states.is_empty() {
         ui.horizontal_wrapped(|ui| {
@@ -428,89 +433,131 @@ pub fn editor(ui: &mut egui::Ui, o: &mut Object, viewed: &mut String, dim: &mut 
     }
     let init = o.initial_state.clone();
     let is_image = matches!(o.kind, Kind::Image);
-    let v = o.states.iter().position(|s| &s.name == viewed).unwrap_or(0);
-    let mut remove = false;
-    let mut rename: Option<String> = None;
-    let mut make_initial = false;
+    // What was asked, and of which state (a right-click names the card it was on).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Act { Cmd(Cmd), StartAs, ButtonSet }
+    let mut act: Option<(Act, String)> = cmd.map(|c| (Act::Cmd(c), viewed.clone()));
+    // A press anywhere in the panel gives it the keyboard.
+    let panel = ui.max_rect();
+    out.focus = ui.input(|i| (i.pointer.any_pressed() || i.pointer.any_released()) && i.pointer.interact_pos().is_some_and(|p| panel.contains(p)));
+    let rename_id = egui::Id::new(("state-rename", o.id.clone()));
+    let mut renaming: Option<(String, String)> = ui.data(|d| d.get_temp(rename_id));
+    if renaming.as_ref().is_some_and(|(from, _)| !o.states.iter().any(|s| &s.name == from)) { renaming = None; }
+
+    // The cards flow in rows that fit the width, so the layout follows the space the panel has, and every card stays in view without a
+    // horizontal scroll bar. The buttons under them always fit in the room there is; the cards take what is left (and scroll).
+    let list_h = (ui.available_height() - 64.0).max(60.0);
+    let snapshot: Vec<ObjectState> = o.states.clone();
+    egui::ScrollArea::vertical().id_salt("state-cards").max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            for s in &snapshot {
+                let selected = &s.name == viewed;
+                let r = card(ui, o, s, selected, s.name == init);
+                if r.clicked() || r.secondary_clicked() { *viewed = s.name.clone(); }
+                if r.double_clicked() { *viewed = s.name.clone(); renaming = Some((s.name.clone(), s.name.clone())); }
+                if let Some((from, text)) = renaming.as_mut().filter(|(from, _)| *from == s.name) {
+                    // The name is edited where it is written.
+                    let at = egui::Rect::from_center_size(egui::pos2(r.rect.center().x, r.rect.bottom() - 12.0), egui::vec2(r.rect.width() - 8.0, 20.0));
+                    let id = egui::Id::new(("state-rename-field", from.clone()));
+                    // Drawn in a child area of its own, so the row of cards is not asked to make room for it.
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at).layout(egui::Layout::top_down(egui::Align::Center)));
+                    let field = child.add(egui::TextEdit::singleline(text).id(id).font(egui::FontId::proportional(12.0)).desired_width(at.width()).horizontal_align(egui::Align::Center));
+                    if !field.has_focus() && !field.lost_focus() { field.request_focus(); }
+                    if field.lost_focus() {
+                        let escaped = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                        if !escaped { act = Some((Act::Cmd(Cmd::Rename), format!("{from}\u{1}{text}"))); }
+                        renaming = None;
+                    }
+                }
+                let can_delete = s.name != init && o.states.len() > 1;
+                r.context_menu(|ui| {
+                    if ui.add(egui::Button::new("Rename").shortcut_text("F2")).clicked() { act = Some((Act::Cmd(Cmd::Rename), s.name.clone())); ui.close(); }
+                    if ui.add(egui::Button::new("New (a copy of this state)").shortcut_text(if cfg!(target_os = "macos") { "\u{2318}D" } else { "Ctrl+D" })).clicked() { act = Some((Act::Cmd(Cmd::Duplicate), s.name.clone())); ui.close(); }
+                    if ui.add_enabled(s.name != init, egui::Button::new("Start as this")).on_hover_text("The object begins in this state").clicked() { act = Some((Act::StartAs, s.name.clone())); ui.close(); }
+                    ui.separator();
+                    if ui.add_enabled(can_delete, egui::Button::new("Delete").shortcut_text("Delete")).clicked() { act = Some((Act::Cmd(Cmd::Delete), s.name.clone())); ui.close(); }
+                });
+            }
+        });
+    });
+    ui.add_space(4.0);
+    // Where what is inserted goes: into the state being viewed, or (the state the object starts in, as it is on the slide) onto the slide.
+    ui.weak(if editing { format!("Adding to {viewed}: shapes you insert belong to this state") } else { "Adding to the slide: this is the object as it is on the slide".to_string() });
+    ui.add_space(2.0);
+
+    // The buttons: New, Delete, Dim, and the settings (the other panels keep theirs here too).
     ui.horizontal_wrapped(|ui| {
+        use crate::ribbon::icons;
         crate::ribbon::flat(ui);
         ui.spacing_mut().item_spacing.y = 6.0;
-        // Edit opens the viewed state so that shapes added go into it; Done closes it again.
-        let (label, tip, fill) = if editing { ("Done", "Finish editing this state: the shapes you added stay in it", egui::Color32::from_rgb(11, 110, 105)) } else { ("Edit", "Add shapes to this state. Anything you insert while editing belongs to the state, and shows only while the object is in it", egui::Color32::from_rgb(3, 83, 158)) };
-        // Normal is the object itself, as it is on the slide: to change how it looks, change the object. Extra shapes belong in the other states.
-        let normal = viewed == "Normal" && o.initial_state == "Normal" && !editing;
-        let tip = if normal { "Normal is the object as it is on the slide while it is the state the object starts in. Choose another state to give it shapes of its own, or start the object in another state to edit Normal too" } else { tip };
-        if ui.add_enabled(!normal, egui::Button::new(egui::RichText::new(label).strong().color(egui::Color32::WHITE)).fill(fill)).on_hover_text(tip).clicked() { out.toggle_edit = true; }
-        ui.add_space(8.0);
-        if ui.button("+ New").on_hover_text("A copy of the state you are viewing").clicked() {
-            let mut copy = o.states[v].clone();
-            copy.name = next_name(o);
-            // The copy's shapes are its own, so their ids are new (a trigger finds an object by its id).
-            for (k, e) in copy.extras.iter_mut().enumerate() { e.id = format!("{}-{}-{k}", e.id, copy.name.replace(' ', "_")); }
-            *viewed = copy.name.clone();
-            o.states.push(copy);
-            out.changed = true;
-        }
-        if ui.button("Button set").on_hover_text("Add any missing Hover, Down, Visited and Disabled").clicked() {
-            add_button_states(o);
-            out.changed = true;
-        }
-        let not_first = o.states[v].name != init;
-        if ui.add_enabled(not_first, egui::Button::new("Start as this")).on_hover_text("The object begins in this state").clicked() { make_initial = true; }
-        if ui.add_enabled(not_first, egui::Button::new("Delete")).clicked() { remove = true; }
-        ui.add_space(8.0);
-        // The name field takes the room the row has left (up to 110), so it never runs off the edge of a narrow panel.
-        let room = (ui.available_width() - 56.0).clamp(40.0, 110.0);
-        ui.label("Name");
-        let mut name = o.states[v].name.clone();
-        crate::ribbon::framed(ui, |ui| { if ui.add(egui::TextEdit::singleline(&mut name).desired_width(room)).changed() { rename = Some(name.clone()); } });
-        ui.add_space(8.0);
-        ui.checkbox(dim, "Dim background objects");
-        let st = &mut o.states[v];
-        if is_image {
-            ui.add_space(8.0);
-            if ui.button("Choose picture…").clicked() { out.want_picture = true; }
-        } else {
-            ui.add_space(8.0);
-            let mut on = st.shine.is_some();
-            if ui.checkbox(&mut on, "Shine").changed() {
-                st.shine = on.then_some(Shine { alpha: 0.4, reverse: false });
-                out.changed = true;
-            }
-            if let Some(sh) = &mut st.shine {
-                out.changed |= ui.add(egui::Slider::new(&mut sh.alpha, 0.0..=1.0).show_value(false)).changed();
-                out.changed |= ui.checkbox(&mut sh.reverse, "reversed").changed();
-            }
-        }
+        let btn = |ui: &mut egui::Ui, icon: char, tip: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(icon.to_string()).family(icons()).size(17.0)).min_size(egui::vec2(30.0, 28.0))).on_hover_text(tip);
+        let can_delete = *viewed != init && o.states.len() > 1;
+        if btn(ui, '\u{e236}', "New state: a copy of the one you are viewing", true).clicked() { act = Some((Act::Cmd(Cmd::Duplicate), viewed.clone())); }
+        if btn(ui, '\u{e4a6}', "Delete this state (not the one the object starts in)", can_delete).clicked() { act = Some((Act::Cmd(Cmd::Delete), viewed.clone())); }
+        ui.checkbox(dim, "Dim").on_hover_text("Dim the other objects on the slide while you work on this one");
+        let gear = btn(ui, '\u{e270}', "State settings", true);
+        egui::Popup::from_toggle_button_response(&gear).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
+            ui.set_min_width(200.0);
+            if ui.add(egui::Button::new("Rename").shortcut_text("F2")).clicked() { act = Some((Act::Cmd(Cmd::Rename), viewed.clone())); }
+            if ui.add_enabled(*viewed != init, egui::Button::new("Start as this")).on_hover_text("The object begins in this state").clicked() { act = Some((Act::StartAs, viewed.clone())); }
+            if ui.add(egui::Button::new("New (a copy of this state)").shortcut_text(if cfg!(target_os = "macos") { "\u{2318}D" } else { "Ctrl+D" })).clicked() { act = Some((Act::Cmd(Cmd::Duplicate), viewed.clone())); }
+            if ui.add_enabled(can_delete, egui::Button::new("Delete").shortcut_text("Delete")).clicked() { act = Some((Act::Cmd(Cmd::Delete), viewed.clone())); }
+            ui.separator();
+            if ui.button("Add the button states").on_hover_text("Add any missing Hover, Down, Visited and Disabled").clicked() { act = Some((Act::ButtonSet, viewed.clone())); }
+            if is_image && ui.button("Choose picture…").clicked() { out.want_picture = true; }
+        });
     });
-    // The cards flow in rows that fit the width, so the layout follows the space the panel has (one column when it is narrow, one row
-    // when it is wide) with no point where it switches, and every card stays in view without a horizontal scroll bar.
-    let snapshot: Vec<ObjectState> = o.states.clone();
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.y = 8.0;
-        for s in &snapshot {
-            if card(ui, o, s, &s.name == viewed, s.name == init).clicked() { *viewed = s.name.clone(); }
+
+    // Do what was asked.
+    if let Some((what, target)) = act {
+        match what {
+            Act::Cmd(Cmd::Rename) if target.contains('\u{1}') => {
+                // An inline edit finished: from, then the new name.
+                let (from, to) = target.split_once('\u{1}').map(|(a, b)| (a.to_string(), b.trim().to_string())).unwrap();
+                if !to.is_empty() && to != from && !o.states.iter().any(|s| s.name == to) {
+                    if let Some(i) = o.states.iter().position(|s| s.name == from) {
+                        if o.initial_state == from { o.initial_state = to.clone(); }
+                        o.states[i].name = to.clone();
+                        out.renamed = Some((from, to.clone()));
+                        *viewed = to;
+                        out.changed = true;
+                    }
+                }
+            }
+            Act::Cmd(Cmd::Rename) => { *viewed = target.clone(); renaming = Some((target.clone(), target)); }
+            Act::Cmd(Cmd::Prev | Cmd::Next) => {
+                let i = o.states.iter().position(|s| &s.name == viewed).unwrap_or(0);
+                let j = if matches!(what, Act::Cmd(Cmd::Prev)) { i.saturating_sub(1) } else { (i + 1).min(o.states.len() - 1) };
+                *viewed = o.states[j].name.clone();
+            }
+            Act::Cmd(Cmd::Duplicate) => {
+                if let Some(src) = o.states.iter().find(|s| s.name == target).cloned() {
+                    let mut copy = src;
+                    copy.name = next_name(o);
+                    // The copy's shapes are its own, so their ids are new (a trigger finds an object by its id).
+                    for (k, e) in copy.extras.iter_mut().enumerate() { e.id = format!("{}-{}-{k}", e.id, copy.name.replace(' ', "_")); }
+                    *viewed = copy.name.clone();
+                    o.states.push(copy);
+                    out.changed = true;
+                }
+            }
+            Act::Cmd(Cmd::Delete) => {
+                if target != o.initial_state && o.states.len() > 1 {
+                    if let Some(i) = o.states.iter().position(|s| s.name == target) {
+                        o.states.remove(i);
+                        *viewed = o.initial_state.clone();
+                        out.changed = true;
+                    }
+                }
+            }
+            Act::StartAs => {
+                if o.states.iter().any(|s| s.name == target) { o.initial_state = target.clone(); *viewed = target; out.changed = true; }
+            }
+            Act::ButtonSet => { add_button_states(o); out.changed = true; }
         }
-    });
-    if let Some(to) = rename {
-        let from = o.states[v].name.clone();
-        if !to.is_empty() && !o.states.iter().enumerate().any(|(i, s)| i != v && s.name == to) {
-            if o.initial_state == from { o.initial_state = to.clone(); }
-            o.states[v].name = to.clone();
-            out.renamed = Some((from.clone(), to.clone()));
-            *viewed = to;
-            out.changed = true;
-        }
     }
-    if make_initial {
-        o.initial_state = o.states[v].name.clone();
-        out.changed = true;
-    }
-    if remove && o.states[v].name != o.initial_state {
-        o.states.remove(v);
-        *viewed = o.initial_state.clone();
-        out.changed = true;
-    }
+    ui.data_mut(|d| match renaming { Some(r) => { d.insert_temp(rename_id, r); } None => d.remove::<(String, String)>(rename_id) });
     out
 }
 

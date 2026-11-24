@@ -217,6 +217,11 @@ impl App {
     /// Do it.
     pub(crate) fn run_cmd(&mut self, c: Cmd) {
         let slides = self.editing_slides();
+        // With the States panel in front, Delete and Duplicate (the menu's, or the native menu's keys) are about its states.
+        if !slides && self.states_focus && self.states_showing() && !self.try_mode {
+            let key = match c { Cmd::Delete => Some(crate::states_panel::Cmd::Delete), Cmd::Duplicate => Some(crate::states_panel::Cmd::Duplicate), _ => None };
+            if key.is_some() { self.state_cmd = key; return; }
+        }
         match c {
             Cmd::Undo => self.undo(),
             Cmd::Redo => self.redo(),

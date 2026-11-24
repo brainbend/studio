@@ -1698,6 +1698,23 @@ impl App {
                         if let Some(def) = crate::button_styles::gallery(ui, corners) { style_pick = Some(def); ui.close(); }
                     });
                 });
+                // The gloss of the state being viewed in the States tab (the state the object starts in otherwise).
+                if !matches!(obj.kind, Kind::Image) {
+                    let name = self.view.state_view.as_ref().filter(|(id, _)| *id == obj.id).map(|(_, n)| n.clone()).unwrap_or_else(|| obj.initial_state.clone());
+                    if let Some(st) = obj.states.iter_mut().find(|s| s.name == name) {
+                        pr(ui, "Shine", |ui, _| {
+                            let mut on = st.shine.is_some();
+                            if ui.checkbox(&mut on, "").on_hover_text("A soft white gloss over the fill, bright at the top. Hover is usually stronger and Down reversed").changed() {
+                                st.shine = on.then_some(brainbend_doc::Shine { alpha: 0.4, reverse: false });
+                                *changed = true;
+                            }
+                            if let Some(sh) = &mut st.shine {
+                                *changed |= ui.add(egui::Slider::new(&mut sh.alpha, 0.0..=1.0).show_value(false)).changed();
+                                *changed |= ui.checkbox(&mut sh.reverse, "reversed").changed();
+                            }
+                        });
+                    }
+                }
             });
         }
         if matches!(obj.kind, Kind::Image) {
