@@ -1229,6 +1229,8 @@ pub(crate) fn settings_controls(ui: &mut egui::Ui, d: &mut SettingsDraft) {
             ui.checkbox(&mut d.panels.slides, "Slide List").on_hover_text("The slides of the scene, as thumbnails");
             ui.checkbox(&mut d.panels.layers, "Slide Layers");
         });
+        ui.label("Scene View and Table of Contents");
+        ui.checkbox(&mut d.panels.project, "Project").on_hover_text("The project's settings, beside the Scene View and the Table of Contents");
 }
 
 impl App {
@@ -1604,7 +1606,7 @@ impl App {
         if insert_bar != self.show_insert_bar { self.run_cmd(crate::commands::Cmd::ShowInsertBar); }
         if one != self.one_section { self.one_section = one; crate::prefs::set_bool("one_section_open", one); }
         if each_tab != self.new_tab_each { self.new_tab_each = each_tab; crate::prefs::set_bool("slides_in_new_tabs", each_tab); }
-        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers), ("show_slides", self.panels.slides, panels.slides)] {
+        for (key, was, now) in [("show_properties", self.panels.properties, panels.properties), ("show_timeline", self.panels.timeline, panels.timeline), ("show_notes", self.panels.notes, panels.notes), ("show_states", self.panels.states, panels.states), ("show_triggers", self.panels.triggers, panels.triggers), ("show_ai", self.panels.ai, panels.ai), ("show_layers", self.panels.layers, panels.layers), ("show_slides", self.panels.slides, panels.slides), ("show_project", self.panels.project, panels.project)] {
             if was != now { crate::prefs::set_bool(key, now); }
         }
         self.panels = panels;

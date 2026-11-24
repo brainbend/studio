@@ -231,8 +231,6 @@ struct App {
     web_tabs: Vec<web_tabs::WebTab>,
     web_active: usize,
     toc_pick: web_tabs::TocPick,
-    /// The tab showing in the side panel beside the Scene View and the Table of Contents.
-    project_tab: usize,
     active_tab: Option<usize>,
     /// Open a project into the Scene View (the app turns this on; tests keep the slide view).
     open_to_scene_view: bool,
@@ -547,7 +545,7 @@ impl Default for App {
             undo: vec![], redo: vec![], status: String::new(), painter: None, style_clip: None, dirty: false, edit_open: false, 
             id_counter: 0, new_var_name: String::new(), new_var_kind: 0,
             theme_colors_open: false, pending_recent: None, status_issues: (f64::NEG_INFINITY, 0), status_sig: (0, 0, 0), drag_origin: (0.0, 0.0), drag_accum: egui::Vec2::ZERO,
-            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, web_tabs: vec![], web_active: 0, toc_pick: Default::default(), project_tab: PROJECT_TAB, open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], outline_list: list_view::ListMode::load("outline"), slides_list: list_view::ListMode::load("slides"), slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
+            guides: vec![], clipboard: None, clip_text: String::new(), clip_out: None, drop_path: None, find: None, spell: None, sec: 0, blk: None, lesson_settings: false, check_results: None, bottom_tab: P_TIMELINE, state_dim: true, try_mode: false, last_media_path: None, button_corners: Default::default(), try_layers: vec![], try_slide: None, try_states: HashMap::new(), try_note: None, swap: None, right_tab: 0, inspector_seen: None, trigger_select: false, trig_all: false, variables_open: false, var_query: String::new(), var_kind: 0, var_use: 0, var_rename: None, var_note: None, focus_open: false, eq_dialog: None, pano: Default::default(), scene_view: false, publish_page: Default::default(), publish_lms: brainbend_publish_html::Lms::Scorm12, handout: Default::default(), handout_range: Default::default(), player_pane: 0, tabs: vec![], active_tab: None, web_tabs: vec![], web_active: 0, toc_pick: Default::default(), open_to_scene_view: false, new_tab_request: false, new_tab_each: prefs::get_bool("slides_in_new_tabs").unwrap_or(false), strip_order: vec![], dock: load_dock(), bottom_height_saved: 0.0, panel_sizes_saved: HashMap::new(), merged_bar: cfg!(not(target_os = "macos")) && !cfg!(test), caption: caption_bar::wanted() && !cfg!(test), app_icon: None, scene_tabs: None, scene_active: String::new(), scene_next: 0, scene_to_slide: false, menu_pick: None, scene_rename: None, slide_rename: None, slide_multi: vec![], outline_list: list_view::ListMode::load("outline"), slides_list: list_view::ListMode::load("slides"), slides_focus: false, states_focus: false, states_hit: false, state_cmd: None, editor_windows: vec![], editor_window_next: 0, focus_window: None, editor_windows_saved: String::new(), scene_windows: vec![],
             #[cfg(target_os = "macos")]
             native_menu: None,
             stashed_main: None, frame_layouts: vec![], ctx_copy: None, show_insert_bar: prefs::get_bool("show_insert_bar").unwrap_or(!cfg!(test)), show_menu_bar: prefs::get_bool("show_menu_bar").unwrap_or(!cfg!(any(test, target_os = "macos"))), tear: None, slide_hit: false, slide_clip: vec![], import_report: vec![], export_report: vec![], export_report_for: "PowerPoint", dim_base: true, layer_edit: None, layer_drag: None, open_requested: false, recent: vec![], recent_file: None, file_view: true, file_page: backstage::FilePage::New, border_color: Rgba(0, 0, 0, 255), border_width: 2.0, table_style: brainbend_doc::tables::TableStyle::Accent, table_opts: Default::default(), tl_drag: None, tl_open: Default::default(), tl_gdrag: None, pending: None, allow_close: false, updater: Default::default(), one_section: prefs::get_bool("one_section_open").unwrap_or(true), panels: prefs::Panels::load(), docked: TOOLS.iter().copied().filter(|t| prefs::get_bool(t.key()).unwrap_or(false)).collect(), tools_seen: vec![], video_support: Default::default(), font_store: Default::default(), word_capture: None, mcp: Default::default(), assistant: Default::default(), video_options: Default::default(), video_run: None, paint_clean: false,
@@ -811,7 +809,7 @@ fn load_dock() -> dock::Layout {
     let mut l = prefs::get_str("dock_layout").and_then(|s| dock::Layout::from_json(&s)).unwrap_or_default();
     let mut start = HashMap::new();
     for t in TOOLS { if prefs::get_bool(t.key()).unwrap_or(false) { start.insert(TOOL_TAB + t.index(), dock::Edge::Right); } }
-    for g in PANEL_IDS { start.insert(g, if g == P_SLIDES { dock::Edge::Left } else if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
+    for g in PANEL_IDS { start.insert(g, if g == P_SLIDES { dock::Edge::Left } else if g == P_PROJECT { dock::Edge::Right } else if g >= P_TIMELINE { dock::Edge::Bottom } else { dock::Edge::Right }); }
     start.insert(dock::LAYERS, dock::Edge::Right);
     let all: Vec<usize> = PANEL_IDS.iter().copied().chain([dock::LAYERS]).chain(TOOLS.iter().map(|t| TOOL_TAB + t.index())).collect();
     l.include(&all, &start);
@@ -820,8 +818,6 @@ fn load_dock() -> dock::Layout {
 
 /// The side panel's tab numbers: 0 Properties, 1 Triggers, 2 AI, then a docked tool is `TOOL_TAB` plus its place in `TOOLS`.
 const TOOL_TAB: usize = 10;
-/// The Project settings tab of the side panel beside the Scene View and the Table of Contents.
-const PROJECT_TAB: usize = 40;
 
 /// The numbers of the panels that are not tools, in both the side and the bottom panel: 0 Properties, 1 Triggers, 2 AI, 20 Timeline,
 /// 21 Slide Notes, 22 States. A tool is `TOOL_TAB` plus its place in `TOOLS`. A tab can be docked in either panel or be a window of its own.
@@ -830,7 +826,8 @@ const P_TIMELINE: usize = 20;
 const P_NOTES: usize = 21;
 const P_STATES: usize = 22;
 const P_SLIDES: usize = dock::SLIDES;
-const PANEL_IDS: [usize; 7] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES, P_SLIDES];
+const P_PROJECT: usize = dock::PROJECT;
+const PANEL_IDS: [usize; 8] = [0, 1, 2, P_TIMELINE, P_NOTES, P_STATES, P_SLIDES, P_PROJECT];
 
 /// Where a tab is: in the side panel, in the bottom panel, or in a window of its own outside the app.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1035,24 +1032,31 @@ impl App {
 
     /// Whether a panel (not a tool) is switched on in Studio Settings.
     fn panel_shown(&self, g: usize) -> bool {
-        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, dock::LAYERS => self.panels.layers, P_SLIDES => self.panels.slides, _ => false }
+        match g { 0 => self.panels.properties, 1 => self.panels.triggers, 2 => self.panels.ai, P_TIMELINE => self.panels.timeline, P_NOTES => self.panels.notes, P_STATES => self.panels.states, dock::LAYERS => self.panels.layers, P_SLIDES => self.panels.slides, P_PROJECT => self.panels.project, _ => false }
     }
 
     fn panel_title(g: usize) -> &'static str {
-        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", P_SLIDES => "Slide List", _ => "States" }
+        match g { 0 => "Properties", 1 => "Triggers", 2 => "AI", P_TIMELINE => "Timeline", P_NOTES => "Slide Notes", dock::LAYERS => "Slide Layers", P_SLIDES => "Slide List", P_PROJECT => "Project", _ => "States" }
     }
 
     /// Whether a tab shows where it is: a panel that is on in Studio Settings (Slide Layers is not part of the Layout Builder), or a
     /// tool that is open and can dock here.
     fn tab_visible(&self, g: usize) -> bool {
+        if g == P_PROJECT { return self.project_view() && self.panel_shown(g); }
         match Self::tool_of(g) {
             Some(t) => self.tool_open(t) && self.can_dock_here(),
-            // A web lesson has the Outline (in the Slide List's place), Properties and AI; the rest belong to slides.
-            // The Table of Contents has a side panel of its own, not the dock.
-            None if self.is_web_lesson() && self.toc_showing() => false,
+            // A web lesson has the Outline (in the Slide List's place), Properties and AI; the rest belong to slides. The Table of Contents has the
+            // Project settings, and Properties for a chosen card.
+            None if self.is_web_lesson() && self.toc_showing() => g == 0 && self.toc_pick == web_tabs::TocPick::Card && self.panel_shown(g),
             None if self.is_web_lesson() => (g == 0 || g == 2 || g == P_SLIDES) && self.panel_shown(g),
-            None => self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
+            // The Scene View has the Project settings and nothing about a slide.
+            None => !self.scene_view && self.panel_shown(g) && !(g == dock::LAYERS && self.in_master_view()),
         }
+    }
+
+    /// Whether what shows is the whole project and not a slide or a section: the Scene View, or the Table of Contents.
+    fn project_view(&self) -> bool {
+        if self.is_web_lesson() { self.toc_showing() } else { self.scene_view && !self.in_master_view() && self.pano.edit.is_none() }
     }
 
     /// Where a tab is: in the side panel, the bottom panel or a window of its own.
@@ -1240,7 +1244,7 @@ impl App {
     /// What a tab shows: its panel's body, or its tool.
     fn panel_body(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize, g: usize, wants: &mut SideWants) {
         if self.is_web_lesson() {
-            match g { 0 => self.lesson_properties(ui, ctx), 2 => self.ai_panel(ui), P_SLIDES => self.lesson_outline(ui, ctx), _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); } }
+            match g { 0 => self.lesson_properties(ui, ctx), 2 => self.ai_panel(ui), P_SLIDES => self.lesson_outline(ui, ctx), P_PROJECT => { egui::ScrollArea::vertical().id_salt("project-scroll").auto_shrink([false, false]).show(ui, |ui| self.project_settings_body(ui, ctx)); } _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); } }
             return;
         }
         match g {
@@ -1253,6 +1257,7 @@ impl App {
             P_NOTES => self.notes_panel(ui, slide_idx),
             dock::LAYERS => self.layers_panel(ui, ctx, slide_idx, true),
             P_SLIDES => self.slides_body(ui, ctx),
+            P_PROJECT => { egui::ScrollArea::vertical().id_salt("project-scroll").auto_shrink([false, false]).show(ui, |ui| self.project_settings_body(ui, ctx)); }
             _ => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
         }
     }
@@ -1289,8 +1294,7 @@ impl App {
     /// Whether a tool shows as a tab of the side panel: where it was left, except in the 360° editor, whose panel is its own.
     fn tool_docked(&self, t: Tool) -> bool {
         let area = self.area_of(TOOL_TAB + t.index());
-        // The Scene View has only the side panel, so a tool docked anywhere else shows as a window there.
-        area != Area::Window && self.can_dock_here() && (!self.scene_view || area == Area::Side)
+        area != Area::Window && self.can_dock_here()
     }
 
     /// Docking needs the side panel: the 360° editor and a web lesson have their own.
@@ -1299,25 +1303,6 @@ impl App {
     fn is_web_lesson(&self) -> bool { self.project.as_ref().is_some_and(|p| p.is_web()) }
 
     /// The tools that are open and docked in the side panel, in the order they were docked.
-    /// The side panel beside the Scene View and the Table of Contents (and each of their extra tabs): the Project settings first, then the chosen card's
-    /// Properties on the Table of Contents, then the tools docked at the side.
-    pub(crate) fn project_side_panel(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
-        let docked = self.docked_open();
-        let card = self.is_web_lesson() && self.toc_pick == web_tabs::TocPick::Card;
-        let mut tabs: Vec<(usize, String)> = vec![(PROJECT_TAB, "Project".to_string())];
-        if card { tabs.push((0, "Properties".to_string())); }
-        tabs.extend(docked.iter().map(|t| (TOOL_TAB + t.index(), t.title().to_string())));
-        egui::Panel::right("project-panel").default_size(360.0).min_size(280.0).resizable(true).frame(doc_tabs::tabbed_panel_frame(&root.ctx().global_style(), false)).show(root, |ui| {
-            if !tabs.iter().any(|(i, _)| *i == self.project_tab) { self.project_tab = PROJECT_TAB; }
-            doc_tabs::panel_tabs_of(ui, &tabs, &mut self.project_tab);
-            match self.project_tab {
-                PROJECT_TAB => { egui::ScrollArea::vertical().id_salt("project-panel-scroll").auto_shrink([false, false]).show(ui, |ui| self.project_settings_body(ui, ctx)); }
-                0 => self.lesson_properties(ui, ctx),
-                g => if let Some(t) = Self::tool_of(g) { self.show_tool(ctx, t, ui); },
-            }
-        });
-    }
-
     fn docked_open(&self) -> Vec<Tool> { self.docked.iter().copied().filter(|t| self.tool_open(*t) && self.can_dock_here() && self.area_of(TOOL_TAB + t.index()) == Area::Side).collect() }
 
     fn show_tool(&mut self, ctx: &egui::Context, t: Tool, ui: &mut egui::Ui) {
@@ -8079,9 +8064,13 @@ impl App {
 
         if self.pano_edit_ui(root, ctx) { return; }
         if self.scene_view {
-            // The Scene View has no Properties panel: its side panel holds the Project settings, and any tool that is docked and open.
-            self.project_side_panel(root, ctx);
-            egui::CentralPanel::default().show(root, |ui| self.scene_view_ui(ui, ctx));
+            // The Scene View has the Project settings and any tool that is open, in the dock like everything else.
+            self.dock_panels(root, ctx, self.view.slide.min(slide_count - 1));
+            egui::CentralPanel::default().show(root, |ui| {
+                // Where a tab dropped at the left or top edge lands.
+                ctx.data_mut(|d| d.insert_temp(egui::Id::new("canvas-rect"), ui.max_rect()));
+                self.scene_view_ui(ui, ctx);
+            });
             return;
         }
 
@@ -13041,6 +13030,45 @@ mod tests {
         h.run_steps(4);
         assert!(h.query_by_label("Slide size").is_some());
         if let Some(dir) = std::env::var_os("BRAINBEND_SHOT_DIR") { h.render().expect("renderer").save(std::path::PathBuf::from(dir).join("7-scene-view-project.png")).unwrap(); }
+    }
+
+    #[test]
+    fn gui_the_project_panel_docks_to_any_side_and_pops_out_beside_the_scene_view_and_the_table_of_contents() {
+        use egui_kittest::kittest::Queryable;
+        let mut a = App::default();
+        a.open_to_scene_view = true;
+        a.new_project();
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().tab_visible(P_PROJECT), "the Scene View has the Project panel");
+        assert!(!h.state().tab_visible(0) && !h.state().tab_visible(P_SLIDES) && !h.state().tab_visible(P_TIMELINE), "and none of the slide's panels");
+        assert_eq!(h.state().area_of(P_PROJECT), Area::Side, "it starts at the right");
+        for area in [Area::Bottom, Area::Top, Area::Left, Area::Window, Area::Side] {
+            h.state_mut().set_area(P_PROJECT, area);
+            h.run_steps(4);
+            assert_eq!(h.state().area_of(P_PROJECT), area);
+            assert!(h.query_by_label("Slide size").is_some(), "its settings show {area:?}");
+        }
+        // A slide has Properties, not the Project panel, and Properties is the tab showing at the right.
+        h.state_mut().scene_view = false;
+        h.run_steps(4);
+        assert!(!h.state().tab_visible(P_PROJECT) && h.state().tab_visible(0));
+        assert!(h.query_by_label("Slide size").is_none());
+        // The Table of Contents of a web lesson too.
+        let mut a = App::default();
+        a.new_lesson_project(ProjectKind::WebLesson);
+        let mut h = harness(a);
+        h.run_steps(4);
+        assert!(h.state().tab_visible(P_PROJECT));
+        for area in [Area::Bottom, Area::Left, Area::Window, Area::Side] {
+            h.state_mut().set_area(P_PROJECT, area);
+            h.run_steps(4);
+            assert_eq!(h.state().area_of(P_PROJECT), area);
+            assert!(h.query_by_label("Lesson").is_some(), "its settings show {area:?}");
+        }
+        h.state_mut().web_open_section(0);
+        h.run_steps(4);
+        assert!(!h.state().tab_visible(P_PROJECT), "a section has no Project panel");
     }
 
     #[test]

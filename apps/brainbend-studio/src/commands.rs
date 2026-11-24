@@ -374,7 +374,7 @@ impl App {
         let (key, flag) = match g {
             0 => ("show_properties", &mut self.panels.properties), 1 => ("show_triggers", &mut self.panels.triggers), 2 => ("show_ai", &mut self.panels.ai),
             crate::P_TIMELINE => ("show_timeline", &mut self.panels.timeline), crate::P_NOTES => ("show_notes", &mut self.panels.notes), crate::P_STATES => ("show_states", &mut self.panels.states),
-            dock::LAYERS => ("show_layers", &mut self.panels.layers), crate::P_SLIDES => ("show_slides", &mut self.panels.slides),
+            dock::LAYERS => ("show_layers", &mut self.panels.layers), crate::P_SLIDES => ("show_slides", &mut self.panels.slides), crate::P_PROJECT => ("show_project", &mut self.panels.project),
             _ => return,
         };
         *flag = on;

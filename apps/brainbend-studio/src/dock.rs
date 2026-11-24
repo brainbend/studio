@@ -15,6 +15,9 @@ pub const LAYERS: usize = 30;
 /// The slide list's number.
 pub const SLIDES: usize = 31;
 
+/// The Project settings panel's number: it shows beside the Scene View and the Table of Contents.
+pub const PROJECT: usize = 32;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Edge { Right, Bottom, Left, Top }
 

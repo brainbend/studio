@@ -439,7 +439,7 @@ impl App {
         self.web_sync_tabs();
 
         // The Outline and Properties are tabs of the same dock as in a media lesson: pinned to any side, or windows of their own.
-        self.lesson_panels(root, ctx);
+        self.dock_panels(root, ctx, 0);
         // The insert bar sits at the top of what is left, between the panels, as it does for a slide.
         if !self.toc_showing() { self.lesson_toolbar(root, ctx); }
         // The preview is the working area: the drop strips for the left and top edges run along it, as they do along a slide.
@@ -451,22 +451,15 @@ impl App {
         self.lesson_settings_window(ctx);
     }
 
-    /// The dock's edges and the panels that are windows, drawn around the preview.
-    fn lesson_panels(&mut self, root: &mut egui::Ui, ctx: &egui::Context) {
-        // The Table of Contents has one side panel: the Project settings (and the chosen card's Properties), as the Scene View has.
-        if self.toc_showing() {
-            self.project_side_panel(root, ctx);
-            let window = ctx.content_rect();
-            ctx.data_mut(|d| { d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects")); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); d.insert_temp(egui::Id::new("root-rect"), window); });
-            return;
-        }
+    /// The dock's edges and the panels that are windows, drawn around the working area (a section's preview, the Table of Contents, the Scene View).
+    pub(crate) fn dock_panels(&mut self, root: &mut egui::Ui, ctx: &egui::Context, slide_idx: usize) {
         let mut wants = SideWants::default();
         self.sync_current_in();
         let window = ctx.content_rect();
         ctx.data_mut(|d| { d.insert_temp(egui::Id::new("root-rect"), window); d.remove_temp::<Vec<GroupRect>>(egui::Id::new("group-rects-next")); });
-        for edge in [dock::Edge::Left, dock::Edge::Right] { self.dock_edge(root, ctx, edge, 0, &mut wants); }
-        self.panel_windows(ctx, 0, &mut wants);
-        for edge in [dock::Edge::Top, dock::Edge::Bottom] { self.dock_edge(root, ctx, edge, 0, &mut wants); }
+        for edge in [dock::Edge::Left, dock::Edge::Right] { self.dock_edge(root, ctx, edge, slide_idx, &mut wants); }
+        self.panel_windows(ctx, slide_idx, &mut wants);
+        for edge in [dock::Edge::Top, dock::Edge::Bottom] { self.dock_edge(root, ctx, edge, slide_idx, &mut wants); }
         ctx.data_mut(|d| { let next: Vec<GroupRect> = d.get_temp(egui::Id::new("group-rects-next")).unwrap_or_default(); d.insert_temp(egui::Id::new("group-rects"), next); });
         dock_drag_overlay(ctx);
         self.sync_current_out();
